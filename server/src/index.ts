@@ -11,7 +11,7 @@ async function main() {
   const { db, close: closeDb } = openDb(config, log);
   const jwtSecret = loadOrCreateJwtSecret(config);
 
-  const app = await buildApp({
+  const { app, manager } = await buildApp({
     db,
     jwtSecret,
     logger: log as any,
@@ -21,6 +21,7 @@ async function main() {
   const shutdown = async (signal: string) => {
     log.info({ signal }, "shutting down");
     try {
+      await manager.disposeAll();
       await app.close();
     } finally {
       closeDb();

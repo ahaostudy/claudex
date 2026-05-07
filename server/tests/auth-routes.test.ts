@@ -24,7 +24,7 @@ async function bootstrap(): Promise<Ctx> {
   const { config, log, cleanup } = tempConfig();
   const dbh = openDb(config, log);
   const jwtSecret = loadOrCreateJwtSecret(config);
-  const app = await buildApp({
+  const { app } = await buildApp({
     db: dbh.db,
     jwtSecret,
     logger: false,

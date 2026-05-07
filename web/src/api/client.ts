@@ -1,9 +1,8 @@
 import type {
-  LoginRequest,
-  LoginResponse,
-  VerifyTotpRequest,
-  VerifyTotpResponse,
-  WhoAmIResponse,
+  CreateSessionRequest,
+  Project,
+  Session,
+  SessionEvent,
 } from "@claudex/shared";
 
 export class ApiError extends Error {
@@ -32,7 +31,7 @@ async function request<T>(
       const body = (await res.json()) as { error?: string };
       if (body?.error) code = body.error;
     } catch {
-      // ignore
+      /* ignore */
     }
     throw new ApiError(res.status, code);
   }
@@ -41,16 +40,59 @@ async function request<T>(
 }
 
 export const api = {
-  login(body: LoginRequest): Promise<LoginResponse> {
-    return request("/api/auth/login", { method: "POST", json: body });
+  login(body: { username: string; password: string }) {
+    return request<{ requireTotp: boolean; challengeId: string | null }>(
+      "/api/auth/login",
+      { method: "POST", json: body },
+    );
   },
-  verifyTotp(body: VerifyTotpRequest): Promise<VerifyTotpResponse> {
-    return request("/api/auth/verify-totp", { method: "POST", json: body });
+  verifyTotp(body: { challengeId: string; code: string }) {
+    return request<{ ok: true }>("/api/auth/verify-totp", {
+      method: "POST",
+      json: body,
+    });
   },
-  logout(): Promise<{ ok: true }> {
-    return request("/api/auth/logout", { method: "POST" });
+  logout() {
+    return request<{ ok: true }>("/api/auth/logout", { method: "POST" });
   },
-  whoami(): Promise<WhoAmIResponse> {
-    return request("/api/auth/whoami");
+  whoami() {
+    return request<{ user: import("@claudex/shared").User }>("/api/auth/whoami");
+  },
+  listProjects() {
+    return request<{ projects: Project[] }>("/api/projects");
+  },
+  createProject(body: { name: string; path: string }) {
+    return request<{ project: Project }>("/api/projects", {
+      method: "POST",
+      json: body,
+    });
+  },
+  listSessions(opts?: { project?: string; archived?: boolean }) {
+    const qs = new URLSearchParams();
+    if (opts?.project) qs.set("project", opts.project);
+    if (opts?.archived) qs.set("archived", "1");
+    const q = qs.toString();
+    return request<{ sessions: Session[] }>(
+      `/api/sessions${q ? `?${q}` : ""}`,
+    );
+  },
+  getSession(id: string) {
+    return request<{ session: Session }>(`/api/sessions/${id}`);
+  },
+  listEvents(sessionId: string, sinceSeq = -1) {
+    return request<{ events: SessionEvent[] }>(
+      `/api/sessions/${sessionId}/events?sinceSeq=${sinceSeq}`,
+    );
+  },
+  createSession(body: CreateSessionRequest) {
+    return request<{ session: Session }>("/api/sessions", {
+      method: "POST",
+      json: body,
+    });
+  },
+  archiveSession(id: string) {
+    return request<{ ok: true }>(`/api/sessions/${id}/archive`, {
+      method: "POST",
+    });
   },
 };
