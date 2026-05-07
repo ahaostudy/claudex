@@ -3,6 +3,7 @@ import { openDb } from "../src/db/index.js";
 import { ProjectStore } from "../src/sessions/projects.js";
 import { SessionStore } from "../src/sessions/store.js";
 import { SessionManager } from "../src/sessions/manager.js";
+import { ToolGrantStore } from "../src/sessions/grants.js";
 import type {
   Runner,
   RunnerEvent,
@@ -77,6 +78,7 @@ function setupManager() {
   const { db, close } = openDb(config, log);
   const projects = new ProjectStore(db);
   const sessions = new SessionStore(db);
+  const grants = new ToolGrantStore(db);
   const project = projects.create({
     name: "spindle",
     path: "/p/spindle",
@@ -93,6 +95,7 @@ function setupManager() {
   const manager = new SessionManager({
     sessions,
     projects,
+    grants,
     runnerFactory: factory,
     broadcast: (sessionId, event) => broadcasts.push({ sessionId, event }),
   });
@@ -100,6 +103,7 @@ function setupManager() {
     manager,
     sessions,
     projects,
+    grants,
     session,
     project,
     broadcasts,
@@ -181,13 +185,66 @@ describe("SessionManager", () => {
     });
     expect(s.sessions.findById(s.session.id)!.status).toBe("awaiting");
 
-    s.manager.resolvePermission(s.session.id, "tu-1", { behavior: "allow" });
+    s.manager.resolvePermission(s.session.id, "tu-1", "allow_once");
     expect(mock.permissions).toEqual([{ id: "tu-1", behavior: "allow" }]);
     expect(s.sessions.findById(s.session.id)!.status).toBe("running");
 
     const kinds = s.sessions.listEvents(s.session.id).map((e) => e.kind);
     expect(kinds).toContain("permission_request");
     expect(kinds).toContain("permission_decision");
+  });
+
+  it("allow_always records a tool grant that auto-approves next matching call", () => {
+    const s = setupManager();
+    cleanups.push(s.cleanup);
+    s.manager.getOrCreate(s.session.id);
+    const mock = s.last()!;
+
+    mock.emit({
+      type: "permission_request",
+      toolUseId: "tu-1",
+      toolName: "Bash",
+      input: { command: "pnpm vitest run" },
+      title: "use Bash",
+    });
+    s.manager.resolvePermission(s.session.id, "tu-1", "allow_always");
+
+    // Second request with the same command should be auto-allowed
+    // (resolved without flipping status or emitting a permission_request)
+    s.sessions.setStatus(s.session.id, "running");
+    mock.emit({
+      type: "permission_request",
+      toolUseId: "tu-2",
+      toolName: "Bash",
+      input: { command: "pnpm vitest run" },
+      title: "use Bash",
+    });
+    expect(mock.permissions).toEqual([
+      { id: "tu-1", behavior: "allow" },
+      { id: "tu-2", behavior: "allow" },
+    ]);
+    // Auto-approved requests do not persist a permission_request event.
+    const kinds = s.sessions.listEvents(s.session.id).map((e) => e.kind);
+    const permReqs = kinds.filter((k) => k === "permission_request");
+    expect(permReqs).toHaveLength(1);
+    expect(s.sessions.findById(s.session.id)!.status).toBe("running");
+  });
+
+  it("deny decision still resolves and does not grant", () => {
+    const s = setupManager();
+    cleanups.push(s.cleanup);
+    s.manager.getOrCreate(s.session.id);
+    const mock = s.last()!;
+    mock.emit({
+      type: "permission_request",
+      toolUseId: "tu-1",
+      toolName: "Edit",
+      input: { file_path: "/x/y.ts" },
+      title: "Edit",
+    });
+    s.manager.resolvePermission(s.session.id, "tu-1", "deny");
+    expect(mock.permissions).toEqual([{ id: "tu-1", behavior: "deny" }]);
+    expect(s.grants.has(s.session.id, "Edit", "/x/y.ts")).toBe(false);
   });
 
   it("broadcasts every event to subscribers", () => {
@@ -234,7 +291,7 @@ describe("SessionManager", () => {
     cleanups.push(s.cleanup);
     // Don't create the runner — just try to resolve
     expect(() =>
-      s.manager.resolvePermission(s.session.id, "tu-1", { behavior: "allow" }),
+      s.manager.resolvePermission(s.session.id, "tu-1", "allow_once"),
     ).not.toThrow();
   });
 });

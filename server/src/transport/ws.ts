@@ -179,11 +179,11 @@ async function handleClientFrame(
       return;
     }
     case "permission_decision": {
-      const behavior =
-        frame.decision === "deny" ? ("deny" as const) : ("allow" as const);
-      deps.manager.resolvePermission(frame.sessionId, frame.approvalId, {
-        behavior,
-      });
+      deps.manager.resolvePermission(
+        frame.sessionId,
+        frame.approvalId,
+        frame.decision,
+      );
       return;
     }
   }

@@ -7,12 +7,15 @@ import type {
 } from "./runner.js";
 import type { SessionStore } from "./store.js";
 import type { ProjectStore } from "./projects.js";
+import { ToolGrantStore, signatureFor } from "./grants.js";
+import { summarizePermission } from "./permission-summary.js";
 
 type Broadcaster = (sessionId: string, event: RunnerEvent) => void;
 
 export interface SessionManagerDeps {
   sessions: SessionStore;
   projects: ProjectStore;
+  grants: ToolGrantStore;
   runnerFactory: RunnerFactory;
   broadcast: Broadcaster;
   logger?: FastifyBaseLogger;
@@ -23,13 +26,16 @@ interface SessionEntry {
   off: () => void;
 }
 
-/**
- * Holds one Runner per live session. Persists every translated event into
- * session_events and bumps session status + stats. Broadcaster is the hook
- * the WS transport subscribes to.
- */
+export type PermissionDecision = "allow_once" | "allow_always" | "deny";
+
 export class SessionManager {
   private runners = new Map<string, SessionEntry>();
+  // Track pending permission requests by toolUseId so we can look up the tool
+  // name / input when the user sends back a decision (for "allow_always").
+  private pendingByApproval = new Map<
+    string,
+    { sessionId: string; toolName: string; input: Record<string, unknown> }
+  >();
 
   constructor(private readonly deps: SessionManagerDeps) {}
 
@@ -41,7 +47,9 @@ export class SessionManager {
     if (!session) throw new Error(`session not found: ${sessionId}`);
     const project = this.deps.projects.findById(session.projectId);
     if (!project)
-      throw new Error(`project ${session.projectId} gone for session ${sessionId}`);
+      throw new Error(
+        `project ${session.projectId} gone for session ${sessionId}`,
+      );
 
     const opts: RunnerInitOptions = {
       sessionId,
@@ -56,7 +64,6 @@ export class SessionManager {
   }
 
   private handleEvent(sessionId: string, event: RunnerEvent) {
-    // Persist (most) events for later replay. status pings stay in memory.
     try {
       switch (event.type) {
         case "assistant_text":
@@ -99,7 +106,25 @@ export class SessionManager {
             },
           });
           break;
-        case "permission_request":
+        case "permission_request": {
+          // Auto-approve if an existing grant matches. "allow_once" here because
+          // the grant itself already represents the "always" decision.
+          const sig = signatureFor(event.toolName, event.input);
+          if (sig && this.deps.grants.has(sessionId, event.toolName, sig)) {
+            const entry = this.runners.get(sessionId);
+            entry?.runner.resolvePermission(event.toolUseId, {
+              behavior: "allow",
+              reason: "auto-approved by saved grant",
+            });
+            // Don't persist this as a user-facing permission_request.
+            return;
+          }
+
+          // Enrich with a summary for the UI.
+          const { summary, blastRadius } = summarizePermission(
+            event.toolName,
+            event.input,
+          );
           this.deps.sessions.appendEvent({
             sessionId,
             kind: "permission_request",
@@ -107,11 +132,23 @@ export class SessionManager {
               toolUseId: event.toolUseId,
               toolName: event.toolName,
               input: event.input,
-              title: event.title,
+              title: summary,
+              blastRadius,
             },
           });
+          this.pendingByApproval.set(event.toolUseId, {
+            sessionId,
+            toolName: event.toolName,
+            input: event.input,
+          });
           this.deps.sessions.setStatus(sessionId, "awaiting");
-          break;
+          // Propagate enriched event to subscribers.
+          this.deps.broadcast(sessionId, {
+            ...event,
+            title: summary,
+          });
+          return;
+        }
         case "turn_end":
           this.deps.sessions.appendEvent({
             sessionId,
@@ -171,15 +208,28 @@ export class SessionManager {
   resolvePermission(
     sessionId: string,
     toolUseId: string,
-    decision: { behavior: "allow" | "deny"; reason?: string },
+    decision: PermissionDecision,
   ): void {
     const entry = this.runners.get(sessionId);
     if (!entry) return;
-    entry.runner.resolvePermission(toolUseId, decision);
+
+    const pending = this.pendingByApproval.get(toolUseId);
+    this.pendingByApproval.delete(toolUseId);
+
+    if (decision === "allow_always" && pending) {
+      const sig = signatureFor(pending.toolName, pending.input);
+      if (sig) {
+        this.deps.grants.addSessionGrant(sessionId, pending.toolName, sig);
+      }
+    }
+
+    const behavior = decision === "deny" ? "deny" : "allow";
+    entry.runner.resolvePermission(toolUseId, { behavior });
+
     this.deps.sessions.appendEvent({
       sessionId,
       kind: "permission_decision",
-      payload: { toolUseId, decision: decision.behavior, reason: decision.reason ?? null },
+      payload: { toolUseId, decision, toolName: pending?.toolName ?? null },
     });
     this.deps.sessions.setStatus(sessionId, "running");
   }

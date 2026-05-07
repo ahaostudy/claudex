@@ -5,6 +5,7 @@ import { useSessions } from "@/state/sessions";
 import { api } from "@/api/client";
 import type { Session } from "@claudex/shared";
 import { cn } from "@/lib/cn";
+import { DiffView, toolCallToDiff } from "@/components/DiffView";
 
 export function ChatScreen() {
   const { id } = useParams<{ id: string }>();
@@ -132,7 +133,11 @@ function Piece({
           {p.text}
         </div>
       );
-    case "tool_use":
+    case "tool_use": {
+      const diff = toolCallToDiff(p.name, p.input);
+      if (diff) {
+        return <DiffView diff={diff} />;
+      }
       return (
         <div className="flex items-center gap-2 py-1.5 pl-2 pr-3 rounded-[8px] bg-paper border border-line w-fit max-w-full">
           <span className="mono text-[12px] text-ink-soft">{p.name}</span>
@@ -141,6 +146,7 @@ function Piece({
           </span>
         </div>
       );
+    }
     case "tool_result":
       return (
         <div
@@ -183,24 +189,37 @@ function PermissionCard({
     decision: "allow_once" | "allow_always" | "deny",
   ) => void;
 }) {
+  const diff = toolCallToDiff(toolName, input);
   return (
-    <div className="rounded-[12px] border border-warn/40 bg-warn-wash/40 p-3">
-      <div className="flex items-center gap-2 mb-1.5">
-        <span className="h-2 w-2 rounded-full bg-warn" />
-        <span className="text-[11px] uppercase tracking-[0.12em] text-[#7a4700]">
-          permission · ask mode
-        </span>
+    <div className="rounded-[12px] border border-warn/40 bg-warn-wash/40 p-3 space-y-3">
+      <div>
+        <div className="flex items-center gap-2 mb-1.5">
+          <span className="h-2 w-2 rounded-full bg-warn" />
+          <span className="text-[11px] uppercase tracking-[0.12em] text-[#7a4700]">
+            permission · {toolName}
+          </span>
+        </div>
+        <div className="display text-[16px] leading-tight">{summary}</div>
       </div>
-      <div className="display text-[16px] leading-tight">{summary}</div>
-      <div className="mono text-[12px] text-ink-soft bg-ink text-canvas rounded-[8px] mt-2 px-3 py-2 whitespace-pre-wrap">
-        {JSON.stringify(input, null, 2)}
-      </div>
-      <div className="flex gap-2 mt-3">
+      {diff ? (
+        <DiffView diff={diff} />
+      ) : (
+        <div className="mono text-[12px] text-canvas bg-ink rounded-[8px] px-3 py-2 whitespace-pre-wrap overflow-x-auto">
+          {JSON.stringify(input, null, 2)}
+        </div>
+      )}
+      <div className="flex flex-wrap gap-2">
         <button
           onClick={() => onDecide(approvalId, "allow_once")}
-          className="flex-1 h-10 rounded-[8px] bg-ink text-canvas font-medium text-[13px]"
+          className="flex-1 min-w-[120px] h-10 rounded-[8px] bg-ink text-canvas font-medium text-[13px]"
         >
           Allow once
+        </button>
+        <button
+          onClick={() => onDecide(approvalId, "allow_always")}
+          className="flex-1 min-w-[120px] h-10 rounded-[8px] border border-line bg-canvas text-ink text-[13px]"
+        >
+          Always
         </button>
         <button
           onClick={() => onDecide(approvalId, "deny")}
