@@ -1,21 +1,22 @@
-import Fastify from "fastify";
 import { loadConfig, assertSafeBind } from "./lib/config.js";
 import { createLogger } from "./lib/logger.js";
 import { openDb } from "./db/index.js";
+import { loadOrCreateJwtSecret } from "./auth/index.js";
+import { buildApp } from "./transport/app.js";
 
 async function main() {
   const config = loadConfig();
   assertSafeBind(config.host);
   const log = createLogger(config);
   const { db, close: closeDb } = openDb(config, log);
+  const jwtSecret = loadOrCreateJwtSecret(config);
 
-  const app = Fastify({ loggerInstance: log });
-
-  app.get("/api/health", async () => ({
-    status: "ok",
-    version: "0.0.1",
-    time: new Date().toISOString(),
-  }));
+  const app = await buildApp({
+    db,
+    jwtSecret,
+    logger: log as any,
+    isProduction: config.nodeEnv === "production",
+  });
 
   const shutdown = async (signal: string) => {
     log.info({ signal }, "shutting down");
