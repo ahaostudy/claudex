@@ -205,4 +205,14 @@ describe("ChallengeStore", () => {
     const store = new ChallengeStore();
     expect(store.consume("bogus")).toBeNull();
   });
+
+  it("peek is non-destructive and consume still works after it", () => {
+    const store = new ChallengeStore();
+    const id = store.create("user-1");
+    expect(store.peek(id)).toBe("user-1");
+    expect(store.peek(id)).toBe("user-1");
+    expect(store._size()).toBe(1);
+    expect(store.consume(id)).toBe("user-1");
+    expect(store.peek(id)).toBeNull();
+  });
 });

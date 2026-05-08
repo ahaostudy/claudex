@@ -56,7 +56,6 @@ export async function buildApp(
     db: deps.db,
     jwtSecret: deps.jwtSecret,
     challenges,
-    isProduction: deps.isProduction,
   });
 
   const manager = new SessionManager({

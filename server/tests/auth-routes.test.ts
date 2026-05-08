@@ -142,7 +142,9 @@ describe("auth routes", () => {
       const cookie = res.cookies.find((c) => c.name === "claudex_session");
       expect(cookie).toBeDefined();
       expect(cookie!.httpOnly).toBe(true);
-      expect(cookie!.sameSite?.toLowerCase()).toBe("strict");
+      // Lax — see routes.ts: strict used to break us across some reverse
+      // proxies, and state changes still require a JSON body (no CSRF).
+      expect(cookie!.sameSite?.toLowerCase()).toBe("lax");
     });
 
     it("rejects a wrong TOTP code", async () => {
@@ -152,10 +154,28 @@ describe("auth routes", () => {
         url: "/api/auth/verify-totp",
         payload: { challengeId, code: "000000" },
       });
-      // Could be 401 invalid_totp. Also accept invalid_challenge if the wrong
-      // code already consumed the challenge — but we consume only after code
-      // check. Enforce strict behavior:
       expect(res.statusCode).toBe(401);
+      expect(res.json().error).toBe("invalid_totp");
+    });
+
+    it("keeps the challenge alive on wrong code so the user can retry", async () => {
+      const challengeId = await getChallenge();
+      // First attempt: wrong code
+      const bad = await ctx.app.inject({
+        method: "POST",
+        url: "/api/auth/verify-totp",
+        payload: { challengeId, code: "000000" },
+      });
+      expect(bad.statusCode).toBe(401);
+      expect(bad.json().error).toBe("invalid_totp");
+      // Second attempt with the same challenge and a correct code succeeds.
+      const good = await ctx.app.inject({
+        method: "POST",
+        url: "/api/auth/verify-totp",
+        payload: { challengeId, code: currentTotp(ctx.totpSecret) },
+      });
+      expect(good.statusCode).toBe(200);
+      expect(good.json().ok).toBe(true);
     });
 
     it("rejects replay of a challengeId", async () => {

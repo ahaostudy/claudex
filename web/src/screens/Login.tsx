@@ -35,7 +35,9 @@ export function LoginScreen() {
     try {
       await verifyTotp(code);
     } catch {
-      /* error in store */
+      // Wrong code: clear the input so the user can tap in the next one
+      // without having to delete six digits first.
+      setCode("");
     } finally {
       setBusy(false);
     }

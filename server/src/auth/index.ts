@@ -204,6 +204,18 @@ export class ChallengeStore {
     return id;
   }
 
+  /** Inspect a challenge without consuming it. Returns null if missing/expired. */
+  peek(id: string): string | null {
+    const c = this.map.get(id);
+    if (!c) return null;
+    if (c.expiresAt < Date.now()) {
+      this.map.delete(id);
+      return null;
+    }
+    return c.userId;
+  }
+
+  /** Atomically validate + remove. Returns null if missing/expired. */
   consume(id: string): string | null {
     const c = this.map.get(id);
     if (!c) return null;
