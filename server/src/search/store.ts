@@ -1,4 +1,5 @@
 import type Database from "better-sqlite3";
+import type { Statement } from "better-sqlite3";
 
 // ---------------------------------------------------------------------------
 // Full-text search store.
@@ -83,7 +84,35 @@ export function sanitizeFtsQuery(q: string): string | null {
 }
 
 export class SearchStore {
+  // Prepared-statement cache. Populated lazily on first use of each method
+  // so we don't pay the prepare() cost per write on hot paths like
+  // indexMessage (called once per appended text-bearing event).
+  private readonly stmts: {
+    insertMsg: Statement | null;
+    deleteTitle: Statement | null;
+    insertTitle: Statement | null;
+    deleteSessionMsg: Statement | null;
+    deleteSessionTitle: Statement | null;
+    deleteEventsAbove: Statement | null;
+    deleteOneMsg: Statement | null;
+  } = {
+    insertMsg: null,
+    deleteTitle: null,
+    insertTitle: null,
+    deleteSessionMsg: null,
+    deleteSessionTitle: null,
+    deleteEventsAbove: null,
+    deleteOneMsg: null,
+  };
+
   constructor(private readonly db: Database.Database) {}
+
+  private lazyStmt<K extends keyof SearchStore["stmts"]>(
+    key: K,
+    sql: string,
+  ): Statement {
+    return (this.stmts[key] ??= this.db.prepare(sql));
+  }
 
   // ---- live-sync writes -------------------------------------------------
 
@@ -105,12 +134,11 @@ export class SearchStore {
           ? (input.payload.text as string)
           : "";
       if (text.length === 0) return;
-      this.db
-        .prepare(
-          `INSERT INTO session_search (session_id, event_seq, kind, body)
-           VALUES (?, ?, ?, ?)`,
-        )
-        .run(input.sessionId, input.seq, input.kind, text);
+      this.lazyStmt(
+        "insertMsg",
+        `INSERT INTO session_search (session_id, event_seq, kind, body)
+         VALUES (?, ?, ?, ?)`,
+      ).run(input.sessionId, input.seq, input.kind, text);
     } catch {
       // Best-effort: log via caller if desired. The caller passes a logger
       // through its own try/catch — we stay silent here so an FTS failure
@@ -127,17 +155,15 @@ export class SearchStore {
    */
   upsertTitle(sessionId: string, title: string): void {
     try {
-      this.db
-        .prepare(
-          `DELETE FROM session_title_search WHERE session_id = ?`,
-        )
-        .run(sessionId);
-      this.db
-        .prepare(
-          `INSERT INTO session_title_search (session_id, title)
-           VALUES (?, ?)`,
-        )
-        .run(sessionId, title);
+      this.lazyStmt(
+        "deleteTitle",
+        `DELETE FROM session_title_search WHERE session_id = ?`,
+      ).run(sessionId);
+      this.lazyStmt(
+        "insertTitle",
+        `INSERT INTO session_title_search (session_id, title)
+         VALUES (?, ?)`,
+      ).run(sessionId, title);
     } catch {
       /* best-effort, see indexMessage */
     }
@@ -146,12 +172,14 @@ export class SearchStore {
   /** Remove every FTS row for a session — called from SessionStore.deleteById. */
   deleteSession(sessionId: string): void {
     try {
-      this.db
-        .prepare(`DELETE FROM session_search WHERE session_id = ?`)
-        .run(sessionId);
-      this.db
-        .prepare(`DELETE FROM session_title_search WHERE session_id = ?`)
-        .run(sessionId);
+      this.lazyStmt(
+        "deleteSessionMsg",
+        `DELETE FROM session_search WHERE session_id = ?`,
+      ).run(sessionId);
+      this.lazyStmt(
+        "deleteSessionTitle",
+        `DELETE FROM session_title_search WHERE session_id = ?`,
+      ).run(sessionId);
     } catch {
       /* best-effort */
     }
@@ -167,12 +195,11 @@ export class SearchStore {
    */
   deleteEventsAbove(sessionId: string, cutoffSeq: number): void {
     try {
-      this.db
-        .prepare(
-          `DELETE FROM session_search
-           WHERE session_id = ? AND event_seq > ?`,
-        )
-        .run(sessionId, cutoffSeq);
+      this.lazyStmt(
+        "deleteEventsAbove",
+        `DELETE FROM session_search
+         WHERE session_id = ? AND event_seq > ?`,
+      ).run(sessionId, cutoffSeq);
     } catch {
       /* best-effort */
     }
@@ -191,12 +218,11 @@ export class SearchStore {
     payload: Record<string, unknown> | null | undefined;
   }): void {
     try {
-      this.db
-        .prepare(
-          `DELETE FROM session_search
-           WHERE session_id = ? AND event_seq = ?`,
-        )
-        .run(input.sessionId, input.seq);
+      this.lazyStmt(
+        "deleteOneMsg",
+        `DELETE FROM session_search
+         WHERE session_id = ? AND event_seq = ?`,
+      ).run(input.sessionId, input.seq);
     } catch {
       /* best-effort */
     }

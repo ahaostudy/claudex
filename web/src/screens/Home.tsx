@@ -286,6 +286,7 @@ export function HomeScreen() {
           type="button"
           onClick={() => setShowWsDiag((v) => !v)}
           title="WebSocket diagnostics"
+          aria-label="WebSocket diagnostics"
           className={`inline-flex items-center gap-1.5 ml-1 px-1.5 py-0.5 rounded-[4px] border border-line bg-paper text-[10px] uppercase tracking-[0.1em] ${
             connected ? "text-success" : "text-ink-muted"
           }`}
@@ -343,6 +344,19 @@ export function HomeScreen() {
           )}
         </div>
         <div className="ml-auto flex items-center gap-2">
+          {/* Mobile-only full-text search trigger. Desktop uses the inline
+              input above (which also carries the ⌘K hint); on touch there's
+              no keyboard shortcut, so an explicit tappable icon is the only
+              affordance to reach GlobalSearchSheet. */}
+          <button
+            type="button"
+            onClick={() => setShowSearchSheet(true)}
+            aria-label="Search"
+            title="Search"
+            className="md:hidden h-9 w-9 rounded-[8px] border border-line bg-canvas flex items-center justify-center hover:bg-paper"
+          >
+            <Search className="w-4 h-4 text-ink-soft" />
+          </button>
           <button
             onClick={() => setShowImport(true)}
             title="Import existing CLI sessions"
@@ -398,7 +412,7 @@ export function HomeScreen() {
             <button
               type="button"
               onClick={clearFilter}
-              className="inline-flex items-center gap-1 px-2 h-6 rounded-full border border-line bg-paper text-[11px] text-ink-soft hover:bg-canvas"
+              className="inline-flex items-center gap-1 px-3 h-8 rounded-full border border-line bg-paper text-[11px] text-ink-soft hover:bg-canvas"
             >
               <X className="w-3 h-3" />
               clear filter
@@ -491,7 +505,12 @@ function ProjectGroup({
   const path = project?.path ?? "";
   return (
     <div>
-      <div className="sticky top-0 z-10 flex items-center gap-3 px-4 md:px-6 py-2 bg-paper/80 backdrop-blur border-b border-line">
+      {/* Chip rail is the first sticky at top-0 z-20 (see FilterChipRail).
+          This group header sticks BELOW it: its top offset equals the
+          rail's rendered height (py-2 = 16px + h-7 button = 28px + border = 1px
+          ≈ 45px). z-10 keeps it under the rail so it slides beneath as you
+          scroll past. */}
+      <div className="sticky top-[45px] z-10 flex items-center gap-3 px-4 md:px-6 py-2 bg-paper/80 backdrop-blur border-b border-line">
         <span className="display text-[15px] md:text-[16px]">{displayName}</span>
         {path && (
           <span className="mono text-[11px] text-ink-muted truncate hidden sm:inline">
@@ -739,7 +758,7 @@ function FilterChipRail({
   ];
 
   return (
-    <div className="sticky top-0 z-10 bg-canvas/90 backdrop-blur border-b border-line px-4 md:px-6 py-2">
+    <div className="sticky top-0 z-20 bg-canvas/95 backdrop-blur border-b border-line px-4 md:px-6 py-2">
       <div className="flex items-center gap-2 overflow-x-auto whitespace-nowrap -mx-1 px-1">
         {chips.map((c) => {
           const isActive = active === c.id;
@@ -917,13 +936,13 @@ function NewSessionSheet({
 
   return (
     <div className="fixed inset-0 z-40 bg-ink/30 flex items-end sm:items-center justify-center">
-      <div className="w-full max-w-lg bg-canvas border-t sm:border border-line rounded-t-[20px] sm:rounded-[14px] shadow-lift p-5">
+      <div role="dialog" aria-modal="true" aria-labelledby="new-session-sheet-title" className="w-full max-w-lg bg-canvas border-t sm:border border-line rounded-t-[20px] sm:rounded-[14px] shadow-lift p-5">
         <div className="flex items-center mb-4">
           <div>
             <div className="text-[11px] uppercase tracking-[0.14em] text-ink-muted">
               New session
             </div>
-            <h2 className="display text-[1.25rem] leading-tight mt-0.5">
+            <h2 id="new-session-sheet-title" className="display text-[1.25rem] leading-tight mt-0.5">
               Tell claude where to work.
             </h2>
           </div>
@@ -1150,9 +1169,9 @@ function TrustConfirmCard({
 }) {
   return (
     <div className="fixed inset-0 z-50 bg-ink/40 flex items-end sm:items-center justify-center">
-      <div className="w-full max-w-md bg-canvas border-t sm:border border-line rounded-t-[20px] sm:rounded-[14px] shadow-lift p-5">
+      <div role="dialog" aria-modal="true" aria-labelledby="trust-folder-modal-title" className="w-full max-w-md bg-canvas border-t sm:border border-line rounded-t-[20px] sm:rounded-[14px] shadow-lift p-5">
         <div className="caps text-ink-muted">Security</div>
-        <h2 className="display text-[1.25rem] leading-tight mt-0.5">
+        <h2 id="trust-folder-modal-title" className="display text-[1.25rem] leading-tight mt-0.5">
           Trust this folder?
         </h2>
         <div className="mt-3 rounded-[8px] border border-line bg-paper px-3 py-2">
@@ -1237,13 +1256,13 @@ function WsDiagPanel({
   ];
   return (
     <div className="fixed inset-0 z-40 bg-ink/30 flex items-end sm:items-center justify-center">
-      <div className="w-full sm:max-w-md bg-canvas border-t sm:border border-line rounded-t-[20px] sm:rounded-[14px] shadow-lift p-4">
+      <div role="dialog" aria-modal="true" aria-labelledby="ws-diag-title" className="w-full sm:max-w-md bg-canvas border-t sm:border border-line rounded-t-[20px] sm:rounded-[14px] shadow-lift p-4">
         <div className="flex items-center mb-3">
           <div>
             <div className="text-[11px] uppercase tracking-[0.14em] text-ink-muted">
               WebSocket
             </div>
-            <div className="display text-[1.1rem] leading-tight">
+            <div id="ws-diag-title" className="display text-[1.1rem] leading-tight">
               Connection diagnostics
             </div>
           </div>
@@ -1329,13 +1348,13 @@ function ProjectsSheet({ onClose }: { onClose: () => void }) {
 
   return (
     <div className="fixed inset-0 z-40 bg-ink/30 flex items-end sm:items-center justify-center">
-      <div className="w-full sm:max-w-lg bg-canvas border-t sm:border border-line rounded-t-[20px] sm:rounded-[14px] shadow-lift flex flex-col max-h-[90vh]">
+      <div role="dialog" aria-modal="true" aria-labelledby="projects-sheet-title" className="w-full sm:max-w-lg bg-canvas border-t sm:border border-line rounded-t-[20px] sm:rounded-[14px] shadow-lift flex flex-col max-h-[90vh]">
         <div className="flex items-center p-4 border-b border-line">
           <div>
             <div className="text-[11px] uppercase tracking-[0.14em] text-ink-muted">
               Projects
             </div>
-            <h2 className="display text-[1.25rem] leading-tight mt-0.5">
+            <h2 id="projects-sheet-title" className="display text-[1.25rem] leading-tight mt-0.5">
               Manage where claude can work.
             </h2>
           </div>

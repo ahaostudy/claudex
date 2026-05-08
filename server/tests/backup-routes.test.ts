@@ -253,7 +253,23 @@ describe("backup routes — import", () => {
     expect(body.imported.events).toBeGreaterThanOrEqual(2);
     expect(body.imported.routines).toBe(1);
     expect(body.imported.queue).toBe(1);
-    expect(body.imported.audit).toBeGreaterThanOrEqual(1);
+    // Audit rows are NEVER imported from an untrusted bundle — they carry
+    // attacker-chosen event/ip/user_agent strings. imported.audit must
+    // stay at zero; skipped.audit surfaces the count that was rejected.
+    expect(body.imported.audit).toBe(0);
+    expect(body.skipped.audit).toBeDefined();
+    expect(body.skipped.audit.count).toBeGreaterThanOrEqual(1);
+    expect(body.skipped.audit.reason).toMatch(/audit rows never imported/);
+    // Confirm at the DB level that no audit rows from the bundle landed in
+    // the target's audit table. The target does have its own audit trail
+    // (the user's /api/import/all request itself logs one), so we compare
+    // against the seed's specific "login" detail="seed" row.
+    const forgedCount = tgt.dbh.db
+      .prepare(
+        "SELECT COUNT(*) AS n FROM audit_events WHERE event = 'login' AND detail = 'seed'",
+      )
+      .get() as { n: number };
+    expect(forgedCount.n).toBe(0);
     // Grants + attachments skipped by policy.
     expect(body.skipped.grants).toBeGreaterThanOrEqual(1);
     expect(body.skipped.attachments).toBeGreaterThanOrEqual(1);
@@ -265,6 +281,24 @@ describe("backup routes — import", () => {
       includeArchived: true,
     });
     expect(tgtSessions.some((s) => s.title === "hello world")).toBe(true);
+
+    // FTS sync: the imported user/assistant text must be searchable. The
+    // seed inserts "hi" and "hello" via sessions.appendEvent on the source;
+    // after import, the target's /api/search should find them.
+    const searchRes = await tgt.app.inject({
+      method: "GET",
+      url: "/api/search?q=" + encodeURIComponent("hello"),
+      headers: { cookie: tgt.cookie },
+    });
+    expect(searchRes.statusCode).toBe(200);
+    const searchBody = searchRes.json() as {
+      titleHits: Array<{ title: string }>;
+      messageHits: Array<{ snippet: string }>;
+    };
+    const hasHit =
+      searchBody.titleHits.some((h) => /hello/i.test(h.title)) ||
+      searchBody.messageHits.some((h) => /hello/i.test(h.snippet));
+    expect(hasHit).toBe(true);
   });
 
   it("import tolerates a partial bundle with missing optional tables", async () => {

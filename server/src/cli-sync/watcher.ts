@@ -224,29 +224,60 @@ async function onNewJsonl(
 /**
  * An existing adopted session's JSONL changed. Resync from the last
  * cli_jsonl_seq and refresh status.
+ *
+ * Skip the event-resync branch when claudex itself has a live AgentRunner
+ * attached to this session — in that case the SDK is writing to the JSONL
+ * as a *consequence* of turns we already persisted via
+ * `SessionManager.handleEvent` (user_message, assistant_text, tool_use,
+ * tool_result, turn_end, etc). Re-importing from the JSONL would double
+ * every event in the transcript. See issue writeup in commit message.
+ *
+ * Status backfill still runs unconditionally — mtime/tail heuristics are
+ * cheap and non-mutating to the event log, and the claudex-driven case
+ * already transitions status through the runner event bus anyway.
  */
 async function onExistingChange(
   deps: CliSyncWatcherDeps,
   session: Session,
   absPath: string,
 ): Promise<void> {
-  // Resync — appends any new events and broadcasts refresh_transcript on
-  // success via its manager hook.
-  try {
-    await resyncCliSession(
-      {
-        sessions: deps.sessions,
-        manager: deps.manager,
-        cliProjectsRoot: deps.cliProjectsRoot,
-        logger: deps.logger,
-      },
-      session,
-    );
-  } catch (err) {
-    deps.logger?.warn?.(
-      { err, sessionId: session.id },
-      "cli-sync: resync failed",
-    );
+  if (deps.manager.hasRunner(session.id)) {
+    // Claudex is the one driving — any growth in the JSONL is the SDK
+    // echoing back events we've already appended through AgentRunner.
+    // Still bump cli_jsonl_seq so that after the runner disposes, the
+    // next CLI-driven edit resumes from the correct offset rather than
+    // reimporting everything the SDK wrote during our own run.
+    try {
+      const lineCount = await countNonEmptyLines(absPath);
+      const persisted = deps.sessions.getCliJsonlSeq(session.id);
+      if (lineCount > persisted) {
+        deps.sessions.setCliJsonlSeq(session.id, lineCount);
+      }
+    } catch (err) {
+      deps.logger?.debug?.(
+        { err, sessionId: session.id },
+        "cli-sync: seq bump during active runner failed",
+      );
+    }
+  } else {
+    // Resync — appends any new events and broadcasts refresh_transcript on
+    // success via its manager hook.
+    try {
+      await resyncCliSession(
+        {
+          sessions: deps.sessions,
+          manager: deps.manager,
+          cliProjectsRoot: deps.cliProjectsRoot,
+          logger: deps.logger,
+        },
+        session,
+      );
+    } catch (err) {
+      deps.logger?.warn?.(
+        { err, sessionId: session.id },
+        "cli-sync: resync failed",
+      );
+    }
   }
 
   // Always refresh derived status — the JSONL grew, which is new signal
@@ -324,6 +355,28 @@ function lastLineLooksTerminal(parsed: unknown): boolean {
   const message = obj.message as Record<string, unknown> | undefined;
   if (!message) return false;
   return message.stop_reason !== undefined && message.stop_reason !== null;
+}
+
+/**
+ * Count non-empty lines in a JSONL file by streaming via readline — same
+ * accounting `cli_jsonl_seq` uses elsewhere. Kept local to the watcher so
+ * claudex-drives-the-session branch can bump the seq without pulling in
+ * `cli-resync`'s larger surface.
+ */
+async function countNonEmptyLines(absPath: string): Promise<number> {
+  const readline = await import("node:readline");
+  const stream = fs.createReadStream(absPath, { encoding: "utf-8" });
+  const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
+  let n = 0;
+  try {
+    for await (const line of rl) {
+      if (line.trim().length > 0) n += 1;
+    }
+  } finally {
+    rl.close();
+    stream.destroy();
+  }
+  return n;
 }
 
 /**

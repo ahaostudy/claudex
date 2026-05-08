@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import {
   AlertTriangle,
   Check,
@@ -89,6 +89,7 @@ const VIEW_LABEL: Record<ViewMode, string> = {
 export function ChatScreen() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
   const [session, setSession] = useState<Session | null>(null);
   const [project, setProject] = useState<Project | null>(null);
   const [showSettings, setShowSettings] = useState(false);
@@ -242,6 +243,12 @@ export function ChatScreen() {
   }, [pieces]);
 
   const scroller = useRef<HTMLDivElement>(null);
+  // When a permalink hash is being resolved, we suppress tail-autoscroll so
+  // it doesn't yank the viewport away from the target event while the
+  // polling scroll-to-seq is still in flight. The hash-nav effect below
+  // flips this on mount (and on hashchange) and releases it after the
+  // target is scrolled or the 10-page lazy-load budget runs out.
+  const hashScrollActiveRef = useRef(false);
   // Autoscroll-to-bottom only when pieces are appended at the tail, not when
   // older pages are prepended (lazy-load). We track the previous pieces
   // length; a decrease in tail-delta means older pieces landed, so we
@@ -255,7 +262,7 @@ export function ChatScreen() {
     prevTailLenRef.current = tail;
     // Also skip autoscroll on the very first render after an initial load —
     // we want to land at the bottom without a visible smooth animation.
-    if (grew) {
+    if (grew && !hashScrollActiveRef.current) {
       scroller.current?.scrollTo({
         top: scroller.current.scrollHeight,
         behavior: "smooth",
@@ -264,13 +271,16 @@ export function ChatScreen() {
   }, [visiblePieces.length, id, transcripts]);
 
   // One-shot: after the initial transcript load finishes, jump to the
-  // bottom instantly so big imported sessions land at the tail.
+  // bottom instantly so big imported sessions land at the tail. Skipped
+  // when the URL carries a `#seq-N` anchor — the hash-nav effect below
+  // handles that case and we don't want to race it to the bottom.
   const didInitialJumpRef = useRef<string | null>(null);
   useEffect(() => {
     if (!id || !meta || meta.initialLoading) return;
     if (didInitialJumpRef.current === id) return;
     if (pieces.length === 0) return;
     didInitialJumpRef.current = id;
+    if (/^#seq-\d+$/.test(location.hash)) return;
     // rAF so the browser has painted the rows once; otherwise
     // scrollHeight can be stale right after the state write.
     requestAnimationFrame(() => {
@@ -278,7 +288,100 @@ export function ChatScreen() {
       if (!el) return;
       el.scrollTop = el.scrollHeight;
     });
-  }, [id, meta?.initialLoading, pieces.length]);
+  }, [id, meta?.initialLoading, pieces.length, location.hash]);
+
+  // Hash-anchored scroll-to-event. Permalinks from MessageActions / global
+  // search look like `/session/<id>#seq-42`. We want that anchor to land
+  // the transcript centered on the matching event, even if the event lives
+  // on an older page that hasn't been lazy-loaded yet.
+  //
+  // Strategy:
+  //   1. Poll the DOM for `[data-event-seq="N"]` every 120ms up to 2s —
+  //      transcripts stream in asynchronously, so we can't just scroll
+  //      once on mount. If found, scrollIntoView + flash ring for 1.2s.
+  //   2. If not found and there's older history, call `loadOlderTranscript`
+  //      up to 10 times until the element appears (or no more pages).
+  //   3. Re-run on `hashchange` so in-session nav from GlobalSearchSheet
+  //      works without a page reload.
+  useEffect(() => {
+    if (!id) return;
+    let cancelled = false;
+
+    async function scrollToSeq(seq: number) {
+      const container = scroller.current;
+      if (!container) return;
+      hashScrollActiveRef.current = true;
+      const deadline = Date.now() + 2000;
+      let olderLoads = 0;
+
+      const find = () =>
+        container.querySelector(`[data-event-seq="${seq}"]`) as
+          | HTMLElement
+          | null;
+
+      try {
+        while (!cancelled) {
+          const el = find();
+          if (el) {
+            el.scrollIntoView({ behavior: "smooth", block: "center" });
+            // Flash a klein ring for 1.2s so the user can spot the target
+            // after the scroll settles. Added as literal classes so they
+            // survive the removal step without other transitions kicking in.
+            const flashClasses = [
+              "ring-2",
+              "ring-klein/60",
+              "rounded-[10px]",
+            ];
+            el.classList.add(...flashClasses);
+            window.setTimeout(() => {
+              if (!cancelled) el.classList.remove(...flashClasses);
+            }, 1200);
+            return;
+          }
+          // Not yet in the DOM. If we still have budget, wait 120ms and retry.
+          // If the poll window is up, try loading an older page (up to 10x)
+          // before giving up — the target may live above the initial tail.
+          if (Date.now() < deadline) {
+            await new Promise((r) => window.setTimeout(r, 120));
+            continue;
+          }
+          if (olderLoads >= 10) return;
+          const m = id ? transcriptMeta[id] : undefined;
+          if (!m || !m.hasMore || m.loadingOlder) return;
+          olderLoads += 1;
+          try {
+            await loadOlderTranscript(id!);
+          } catch {
+            return;
+          }
+          // After loading, give the freshly prepended rows a tick to mount
+          // before the next poll.
+          await new Promise((r) => window.setTimeout(r, 60));
+        }
+      } finally {
+        hashScrollActiveRef.current = false;
+      }
+    }
+
+    function tryHash() {
+      const m = /^#seq-(\d+)$/.exec(window.location.hash);
+      if (!m) return;
+      const seq = Number(m[1]);
+      if (!Number.isFinite(seq)) return;
+      void scrollToSeq(seq);
+    }
+
+    tryHash();
+    window.addEventListener("hashchange", tryHash);
+    return () => {
+      cancelled = true;
+      hashScrollActiveRef.current = false;
+      window.removeEventListener("hashchange", tryHash);
+    };
+    // Re-run on session change AND on hash change via the listener. pieces
+    // length is intentionally omitted — the internal poll covers that.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id, location.hash]);
 
   /**
    * Scroll-to-top trigger for lazy-loading older messages. We:
@@ -855,7 +958,7 @@ function ChatMoreSheet({
   const viewModes: ViewMode[] = ["normal", "verbose", "summary"];
   return (
     <div className="fixed inset-0 z-40 bg-ink/30 flex items-end justify-center">
-      <div className="w-full bg-canvas border-t border-line rounded-t-[20px] shadow-lift p-4">
+      <div role="dialog" aria-modal="true" aria-label="More actions" className="w-full bg-canvas border-t border-line rounded-t-[20px] shadow-lift p-4">
         <div className="flex justify-center mb-3">
           <span className="h-1 w-12 bg-line-strong rounded-full" />
         </div>
@@ -1593,7 +1696,7 @@ function UserBubble({
               setError(null);
             }}
             className={cn(
-              "absolute -top-2 -left-2 h-6 w-6 rounded-full bg-paper text-ink border border-line shadow-card transition-opacity flex items-center justify-center",
+              "absolute -top-2 -left-2 h-8 w-8 rounded-full bg-paper text-ink border border-line shadow-card transition-opacity flex items-center justify-center",
               // Desktop: show on hover; mobile: show when the bubble is
               // revealed (same tap gesture as the action chips).
               revealed ? "opacity-100" : "opacity-0",

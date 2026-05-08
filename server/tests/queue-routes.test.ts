@@ -710,6 +710,130 @@ describe("QueueRunner", () => {
     expect(changes.length).toBeGreaterThan(afterDispatch);
   });
 
+  it("watchdog fails a running row whose session hasn't settled within dispatchTimeoutMs", async () => {
+    // Build a runner with a controllable clock and a tight (1 min) watchdog
+    // so we can exercise the timeout branch without waiting 30 real minutes.
+    const { config, log, cleanup } = tempConfig();
+    const { db, close } = openDb(config, log);
+    const projects = new ProjectStore(db);
+    const sessions = new SessionStore(db);
+    const grants = new ToolGrantStore(db);
+    const queue = new QueueStore(db);
+
+    const project = projects.create({
+      name: "p",
+      path: "/tmp/does-not-need-to-exist",
+      trusted: true,
+    });
+
+    const runners: RecordingRunner[] = [];
+    const factory: RunnerFactory = {
+      create(opts) {
+        const r = new RecordingRunner(opts);
+        runners.push(r);
+        return r;
+      },
+    };
+    const manager = new SessionManager({
+      sessions,
+      projects,
+      grants,
+      runnerFactory: factory,
+      broadcast: () => {},
+    });
+    const interruptSpy = vi.spyOn(manager, "interrupt");
+
+    // Control the runner's clock so we can fast-forward past the timeout
+    // without `sleep`. Start at t=0, bump forward in increments below.
+    let now = Date.parse("2026-05-09T00:00:00.000Z");
+    const TIMEOUT_MS = 60_000;
+    const runner = new QueueRunner({
+      queue,
+      sessions,
+      projects,
+      manager,
+      now: () => new Date(now),
+      dispatchTimeoutMs: TIMEOUT_MS,
+    });
+
+    cleanups.push(() => {
+      runner.dispose();
+      interruptSpy.mockRestore();
+      close();
+      cleanup();
+    });
+
+    // Dispatch the row. It flips to `running` with startedAt = now.
+    const row = queue.create({ projectId: project.id, prompt: "wedged" });
+    await runner.tick();
+    await new Promise((r) => setImmediate(r));
+    const dispatched = queue.findById(row.id)!;
+    expect(dispatched.status).toBe("running");
+    expect(dispatched.sessionId).toBeTruthy();
+
+    // The RecordingRunner never drives the session toward idle — a tick at
+    // t+30s should see the row still running (under the watchdog).
+    now += 30_000;
+    await runner.tick();
+    expect(queue.findById(row.id)!.status).toBe("running");
+    expect(interruptSpy).not.toHaveBeenCalled();
+
+    // Fast-forward past the watchdog: startedAt was the initial `now`, so
+    // at t+TIMEOUT+1s we're over the budget. Next tick must flip the row
+    // to `failed` and interrupt the session.
+    now += TIMEOUT_MS + 1_000;
+    await runner.tick();
+    await new Promise((r) => setImmediate(r));
+
+    const failed = queue.findById(row.id)!;
+    expect(failed.status).toBe("failed");
+    expect(failed.finishedAt).toBeTruthy();
+    expect(interruptSpy).toHaveBeenCalledWith(dispatched.sessionId);
+
+    // With the slot freed, the next queued row can now dispatch on the
+    // following tick — proves the queue is no longer wedged.
+    const next = queue.create({ projectId: project.id, prompt: "next" });
+    await runner.tick();
+    await new Promise((r) => setImmediate(r));
+    expect(queue.findById(next.id)!.status).toBe("running");
+  });
+
+  it("watchdog respects the QUEUE_DISPATCH_TIMEOUT_MS env var when no explicit override is passed", () => {
+    // Smoke test for the env-var resolution path. We don't drive a full
+    // tick cycle here — the logic is already covered above; this asserts
+    // the plumbing parses the env var.
+    const prev = process.env.QUEUE_DISPATCH_TIMEOUT_MS;
+    process.env.QUEUE_DISPATCH_TIMEOUT_MS = "12345";
+    try {
+      const { config, log, cleanup } = tempConfig();
+      const { db, close } = openDb(config, log);
+      const projects = new ProjectStore(db);
+      const sessions = new SessionStore(db);
+      const grants = new ToolGrantStore(db);
+      const queue = new QueueStore(db);
+      const factory: RunnerFactory = {
+        create(opts) {
+          return new RecordingRunner(opts);
+        },
+      };
+      const manager = new SessionManager({
+        sessions,
+        projects,
+        grants,
+        runnerFactory: factory,
+        broadcast: () => {},
+      });
+      const runner = new QueueRunner({ queue, sessions, projects, manager });
+      expect((runner as unknown as { dispatchTimeoutMs: number }).dispatchTimeoutMs).toBe(12345);
+      runner.dispose();
+      close();
+      cleanup();
+    } finally {
+      if (prev === undefined) delete process.env.QUEUE_DISPATCH_TIMEOUT_MS;
+      else process.env.QUEUE_DISPATCH_TIMEOUT_MS = prev;
+    }
+  });
+
   it("ordering is deterministic when two rows carry the same seq", () => {
     // Direct DB insert lets us fabricate a tied-seq pair (the public
     // store.create() auto-increments seq, so we can't produce this via the

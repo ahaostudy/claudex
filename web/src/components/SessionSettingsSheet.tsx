@@ -246,12 +246,12 @@ export function SessionSettingsSheet({
 
   return (
     <div
-      className="fixed inset-0 z-20 bg-ink/30 flex justify-end"
+      className="fixed inset-0 z-40 bg-ink/30 flex justify-end"
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="w-full md:w-[380px] bg-canvas md:border-l border-line shadow-lift flex flex-col max-h-screen h-full">
+      <div role="dialog" aria-modal="true" aria-label="Session settings" className="w-full md:w-[380px] bg-canvas md:border-l border-line shadow-lift flex flex-col max-h-screen h-full">
         {/* Mobile header: X on the left, caps+display stacked. */}
         <div className="md:hidden px-4 py-2.5 border-b border-line flex items-center gap-2">
           <button
@@ -338,15 +338,54 @@ export function SessionSettingsSheet({
             )}
           </div>
 
-          {/* Permission mode — 5-segment on desktop. Mobile keeps the same
-              segmented control rather than the mockup's collapsed picker,
-              because we don't have a dedicated sub-sheet and the 5 slots
-              still fit at 390px. */}
+          {/* Permission mode — 5-segment on desktop. At 390px the five labels
+              (Ask / Accept / Plan / Auto / Bypass) can't fit side-by-side, so
+              mobile renders as a vertical stack of clickable rows with a short
+              description to the right and a checkmark on the active row. */}
           <div>
             <div className="text-[11px] uppercase tracking-[0.14em] text-ink-muted mb-2">
               Permission mode
             </div>
-            <div className="grid grid-cols-5 gap-1 md:gap-1.5 p-1 bg-paper border border-line rounded-[8px]">
+            {/* Mobile: stacked list of rows */}
+            <div className="md:hidden rounded-[8px] border border-line bg-canvas overflow-hidden divide-y divide-line">
+              {MODES.map(([id, label]) => {
+                const active = mode === id;
+                const dim = id === "bypassPermissions" && !active;
+                return (
+                  <button
+                    key={id}
+                    disabled={archived || saving}
+                    onClick={() => {
+                      setMode(id);
+                      if (id !== session.mode) patch({ mode: id });
+                    }}
+                    className={`w-full flex items-center gap-3 px-3 py-2.5 text-left disabled:opacity-60 ${
+                      active ? "bg-paper/60" : "hover:bg-paper/40"
+                    } ${dim ? "opacity-60" : ""}`}
+                  >
+                    <span
+                      className={`shrink-0 h-4 w-4 rounded-full border flex items-center justify-center ${
+                        active
+                          ? "bg-ink border-ink"
+                          : "border-line bg-canvas"
+                      }`}
+                    >
+                      {active && (
+                        <span className="h-1.5 w-1.5 rounded-full bg-canvas" />
+                      )}
+                    </span>
+                    <span className="text-[13px] font-medium w-14 shrink-0">
+                      {label}
+                    </span>
+                    <span className="text-[12px] text-ink-muted flex-1 min-w-0">
+                      {modeHint[id]}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+            {/* Desktop: 5-segment control */}
+            <div className="hidden md:grid grid-cols-5 gap-1.5 p-1 bg-paper border border-line rounded-[8px]">
               {MODES.map(([id, label]) => {
                 const active = mode === id;
                 const dim = id === "bypassPermissions" && !active;
@@ -369,7 +408,7 @@ export function SessionSettingsSheet({
                 );
               })}
             </div>
-            <div className="text-[12px] text-ink-muted mt-2">
+            <div className="hidden md:block text-[12px] text-ink-muted mt-2">
               {modeHint[mode]}
             </div>
           </div>

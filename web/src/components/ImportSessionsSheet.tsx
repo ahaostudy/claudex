@@ -119,6 +119,9 @@ export function ImportSessionsSheet({
       onClick={onClose}
     >
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="import-sessions-sheet-title"
         className="w-full sm:max-w-2xl bg-canvas border-t sm:border border-line rounded-t-[20px] sm:rounded-[14px] shadow-lift flex flex-col max-h-[85vh] sm:max-h-[80vh]"
         onClick={(e) => e.stopPropagation()}
       >
@@ -130,7 +133,7 @@ export function ImportSessionsSheet({
         {/* Header */}
         <div className="px-4 pt-3 pb-2 flex items-center gap-2">
           <div className="min-w-0 flex-1">
-            <div className="text-[11px] uppercase tracking-[0.14em] text-ink-muted">
+            <div id="import-sessions-sheet-title" className="text-[11px] uppercase tracking-[0.14em] text-ink-muted">
               Import from CLI
             </div>
             <div className="text-[14px] text-ink">

@@ -113,6 +113,9 @@ export function GlobalSearchSheet({ onClose }: GlobalSearchSheetProps) {
       onClick={onClose}
     >
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Global search"
         className="w-full sm:max-w-[640px] sm:mt-[10vh] bg-canvas border-t sm:border border-line rounded-t-[20px] sm:rounded-[14px] shadow-lift flex flex-col max-h-[80vh] sm:max-h-[70vh]"
         onClick={(e) => e.stopPropagation()}
       >

@@ -197,6 +197,43 @@ d("pruneOrphan", () => {
     expect(res.error).toMatch(/refused/);
   });
 
+  it("refuses to prune a path outside the project directory", async () => {
+    // Defense against a forged request: even with a legit `claude/*`
+    // branch name, the target `path` must be inside the project — otherwise
+    // the defensive rm at the end of pruneOrphan would nuke an arbitrary
+    // absolute path on the host.
+    const ctx = await bootstrapAuthedApp();
+    disposers.push(ctx.cleanup);
+    const repo = createTmpGitRepo();
+    disposers.push(repo.cleanup);
+    // Set up a real worktree inside the project so the branch is plausible;
+    // then call prune with a branch-looks-legit but path-is-outside payload.
+    await addClaudeWorktree(repo.path, "claude/legit", "sess-legit");
+
+    // Create a sibling directory OUTSIDE the project to prove it survives.
+    const outside = mkdtempSync(path.join(tmpdir(), "claudex-outside-"));
+    disposers.push(() => {
+      try {
+        rmSync(outside, { recursive: true, force: true });
+      } catch {
+        /* already gone */
+      }
+    });
+    const outsideFile = path.join(outside, "important.txt");
+    fs.writeFileSync(outsideFile, "precious", "utf8");
+
+    const res = await pruneOrphan({
+      projectPath: repo.path,
+      branch: "claude/legit",
+      path: outside,
+    });
+    expect(res.removed).toBe(false);
+    expect(res.error).toBe("path_out_of_project");
+    // Outside directory must be untouched.
+    expect(fs.existsSync(outsideFile)).toBe(true);
+    expect(fs.readFileSync(outsideFile, "utf8")).toBe("precious");
+  });
+
   it("handles a worktree whose directory is already gone", async () => {
     const ctx = await bootstrapAuthedApp();
     disposers.push(ctx.cleanup);

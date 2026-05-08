@@ -13,6 +13,14 @@ export interface QueueRunnerDeps {
   logger?: FastifyBaseLogger;
   /** Override the clock for tests. */
   now?: () => Date;
+  /**
+   * Per-dispatch watchdog timeout. If a running queue row stays `running` for
+   * longer than this without its session settling to idle/error, the runner
+   * gives up on the row: it interrupts the session, marks the queue row
+   * `failed`, and proceeds to dispatch the next. Defaults to 30 min; can be
+   * overridden per-instance or globally via `QUEUE_DISPATCH_TIMEOUT_MS`.
+   */
+  dispatchTimeoutMs?: number;
 }
 
 /**
@@ -30,6 +38,16 @@ const DEFAULT_MODE: PermissionMode = "default";
  * latency-sensitive path — users expect "it'll run when it runs".
  */
 export const QUEUE_TICK_INTERVAL_MS = 2000;
+
+/**
+ * Default watchdog timeout for a single queued dispatch. If a running row
+ * sits in `running` for longer than this without its session settling, the
+ * runner assumes the dispatch is wedged (SDK hang, missing event stream,
+ * etc.) and fails the row so the queue keeps draining. Configurable via
+ * the `QUEUE_DISPATCH_TIMEOUT_MS` env var for operators who want tighter
+ * (or looser) guardrails; tests pass an override in `QueueRunnerDeps`.
+ */
+export const DEFAULT_QUEUE_DISPATCH_TIMEOUT_MS = 30 * 60 * 1000;
 
 /**
  * QueueRunner — single-instance coordinator that drains the `queued_prompts`
@@ -54,9 +72,19 @@ export class QueueRunner {
   private disposed = false;
   private ticking = false;
   private readonly nowFn: () => Date;
+  private readonly dispatchTimeoutMs: number;
 
   constructor(private readonly deps: QueueRunnerDeps) {
     this.nowFn = deps.now ?? (() => new Date());
+    // Resolution order: explicit constructor arg > env var > default. Invalid
+    // env values (non-positive / NaN) fall through to the default so a typo
+    // doesn't silently disable the watchdog.
+    const envRaw = process.env.QUEUE_DISPATCH_TIMEOUT_MS;
+    const envParsed = envRaw !== undefined ? Number(envRaw) : NaN;
+    const envValid = Number.isFinite(envParsed) && envParsed > 0;
+    this.dispatchTimeoutMs =
+      deps.dispatchTimeoutMs ??
+      (envValid ? envParsed : DEFAULT_QUEUE_DISPATCH_TIMEOUT_MS);
   }
 
   /** Arm the periodic tick. Safe to call multiple times (idempotent). */
@@ -137,9 +165,45 @@ export class QueueRunner {
         this.deps.queue.setStatus(row.id, "failed", {
           finishedAt: this.nowFn().toISOString(),
         });
+      } else {
+        // session.status === 'running' | 'awaiting' | 'archived' → still
+        // occupying the slot. Before we defer to the next tick, check the
+        // watchdog: if the dispatch has been running longer than the
+        // configured timeout without settling, assume it's wedged (SDK
+        // hang, missing event stream, etc.), interrupt the session, and
+        // fail the queue row so the queue keeps draining. Without this
+        // guardrail a single hung session would wedge the queue forever.
+        const startedAt = row.startedAt ? Date.parse(row.startedAt) : NaN;
+        if (Number.isFinite(startedAt)) {
+          const elapsed = this.nowFn().getTime() - startedAt;
+          if (elapsed > this.dispatchTimeoutMs) {
+            this.deps.logger?.warn(
+              {
+                queueId: row.id,
+                sessionId: row.sessionId,
+                elapsedMs: elapsed,
+                timeoutMs: this.dispatchTimeoutMs,
+              },
+              "queue dispatch exceeded watchdog timeout — interrupting session and failing row",
+            );
+            // Fire-and-forget the interrupt: awaiting here would block the
+            // tick on a potentially-hung runner, which is exactly the case
+            // we're guarding against.
+            void this.deps.manager
+              .interrupt(row.sessionId)
+              .catch((err) => {
+                this.deps.logger?.warn(
+                  { err, sessionId: row.sessionId },
+                  "queue watchdog: interrupt failed",
+                );
+              });
+            this.deps.queue.setStatus(row.id, "failed", {
+              finishedAt: this.nowFn().toISOString(),
+            });
+          }
+        }
       }
-      // session.status === 'running' | 'awaiting' | 'archived' → keep
-      // waiting. Archived is rare (user archived the session mid-run); we
+      // Archived is rare (user archived the session mid-run); we
       // treat it as "still occupying the slot" rather than guess — on the
       // next tick the user's archive probably settled the session to idle.
     }

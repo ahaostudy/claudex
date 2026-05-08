@@ -1,4 +1,5 @@
 import type Database from "better-sqlite3";
+import type { Statement } from "better-sqlite3";
 import { nanoid } from "nanoid";
 
 // -----------------------------------------------------------------------------
@@ -83,10 +84,26 @@ function clip(s: string | null | undefined, max: number): string | null {
 type WarnLogger = { warn: (obj: unknown, msg?: string) => void } | undefined;
 
 export class AuditStore {
+  // Prepared-statement cache. `list` intentionally absent — its SQL varies
+  // with the optional since / events filters, so there's no single
+  // statement to cache.
+  private readonly stmts: {
+    insert: Statement | null;
+    count: Statement | null;
+    countSince: Statement | null;
+  } = { insert: null, count: null, countSince: null };
+
   constructor(
     private readonly db: Database.Database,
     private readonly logger?: WarnLogger,
   ) {}
+
+  private lazyStmt<K extends keyof AuditStore["stmts"]>(
+    key: K,
+    sql: string,
+  ): Statement {
+    return (this.stmts[key] ??= this.db.prepare(sql));
+  }
 
   /**
    * Insert one audit row. Swallows every error — callers never need to
@@ -105,22 +122,21 @@ export class AuditStore {
         user_agent: clip(input.userAgent, UA_MAX),
         created_at: new Date().toISOString(),
       };
-      this.db
-        .prepare(
-          `INSERT INTO audit_events
-             (id, user_id, event, target, detail, ip, user_agent, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        )
-        .run(
-          row.id,
-          row.user_id,
-          row.event,
-          row.target,
-          row.detail,
-          row.ip,
-          row.user_agent,
-          row.created_at,
-        );
+      this.lazyStmt(
+        "insert",
+        `INSERT INTO audit_events
+           (id, user_id, event, target, detail, ip, user_agent, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(
+        row.id,
+        row.user_id,
+        row.event,
+        row.target,
+        row.detail,
+        row.ip,
+        row.user_agent,
+        row.created_at,
+      );
     } catch (err) {
       this.logger?.warn?.({ err, event: input.event }, "audit append failed");
     }
@@ -157,9 +173,39 @@ export class AuditStore {
   }
 
   count(): number {
+    const row = this.lazyStmt(
+      "count",
+      "SELECT COUNT(*) as c FROM audit_events",
+    ).get() as { c: number };
+    return row.c;
+  }
+
+  /**
+   * Count events matching the same filter shape as `list`. Used by the
+   * audit route so the `totalCount` it returns reflects the caller's
+   * `since` / `events` selection — otherwise the Security card's
+   * "N events · past 30 days" header lies when a filter is applied.
+   *
+   * SQL mirrors `list`'s WHERE clause. We don't cache the prepared
+   * statement because the filter shape is dynamic (variable IN-list
+   * length), same reason `list` doesn't cache.
+   */
+  countFiltered(opts: AuditListOpts = {}): number {
+    const clauses: string[] = [];
+    const params: unknown[] = [];
+    if (opts.since) {
+      clauses.push("created_at >= ?");
+      params.push(opts.since);
+    }
+    if (opts.events && opts.events.length > 0) {
+      const placeholders = opts.events.map(() => "?").join(",");
+      clauses.push(`event IN (${placeholders})`);
+      params.push(...opts.events);
+    }
+    const where = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
     const row = this.db
-      .prepare("SELECT COUNT(*) as c FROM audit_events")
-      .get() as { c: number };
+      .prepare(`SELECT COUNT(*) as c FROM audit_events ${where}`)
+      .get(...params) as { c: number };
     return row.c;
   }
 
@@ -169,9 +215,10 @@ export class AuditStore {
    * a list query it already paginated.
    */
   countSince(since: string): number {
-    const row = this.db
-      .prepare("SELECT COUNT(*) as c FROM audit_events WHERE created_at >= ?")
-      .get(since) as { c: number };
+    const row = this.lazyStmt(
+      "countSince",
+      "SELECT COUNT(*) as c FROM audit_events WHERE created_at >= ?",
+    ).get(since) as { c: number };
     return row.c;
   }
 }

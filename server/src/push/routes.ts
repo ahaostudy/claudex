@@ -53,6 +53,59 @@ export interface PushSender {
 }
 
 /**
+ * Per-endpoint timeout for `webpush.sendNotification`. A single slow or
+ * wedged push service should not hold the whole fan-out (we await all
+ * endpoints in parallel, and SessionManager's permission-prompt trigger
+ * awaits the fan-out's completion for logging). web-push exposes a
+ * `timeout` option, but that's a socket-level timeout — it doesn't bound
+ * overall wall-clock on a pathological (slow-loris-style) endpoint. We
+ * race against our own timeout so the dispatcher is always bounded, and
+ * we keep the socket-level `timeout` in sync so the HTTP request itself
+ * gets torn down promptly.
+ */
+export const PUSH_SEND_TIMEOUT_MS = 8000;
+
+class PushSendTimeoutError extends Error {
+  constructor() {
+    super("push send timed out");
+    this.name = "PushSendTimeoutError";
+  }
+}
+
+/**
+ * Race a web-push send against a hard timeout. Resolves with the send's
+ * result on success; rejects with `PushSendTimeoutError` when the timeout
+ * fires before web-push resolves. The timer is always cleared so we don't
+ * leak one per pending send.
+ */
+async function sendWithTimeout(
+  sub: {
+    endpoint: string;
+    keys: { p256dh: string; auth: string };
+  },
+  body: string,
+  timeoutMs: number,
+): Promise<unknown> {
+  let timer: NodeJS.Timeout | undefined;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new PushSendTimeoutError()), timeoutMs);
+    // Don't keep the event loop alive just for the timeout — if the process
+    // is shutting down we shouldn't wedge on a pending push.
+    timer.unref?.();
+  });
+  try {
+    return await Promise.race([
+      // Passing `timeout` tells web-push to also tear down the underlying
+      // socket when it idles; our race bounds total wall-clock regardless.
+      webpush.sendNotification(sub, body, { timeout: timeoutMs }),
+      timeoutPromise,
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
+/**
  * Build a pusher that can be handed to other modules (e.g. SessionManager)
  * after `registerPushRoutes` has run. Pulls the store fresh from `deps.db`
  * on every call so tests that swap databases don't cache a stale reference.
@@ -71,17 +124,30 @@ export function createPushSender(deps: PushRoutesDeps): PushSender {
     let sent = 0;
     let pruned = 0;
 
-    await Promise.all(
+    // allSettled so one misbehaving endpoint can't short-circuit the others.
+    // Per-endpoint we race against PUSH_SEND_TIMEOUT_MS — see sendWithTimeout.
+    await Promise.allSettled(
       subs.map(async (s) => {
         const sub = {
           endpoint: s.endpoint,
           keys: { p256dh: s.p256dh, auth: s.auth },
         };
         try {
-          await webpush.sendNotification(sub, body);
+          await sendWithTimeout(sub, body, PUSH_SEND_TIMEOUT_MS);
           store.touchLastUsed(s.id);
           sent += 1;
         } catch (err) {
+          if (err instanceof PushSendTimeoutError) {
+            // Treat as transient — don't prune the subscription, the push
+            // service may just be slow. The next dispatch will retry; if
+            // the endpoint is permanently broken we'll eventually hit a
+            // 404/410 and prune it then.
+            deps.logger?.warn?.(
+              { endpoint: s.endpoint, timeoutMs: PUSH_SEND_TIMEOUT_MS },
+              "web-push send timed out",
+            );
+            return;
+          }
           const statusCode = (err as { statusCode?: number }).statusCode;
           // 404 / 410 = the push service says this subscription is dead
           // (browser unsubscribed, PWA uninstalled, etc). Drop it so we don't

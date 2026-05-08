@@ -78,9 +78,31 @@ describe("audit routes", () => {
     const body = res.json();
     const names = body.events.map((e: { event: string }) => e.event).sort();
     expect(names).toEqual(["login", "password_changed"]);
-    // totalCount reflects the table, not the filter — so the UI can still
-    // render "N events in last 30 days" honestly.
-    expect(body.totalCount).toBe(3);
+    // totalCount respects the filter — the Security card's header renders
+    // "N events · past 30 days" for whatever filter the UI currently
+    // applies, so totalCount is the match count for that filter (2 here),
+    // not the table-wide row count (3).
+    expect(body.totalCount).toBe(2);
+  });
+
+  it("countFiltered on a bulk-seeded table returns the filtered total, not the table size", async () => {
+    // Seed 10 A events + 5 B events; ?events=A should return 10 rows inline
+    // (all fit under the 200 cap) and totalCount=10 (NOT 15).
+    for (let i = 0; i < 10; i += 1) {
+      audit.append({ event: "login", detail: `a-${i}` });
+    }
+    for (let i = 0; i < 5; i += 1) {
+      audit.append({ event: "logout", detail: `b-${i}` });
+    }
+    const res = await env.app.inject({
+      method: "GET",
+      url: "/api/audit?events=login",
+      headers: { cookie: env.cookie },
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.events).toHaveLength(10);
+    expect(body.totalCount).toBe(10);
   });
 
   it("caps limit at 200 even when a bigger value is requested", async () => {

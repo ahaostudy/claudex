@@ -1,4 +1,5 @@
 import type Database from "better-sqlite3";
+import type { Statement } from "better-sqlite3";
 import { nanoid } from "nanoid";
 
 // -----------------------------------------------------------------------------
@@ -50,7 +51,29 @@ function toRow(r: DbRow): AttachmentRow {
 }
 
 export class AttachmentStore {
+  // Prepared-statement cache. `findManyForSession` is intentionally absent —
+  // its SQL interpolates a variable-length `IN (?, ?, ...)` list so we can't
+  // cache a single statement.
+  private readonly stmts: {
+    insertUnlinked: Statement | null;
+    findById: Statement | null;
+    linkOne: Statement | null;
+    deleteById: Statement | null;
+  } = {
+    insertUnlinked: null,
+    findById: null,
+    linkOne: null,
+    deleteById: null,
+  };
+
   constructor(private readonly db: Database.Database) {}
+
+  private lazyStmt<K extends keyof AttachmentStore["stmts"]>(
+    key: K,
+    sql: string,
+  ): Statement {
+    return (this.stmts[key] ??= this.db.prepare(sql));
+  }
 
   insertUnlinked(input: {
     sessionId: string;
@@ -61,21 +84,20 @@ export class AttachmentStore {
   }): AttachmentRow {
     const id = nanoid(12);
     const createdAt = new Date().toISOString();
-    this.db
-      .prepare(
-        `INSERT INTO attachments
-           (id, session_id, message_event_seq, filename, mime, size_bytes, path, created_at)
-         VALUES (?, ?, NULL, ?, ?, ?, ?, ?)`,
-      )
-      .run(
-        id,
-        input.sessionId,
-        input.filename,
-        input.mime,
-        input.sizeBytes,
-        input.path,
-        createdAt,
-      );
+    this.lazyStmt(
+      "insertUnlinked",
+      `INSERT INTO attachments
+         (id, session_id, message_event_seq, filename, mime, size_bytes, path, created_at)
+       VALUES (?, ?, NULL, ?, ?, ?, ?, ?)`,
+    ).run(
+      id,
+      input.sessionId,
+      input.filename,
+      input.mime,
+      input.sizeBytes,
+      input.path,
+      createdAt,
+    );
     return {
       id,
       sessionId: input.sessionId,
@@ -89,9 +111,10 @@ export class AttachmentStore {
   }
 
   findById(id: string): AttachmentRow | null {
-    const row = this.db
-      .prepare("SELECT * FROM attachments WHERE id = ?")
-      .get(id) as DbRow | undefined;
+    const row = this.lazyStmt(
+      "findById",
+      "SELECT * FROM attachments WHERE id = ?",
+    ).get(id) as DbRow | undefined;
     return row ? toRow(row) : null;
   }
 
@@ -115,7 +138,8 @@ export class AttachmentStore {
   /** Stamp a batch of attachment rows with the user_message event seq. */
   linkToMessage(ids: string[], messageEventSeq: number): void {
     if (ids.length === 0) return;
-    const stmt = this.db.prepare(
+    const stmt = this.lazyStmt(
+      "linkOne",
       `UPDATE attachments SET message_event_seq = ? WHERE id = ? AND message_event_seq IS NULL`,
     );
     const tx = this.db.transaction((batch: string[]) => {
@@ -133,7 +157,10 @@ export class AttachmentStore {
     const existing = this.findById(id);
     if (!existing) return null;
     if (existing.messageEventSeq !== null) return null;
-    this.db.prepare("DELETE FROM attachments WHERE id = ?").run(id);
+    this.lazyStmt(
+      "deleteById",
+      "DELETE FROM attachments WHERE id = ?",
+    ).run(id);
     return existing;
   }
 }

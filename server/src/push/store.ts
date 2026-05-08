@@ -1,4 +1,5 @@
 import type Database from "better-sqlite3";
+import type { Statement } from "better-sqlite3";
 import { nanoid } from "nanoid";
 import type { PushDevice } from "@claudex/shared";
 
@@ -52,7 +53,40 @@ export interface PushSubscribeInput {
 }
 
 export class PushSubscriptionStore {
+  // Prepared-statement cache — every method here has fixed SQL so all of them
+  // can be cached. Populated lazily on first use.
+  private readonly stmts: {
+    findByEndpoint: Statement | null;
+    update: Statement | null;
+    insert: Statement | null;
+    listAll: Statement | null;
+    findById: Statement | null;
+    deleteById: Statement | null;
+    deleteByEndpoint: Statement | null;
+    deleteAll: Statement | null;
+    count: Statement | null;
+    touchLastUsed: Statement | null;
+  } = {
+    findByEndpoint: null,
+    update: null,
+    insert: null,
+    listAll: null,
+    findById: null,
+    deleteById: null,
+    deleteByEndpoint: null,
+    deleteAll: null,
+    count: null,
+    touchLastUsed: null,
+  };
+
   constructor(private readonly db: Database.Database) {}
+
+  private lazyStmt<K extends keyof PushSubscriptionStore["stmts"]>(
+    key: K,
+    sql: string,
+  ): Statement {
+    return (this.stmts[key] ??= this.db.prepare(sql));
+  }
 
   /**
    * Insert a new subscription or refresh an existing one keyed on endpoint.
@@ -63,25 +97,25 @@ export class PushSubscriptionStore {
    * rotates keys (iOS Safari renews them occasionally).
    */
   upsert(input: PushSubscribeInput): PushSubscriptionRow {
-    const existing = this.db
-      .prepare("SELECT * FROM push_subscriptions WHERE endpoint = ?")
-      .get(input.endpoint) as DbRow | undefined;
+    const existing = this.lazyStmt(
+      "findByEndpoint",
+      "SELECT * FROM push_subscriptions WHERE endpoint = ?",
+    ).get(input.endpoint) as DbRow | undefined;
 
     const now = new Date().toISOString();
     if (existing) {
-      this.db
-        .prepare(
-          `UPDATE push_subscriptions
-           SET p256dh = ?, auth = ?, user_agent = ?, last_used_at = ?
-           WHERE id = ?`,
-        )
-        .run(
-          input.p256dh,
-          input.auth,
-          input.userAgent ?? existing.user_agent,
-          now,
-          existing.id,
-        );
+      this.lazyStmt(
+        "update",
+        `UPDATE push_subscriptions
+         SET p256dh = ?, auth = ?, user_agent = ?, last_used_at = ?
+         WHERE id = ?`,
+      ).run(
+        input.p256dh,
+        input.auth,
+        input.userAgent ?? existing.user_agent,
+        now,
+        existing.id,
+      );
       return toRow({
         ...existing,
         p256dh: input.p256dh,
@@ -92,20 +126,19 @@ export class PushSubscriptionStore {
     }
 
     const id = nanoid(12);
-    this.db
-      .prepare(
-        `INSERT INTO push_subscriptions
-           (id, endpoint, p256dh, auth, user_agent, created_at, last_used_at)
-         VALUES (?, ?, ?, ?, ?, ?, NULL)`,
-      )
-      .run(
-        id,
-        input.endpoint,
-        input.p256dh,
-        input.auth,
-        input.userAgent ?? null,
-        now,
-      );
+    this.lazyStmt(
+      "insert",
+      `INSERT INTO push_subscriptions
+         (id, endpoint, p256dh, auth, user_agent, created_at, last_used_at)
+       VALUES (?, ?, ?, ?, ?, ?, NULL)`,
+    ).run(
+      id,
+      input.endpoint,
+      input.p256dh,
+      input.auth,
+      input.userAgent ?? null,
+      now,
+    );
 
     return {
       id,
@@ -119,11 +152,10 @@ export class PushSubscriptionStore {
   }
 
   list(): PushSubscriptionRow[] {
-    const rows = this.db
-      .prepare(
-        "SELECT * FROM push_subscriptions ORDER BY created_at DESC",
-      )
-      .all() as DbRow[];
+    const rows = this.lazyStmt(
+      "listAll",
+      "SELECT * FROM push_subscriptions ORDER BY created_at DESC",
+    ).all() as DbRow[];
     return rows.map(toRow);
   }
 
@@ -139,16 +171,18 @@ export class PushSubscriptionStore {
   }
 
   findById(id: string): PushSubscriptionRow | null {
-    const row = this.db
-      .prepare("SELECT * FROM push_subscriptions WHERE id = ?")
-      .get(id) as DbRow | undefined;
+    const row = this.lazyStmt(
+      "findById",
+      "SELECT * FROM push_subscriptions WHERE id = ?",
+    ).get(id) as DbRow | undefined;
     return row ? toRow(row) : null;
   }
 
   deleteById(id: string): boolean {
-    const info = this.db
-      .prepare("DELETE FROM push_subscriptions WHERE id = ?")
-      .run(id);
+    const info = this.lazyStmt(
+      "deleteById",
+      "DELETE FROM push_subscriptions WHERE id = ?",
+    ).run(id);
     return info.changes > 0;
   }
 
@@ -157,27 +191,33 @@ export class PushSubscriptionStore {
    * subscriptions that come back 404 / 410 Gone from the push service.
    */
   deleteByEndpoint(endpoint: string): boolean {
-    const info = this.db
-      .prepare("DELETE FROM push_subscriptions WHERE endpoint = ?")
-      .run(endpoint);
+    const info = this.lazyStmt(
+      "deleteByEndpoint",
+      "DELETE FROM push_subscriptions WHERE endpoint = ?",
+    ).run(endpoint);
     return info.changes > 0;
   }
 
   deleteAll(): number {
-    const info = this.db.prepare("DELETE FROM push_subscriptions").run();
+    const info = this.lazyStmt(
+      "deleteAll",
+      "DELETE FROM push_subscriptions",
+    ).run();
     return info.changes;
   }
 
   count(): number {
-    const row = this.db
-      .prepare("SELECT COUNT(*) as n FROM push_subscriptions")
-      .get() as { n: number };
+    const row = this.lazyStmt(
+      "count",
+      "SELECT COUNT(*) as n FROM push_subscriptions",
+    ).get() as { n: number };
     return row.n;
   }
 
   touchLastUsed(id: string): void {
-    this.db
-      .prepare("UPDATE push_subscriptions SET last_used_at = ? WHERE id = ?")
-      .run(new Date().toISOString(), id);
+    this.lazyStmt(
+      "touchLastUsed",
+      "UPDATE push_subscriptions SET last_used_at = ? WHERE id = ?",
+    ).run(new Date().toISOString(), id);
   }
 }

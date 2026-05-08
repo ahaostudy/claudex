@@ -401,12 +401,15 @@ function ChangePasswordModal({ onClose }: { onClose: () => void }) {
     <div className="fixed inset-0 z-30 bg-ink/30 flex items-end sm:items-center justify-center">
       <form
         onSubmit={submit}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="change-password-modal-title"
         className="w-full max-w-md bg-canvas border-t sm:border border-line rounded-t-[20px] sm:rounded-[14px] shadow-lift p-5"
       >
         <div className="flex items-center mb-4">
           <div>
             <div className="caps text-ink-muted">Security</div>
-            <h2 className="display text-[1.25rem] leading-tight mt-0.5">
+            <h2 id="change-password-modal-title" className="display text-[1.25rem] leading-tight mt-0.5">
               Change password
             </h2>
           </div>
@@ -769,11 +772,11 @@ function RecoveryCodesModal({
 
   return (
     <div className="fixed inset-0 z-30 bg-ink/30 flex items-end sm:items-center justify-center">
-      <div className="w-full max-w-md bg-canvas border-t sm:border border-line rounded-t-[20px] sm:rounded-[14px] shadow-lift p-5">
+      <div role="dialog" aria-modal="true" aria-labelledby="recovery-codes-modal-title" className="w-full max-w-md bg-canvas border-t sm:border border-line rounded-t-[20px] sm:rounded-[14px] shadow-lift p-5">
         <div className="flex items-center mb-4">
           <div>
             <div className="caps text-ink-muted">Security</div>
-            <h2 className="display text-[1.25rem] leading-tight mt-0.5">
+            <h2 id="recovery-codes-modal-title" className="display text-[1.25rem] leading-tight mt-0.5">
               New recovery codes
             </h2>
           </div>

@@ -1174,6 +1174,16 @@ export const ImportAllResponse = z.object({
     queueMissingProject: z.number().int().nonnegative(),
     grants: z.number().int().nonnegative(),
     attachments: z.number().int().nonnegative(),
+    // Audit rows carry attacker-chosen `event`/`ip`/`user_agent` strings —
+    // importing them would let a bundle inject fake "login" entries into
+    // the local Security card. We always skip, and surface the count so
+    // the user sees why the number here doesn't match the bundle body.
+    audit: z
+      .object({
+        count: z.number().int().nonnegative(),
+        reason: z.string(),
+      })
+      .optional(),
   }),
   /** `true` when the incoming `claudexVersion` didn't match this server's —
    * import still proceeded (shapes are additive) but the UI can nag the user. */

@@ -9,8 +9,11 @@
 //      SSRF cannon pointed at `http://127.0.0.1:<something>` or cloud
 //      metadata endpoints. We reject:
 //        - non-http(s) schemes
-//        - hostnames that resolve to a literal loopback / private / link-
-//          local / ULA address (IPv4 and IPv6)
+//        - hostnames that are literal loopback / private / link-local / ULA
+//          addresses (IPv4 and IPv6)
+//        - hostnames that RESOLVE (via DNS) to any of the above. This closes
+//          the DNS-rebinding hole where `evil.example.com` resolves to
+//          127.0.0.1 at fetch time.
 //        - the cloud metadata IPs (169.254.169.254 et al — already covered
 //          by the link-local range, listed explicitly in comments so future
 //          edits don't accidentally lift it)
@@ -19,7 +22,14 @@
 //      minimal regex parse. We deliberately avoid pulling in a DOM parser
 //      — the wire format for these tags is well-known and the cost of a
 //      full parser on every preview isn't worth the resolver accuracy.
+//
+//   Redirects are followed MANUALLY (max 3 hops). Each 3xx `Location` is
+//   parsed, the host re-validated (both literal + DNS-resolved), and only
+//   then re-fetched. This means an open redirector on a public site cannot
+//   bounce us into the private network on hop 2.
 // ---------------------------------------------------------------------------
+
+import dns from "node:dns";
 
 export interface FetchedPreview {
   status: number;
@@ -33,18 +43,17 @@ export interface FetchedPreview {
 export const MAX_BYTES = 512 * 1024;
 /** Per-request upstream timeout. */
 export const FETCH_TIMEOUT_MS = 5000;
+/** How many redirect hops we'll follow before giving up. */
+export const MAX_REDIRECTS = 3;
 
 /**
  * Classify a URL as either public-http(s) or rejected. Returns the parsed URL
  * on success, or a short string code describing the rejection.
  *
- * The host check is split in two: a literal IP short-circuits the DNS lookup
- * (most of our attacker vectors are literal-IP URLs anyway), and a hostname
- * falls through to the caller's DNS resolver at fetch time. We could resolve
- * here too but that adds a second RTT on every preview; the two-layer
- * approach (literal check now, rely on Node's `fetch` not to follow an
- * attacker-controlled DNS-rebind across redirects) is good enough for the
- * claudex threat model.
+ * This is the SYNC literal-IP / bare-hostname check. A successful return here
+ * does NOT guarantee the host is safe to fetch — a DNS name that resolves to
+ * a private address still has to be caught. `assertPublicHost` below does the
+ * DNS-resolved check and must be awaited before every outbound fetch.
  */
 export function classifyUrl(
   raw: string,
@@ -66,6 +75,65 @@ export function classifyUrl(
     return { ok: false, reason: "bad_host" };
   }
   return { ok: true, url };
+}
+
+/**
+ * Resolve `host` via DNS and reject if ANY returned address falls in a
+ * private / loopback / link-local / ULA range. Must be awaited before every
+ * fetch — `classifyUrl` only covers literal IPs; a hostname like
+ * `rebind.attacker.example` that `A`-resolves to `127.0.0.1` slips through
+ * the sync check and has to be caught here.
+ *
+ * For literal-IP hostnames we short-circuit (no DNS lookup). IPv6 literals
+ * in brackets are unwrapped by WHATWG URL, so `URL('http://[::1]').hostname`
+ * is `'::1'` and the sync `isForbiddenHost` path already returns true.
+ *
+ * Returns `{ ok: true }` when the host is safe to fetch; otherwise a reason
+ * string that the caller translates to the HTTP error.
+ */
+export async function assertPublicHost(
+  host: string,
+): Promise<{ ok: true } | { ok: false; reason: "bad_host" }> {
+  const lower = host.toLowerCase();
+  // Re-run the literal + name-based block. Cheap, and it catches the case
+  // where a redirect chain hops from a public name to a literal loopback.
+  if (isForbiddenHost(lower)) {
+    return { ok: false, reason: "bad_host" };
+  }
+  // If the host is a literal IP, isForbiddenHost already ruled — no DNS
+  // query needed and no risk of rebinding (the literal can't change at
+  // fetch time).
+  const stripped = lower.startsWith("[") && lower.endsWith("]")
+    ? lower.slice(1, -1)
+    : lower;
+  if (isIPv4Literal(stripped) || isIPv6Literal(stripped)) {
+    return { ok: true };
+  }
+  // DNS lookup (A + AAAA). Any resolved address that lands in our private
+  // block list fails the check. `all: true` lets us inspect every record so
+  // a mixed A/AAAA response can't hide a private record behind a public
+  // one in the first-result position.
+  let addrs: Array<{ address: string; family: number }>;
+  try {
+    addrs = await dns.promises.lookup(stripped, { all: true });
+  } catch {
+    // Unresolvable host — let the fetch fail naturally so the caller sees a
+    // 502 with the usual "upstream_failed" negative cache. Not a safety
+    // issue: there's no address to reach.
+    return { ok: true };
+  }
+  for (const a of addrs) {
+    const addr = a.address;
+    if (a.family === 4 || isIPv4Literal(addr)) {
+      if (isPrivateIPv4(addr)) return { ok: false, reason: "bad_host" };
+      continue;
+    }
+    // family === 6
+    // Node may surface IPv4-mapped addresses (::ffff:10.0.0.1) as v6 entries —
+    // isPrivateIPv6 already covers that shape, but fall through to it below.
+    if (isPrivateIPv6(addr)) return { ok: false, reason: "bad_host" };
+  }
+  return { ok: true };
 }
 
 /**
@@ -149,31 +217,109 @@ function isPrivateIPv6(s: string): boolean {
  * errors) and no metadata, and callers persist that as a negative cache
  * entry.
  *
- * Implementation note: we pass `redirect: "follow"` so sites that serve
- * their OG metadata on a canonical URL (typical for media sites) are
- * handled transparently. The final hop's URL is not re-validated — an
- * attacker could try to use an open redirector to bounce us at
- * 127.0.0.1, but the fetch happens inside Node's `fetch` which won't
- * redirect across origins under loopback without the browser's
- * same-origin-policy enforcement. We accept this minor residual risk
- * because the alternative (reject all redirects) breaks the majority of
- * real-world previews.
+ * Redirects are followed MANUALLY (up to MAX_REDIRECTS hops). Each redirect
+ * target is re-validated with the same DNS-aware host check before we issue
+ * the next request. This prevents an open redirector on a public site from
+ * bouncing us at 127.0.0.1 on hop 2 — a hole that Node's built-in
+ * `redirect: "follow"` can't close because it has no way to consult our
+ * block list.
  */
 export async function fetchPreview(url: URL): Promise<FetchedPreview> {
-  const controller = AbortSignal.timeout(FETCH_TIMEOUT_MS);
-  let res: Response;
-  try {
-    res = await fetch(url, {
-      redirect: "follow",
-      signal: controller,
-      headers: {
-        // A polite UA so servers that dislike anonymous clients still
-        // answer. No cookies / auth — this is an unauthenticated preview.
-        "User-Agent": "claudex-link-preview/0.1 (+https://github.com/)",
-        Accept: "text/html,application/xhtml+xml;q=0.9,*/*;q=0.5",
-      },
-    });
-  } catch {
+  // First-hop DNS validation. The route already called `classifyUrl` (which
+  // is sync + literal-only); do the async resolve here so we catch a DNS
+  // rebind before issuing any request.
+  const first = await assertPublicHost(url.hostname);
+  if (!first.ok) {
+    return { status: 0 };
+  }
+
+  let current = url;
+  let res: Response | null = null;
+  for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+    const controller = AbortSignal.timeout(FETCH_TIMEOUT_MS);
+    let step: Response;
+    try {
+      step = await fetch(current, {
+        redirect: "manual",
+        signal: controller,
+        headers: {
+          // A polite UA so servers that dislike anonymous clients still
+          // answer. No cookies / auth — this is an unauthenticated preview.
+          "User-Agent": "claudex-link-preview/0.1 (+https://github.com/)",
+          Accept: "text/html,application/xhtml+xml;q=0.9,*/*;q=0.5",
+        },
+      });
+    } catch {
+      return { status: 0 };
+    }
+
+    // 301/302/303/307/308 — follow, after re-validating the Location host.
+    if (step.status >= 300 && step.status < 400) {
+      const loc = step.headers.get("location");
+      if (!loc) {
+        // Redirect without a target — treat as a network-ish error and
+        // cache it negatively. The body went to /dev/null, drain to free
+        // the socket.
+        try {
+          await step.body?.cancel();
+        } catch {
+          /* ignore */
+        }
+        return { status: step.status };
+      }
+      let next: URL;
+      try {
+        next = new URL(loc, current);
+      } catch {
+        try {
+          await step.body?.cancel();
+        } catch {
+          /* ignore */
+        }
+        return { status: step.status };
+      }
+      // Re-validate scheme + literal-host on the redirect target, then DNS
+      // on its hostname. An attacker-controlled redirector cannot flip us
+      // onto an intra-network target without tripping one of these checks.
+      if (next.protocol !== "http:" && next.protocol !== "https:") {
+        try {
+          await step.body?.cancel();
+        } catch {
+          /* ignore */
+        }
+        return { status: step.status };
+      }
+      if (isForbiddenHost(next.hostname)) {
+        try {
+          await step.body?.cancel();
+        } catch {
+          /* ignore */
+        }
+        return { status: 0 };
+      }
+      const guard = await assertPublicHost(next.hostname);
+      if (!guard.ok) {
+        try {
+          await step.body?.cancel();
+        } catch {
+          /* ignore */
+        }
+        return { status: 0 };
+      }
+      try {
+        await step.body?.cancel();
+      } catch {
+        /* ignore */
+      }
+      current = next;
+      continue;
+    }
+
+    res = step;
+    break;
+  }
+  if (!res) {
+    // Exhausted redirect budget without a final response — treat as failure.
     return { status: 0 };
   }
 

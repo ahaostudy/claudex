@@ -246,6 +246,9 @@ export const SlashCommandSheet = forwardRef<
       onClick={onClose}
     >
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Slash commands"
         className="w-full sm:max-w-xl bg-canvas border-t sm:border border-line rounded-t-[24px] sm:rounded-[14px] shadow-lift flex flex-col max-h-[80vh] sm:max-h-[70vh]"
         onClick={(e) => e.stopPropagation()}
       >

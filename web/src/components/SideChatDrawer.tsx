@@ -132,6 +132,9 @@ export function SideChatDrawer({
           drawer full-height, capped at 420px. */}
       <div
         onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Side chat"
         className={cn(
           "relative flex flex-col bg-paper shadow-lift",
           // mobile

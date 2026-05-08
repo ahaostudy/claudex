@@ -78,7 +78,7 @@ export function ViewModePicker({
           viewport via `max-w-[calc(100vw-1rem)]`. Hidden on < md because
           the mobile path is a full-width bottom sheet. */}
       {open && (
-        <div className="hidden md:block absolute right-0 mt-1.5 z-30 w-[320px] max-w-[calc(100vw-1rem)] rounded-[10px] border border-line bg-canvas shadow-lift p-3">
+        <div role="dialog" aria-modal="true" aria-label="View mode" className="hidden md:block absolute right-0 mt-1.5 z-30 w-[320px] max-w-[calc(100vw-1rem)] rounded-[10px] border border-line bg-canvas shadow-lift p-3">
           <ViewModePanel
             mode={mode}
             onChange={(m) => {
@@ -97,6 +97,9 @@ export function ViewModePicker({
         >
           <div className="absolute inset-0 bg-canvas/60 backdrop-blur-[2px]" />
           <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="View mode"
             className="relative w-full bg-canvas border-t border-line rounded-t-[20px] shadow-lift"
             onClick={(ev) => ev.stopPropagation()}
           >

@@ -57,13 +57,16 @@ export function StatsSheet({ onClose }: { onClose: () => void }) {
       onClick={onClose}
     >
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="stats-sheet-title"
         className="w-full sm:max-w-2xl bg-canvas border-t sm:border border-line rounded-t-[20px] sm:rounded-[14px] shadow-lift flex flex-col max-h-[90vh]"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center p-4 border-b border-line">
           <div>
             <div className="caps text-ink-muted">Statistics</div>
-            <h2 className="display text-[1.25rem] leading-tight mt-0.5">
+            <h2 id="stats-sheet-title" className="display text-[1.25rem] leading-tight mt-0.5">
               How claudex is doing.
             </h2>
           </div>

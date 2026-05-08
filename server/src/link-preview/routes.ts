@@ -7,7 +7,7 @@ import {
   rowToPreview,
   type LinkPreviewRow,
 } from "./store.js";
-import { classifyUrl, fetchPreview } from "./fetch.js";
+import { assertPublicHost, classifyUrl, fetchPreview } from "./fetch.js";
 import type { LinkPreview } from "@claudex/shared";
 
 // ---------------------------------------------------------------------------
@@ -101,6 +101,20 @@ export async function registerLinkPreviewRoutes(
           return reply.code(502).send({ error: "upstream_failed" });
         }
         return reply.send(rowToPreview(cached) satisfies LinkPreview);
+      }
+
+      // DNS-aware host guard. `classifyUrl` only catches literal private
+      // IPs; a hostname that resolves to 127.0.0.1 (DNS rebinding) would
+      // otherwise slip through and let us make an unauthenticated request
+      // to an attacker-chosen intra-network address. Do this BEFORE the
+      // fetch so rebinds are rejected with a 400, and BEFORE stamping the
+      // limiter so a burst of rebind attempts doesn't eat the user's
+      // budget (they never reach upstream anyway).
+      const guard = await assertPublicHost(url.hostname);
+      if (!guard.ok) {
+        return reply
+          .code(400)
+          .send({ error: "private_or_invalid_host" });
       }
 
       // Miss — real fetch. Stamp the limiter FIRST so a burst of uncached

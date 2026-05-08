@@ -208,6 +208,9 @@ export function TerminalDrawer({
         className="absolute inset-0 bg-ink/30 backdrop-blur-[2px]"
       />
       <aside
+        role="dialog"
+        aria-modal="true"
+        aria-label="Terminal"
         className={cn(
           "relative bg-canvas border-t border-line shadow-card flex flex-col",
           // Mobile: full-height bottom sheet (feels right at 390px — anything

@@ -431,6 +431,7 @@ function QueueRow({
                 disabled={!canMoveUp}
                 className="md:hidden h-8 w-8 rounded-[6px] border border-line flex items-center justify-center text-ink-soft hover:bg-canvas disabled:opacity-40"
                 title="Move up"
+                aria-label="Move up"
               >
                 <ChevronUp className="w-3.5 h-3.5" />
               </button>
@@ -439,6 +440,7 @@ function QueueRow({
                 disabled={!canMoveDown}
                 className="md:hidden h-8 w-8 rounded-[6px] border border-line flex items-center justify-center text-ink-soft hover:bg-canvas disabled:opacity-40"
                 title="Move down"
+                aria-label="Move down"
               >
                 <ChevronDown className="w-3.5 h-3.5" />
               </button>

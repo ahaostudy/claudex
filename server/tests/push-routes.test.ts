@@ -255,4 +255,108 @@ describe("push routes", () => {
     const sbody = state.json() as { devices: unknown[] };
     expect(sbody.devices).toHaveLength(0);
   });
+
+  it("per-endpoint send timeout bounds the fan-out (slow endpoint doesn't wedge sendToAll)", async () => {
+    // vi.useFakeTimers + a 20s-delay stub + assertion that the 8s timeout
+    // fires first. Without the per-endpoint watchdog this test would hang
+    // for 20s (the delay) instead of resolving at 8s.
+    await env.app.inject({
+      method: "POST",
+      url: "/api/push/subscriptions",
+      headers: { cookie: env.cookie },
+      payload: {
+        endpoint: "https://push.example/slow",
+        keys: { p256dh: "p", auth: "a" },
+      },
+    });
+    // Replace the stub with one that resolves only after 20s of fake time.
+    sendSpy.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          // setTimeout lives on the global — vi.useFakeTimers() intercepts
+          // it so we can fast-forward deterministically.
+          setTimeout(() => resolve({} as any), 20_000);
+        }),
+    );
+
+    vi.useFakeTimers();
+    try {
+      const reqPromise = env.app.inject({
+        method: "POST",
+        url: "/api/push/test",
+        headers: { cookie: env.cookie },
+      });
+      // Advance just past the 8s per-endpoint timeout. The dispatcher's race
+      // promise should fire first and the request should resolve with
+      // sent=0, pruned=0 (timeout is transient — we don't prune on it).
+      await vi.advanceTimersByTimeAsync(8_500);
+      const res = await reqPromise;
+      const body = res.json() as { sent: number; pruned: number };
+      expect(body.sent).toBe(0);
+      expect(body.pruned).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+
+    // The subscription should still exist — timeouts don't prune (could be
+    // transient). Only 404/410 prune.
+    const state = await env.app.inject({
+      method: "GET",
+      url: "/api/push/state",
+      headers: { cookie: env.cookie },
+    });
+    expect((state.json() as { devices: unknown[] }).devices).toHaveLength(1);
+  });
+
+  it("one slow endpoint doesn't prevent a fast endpoint in the same fan-out from succeeding", async () => {
+    // Two subscriptions; one stub resolves immediately, the other hangs for
+    // 20s. The fast one must still be counted as `sent` — allSettled
+    // semantics.
+    await env.app.inject({
+      method: "POST",
+      url: "/api/push/subscriptions",
+      headers: { cookie: env.cookie },
+      payload: {
+        endpoint: "https://push.example/slow-2",
+        keys: { p256dh: "p", auth: "a" },
+      },
+    });
+    await env.app.inject({
+      method: "POST",
+      url: "/api/push/subscriptions",
+      headers: { cookie: env.cookie },
+      payload: {
+        endpoint: "https://push.example/fast",
+        keys: { p256dh: "p", auth: "a" },
+      },
+    });
+
+    // Match by endpoint so the order in which the fan-out iterates doesn't
+    // matter.
+    sendSpy.mockImplementation(((sub: { endpoint: string }) => {
+      if (sub.endpoint.includes("slow")) {
+        return new Promise((resolve) => {
+          setTimeout(() => resolve({} as any), 20_000);
+        });
+      }
+      return Promise.resolve({} as any);
+    }) as any);
+
+    vi.useFakeTimers();
+    try {
+      const reqPromise = env.app.inject({
+        method: "POST",
+        url: "/api/push/test",
+        headers: { cookie: env.cookie },
+      });
+      await vi.advanceTimersByTimeAsync(8_500);
+      const res = await reqPromise;
+      const body = res.json() as { sent: number; pruned: number };
+      // Fast endpoint counted; slow one timed out silently (not pruned).
+      expect(body.sent).toBe(1);
+      expect(body.pruned).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

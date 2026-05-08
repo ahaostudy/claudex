@@ -10,6 +10,7 @@ import type {
   Session,
   SessionEvent,
 } from "@claudex/shared";
+import { SearchStore } from "../search/store.js";
 
 // -----------------------------------------------------------------------------
 // Full-data import
@@ -51,9 +52,11 @@ import type {
 //     appeared in the bundle in the first place. See export.ts — those
 //     tables are intentionally omitted.
 //
-//   - Audit: inserted with `user_id = NULL` so rows survive without
-//     back-references to a user table we did not import. Fresh audit ids are
-//     minted to avoid PK collisions.
+//   - Audit: SKIPPED. The bundle supplies attacker-chosen `event`/`ip`/
+//     `user_agent` strings, so importing them would let a malicious bundle
+//     forge `login` / `import.success` entries into the local Security
+//     card. Count returned under `skipped.audit` so the UI can explain why
+//     the timeline didn't grow.
 //
 // Everything runs inside a single `db.transaction(...)` — on SQL error, the
 // whole import rolls back. The route layer caps the wall-clock of the whole
@@ -118,11 +121,27 @@ export function importBackupBundle(
       queueMissingProject: 0,
       grants: bundle.grants.length,
       attachments: bundle.attachments.length,
+      // Audit rows are never imported from a bundle: the bundle controls
+      // `event`/`ip`/`user_agent`, so honoring them would let an attacker
+      // forge "login" / "import.success" entries into the local Security
+      // card. Count is surfaced so the user can see the cap applied.
+      audit: bundle.audit
+        ? {
+            count: bundle.audit.length,
+            reason: "audit rows never imported from untrusted bundles",
+          }
+        : undefined,
     },
     versionMismatch,
   };
 
   const tx = db.transaction(() => {
+    // FTS mirror — kept in sync inline with every session/event insert below
+    // so search hits imported content immediately. SessionStore does this on
+    // the live path via SearchStore.indexMessage / upsertTitle; imports
+    // bypass the store to get renumbered seqs + preserved timestamps, so we
+    // call the same helpers by hand here.
+    const search = new SearchStore(db);
     // --- projects -------------------------------------------------------
     //
     // Local row with the same `path` wins; we only remember its id to remap
@@ -233,6 +252,9 @@ export function importBackupBundle(
         stats_context_pct: s.stats.contextPct,
         cli_jsonl_seq: s.cliJsonlSeq ?? 0,
       });
+      // Mirror SessionStore.create: a session's title participates in title
+      // search from the moment it exists on disk.
+      search.upsertTitle(newId, s.title ?? "");
       counts.imported.sessions += 1;
     }
     // Pass 2: patch parent_session_id now that every session has a local id.
@@ -281,6 +303,14 @@ export function importBackupBundle(
           e.createdAt,
           JSON.stringify(e.payload ?? {}),
         );
+        // Mirror SessionStore.appendEvent: text-bearing events participate
+        // in global search. No-op for non-text kinds / empty payload.
+        search.indexMessage({
+          sessionId: newSessionId,
+          seq,
+          kind: e.kind,
+          payload: e.payload as Record<string, unknown> | null | undefined,
+        });
         seq += 1;
         counts.imported.events += 1;
       }
@@ -384,29 +414,14 @@ export function importBackupBundle(
 
     // --- audit ----------------------------------------------------------
     //
-    // Fresh ids, no user_id backref. Device/IP/UA preserved as-is. Rows land
-    // as historical context without tripping any FK constraints (there are
-    // none on user_id) and without mixing into the current user's actual
-    // audit trail (user is always NULL on import).
-    if (bundle.audit) {
-      const insertAudit = db.prepare(
-        `INSERT INTO audit_events
-           (id, user_id, event, target, detail, ip, user_agent, created_at)
-         VALUES (?, NULL, ?, ?, ?, ?, ?, ?)`,
-      );
-      for (const a of bundle.audit) {
-        insertAudit.run(
-          nanoid(16),
-          a.event,
-          a.target,
-          a.detail,
-          a.ip,
-          a.userAgent,
-          a.createdAt,
-        );
-        counts.imported.audit += 1;
-      }
-    }
+    // SKIPPED entirely. The bundle carries attacker-chosen `event`, `ip`,
+    // and `user_agent` strings; importing them would let a malicious bundle
+    // inject fake `login`, `import.success`, or `export.all` rows into the
+    // local Security card. We always drop them and surface the count in
+    // `skipped.audit` so the user can see why the import didn't replay
+    // their own prior history.
+    // (Previously imported with fresh ids + NULL user_id; pulled because
+    //  the provenance guarantee isn't worth the trust expansion.)
   });
 
   tx();

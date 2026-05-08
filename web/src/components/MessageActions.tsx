@@ -94,9 +94,9 @@ function ActionChip({
       title={title}
       aria-label={title}
       disabled={disabled}
-      className="h-7 px-2.5 rounded-full border border-line bg-canvas text-[12px] flex items-center gap-1 whitespace-nowrap text-ink-soft hover:bg-paper disabled:opacity-50"
+      className="h-8 min-w-[36px] px-3 rounded-full border border-line bg-canvas text-[12px] flex items-center gap-1 whitespace-nowrap text-ink-soft hover:bg-paper disabled:opacity-50"
     >
-      <Icon className="w-3 h-3" />
+      <Icon className="w-3.5 h-3.5" />
       <span>{label}</span>
     </button>
   );

@@ -76,7 +76,14 @@ export async function registerAuditRoutes(
         createdAt: r.createdAt,
         user: lookup(r.userId),
       }));
-      return { events: out, totalCount: deps.audit.count() };
+      // totalCount must respect the filter so the Security card's
+      // "N events · past 30 days" (or equivalent filtered header) is
+      // honest. `list` caps at 200 but totalCount is the unpaginated
+      // match count for the same WHERE.
+      return {
+        events: out,
+        totalCount: deps.audit.countFiltered({ since, events }),
+      };
     },
   );
 }

@@ -235,6 +235,9 @@ export const FileMentionSheet = forwardRef<
         onClick={onClose}
       >
         <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Mention a file"
           className="w-full bg-canvas border-t border-line rounded-t-[24px] shadow-lift flex flex-col max-h-[92vh]"
           onClick={(e) => e.stopPropagation()}
         >
@@ -346,6 +349,9 @@ export const FileMentionSheet = forwardRef<
         onClick={onClose}
       >
         <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Mention a file"
           className="absolute left-1/2 -translate-x-1/2 bottom-[150px] w-[min(520px,calc(100vw-40px))] rounded-[12px] border border-line bg-canvas shadow-lift overflow-hidden"
           onClick={(e) => e.stopPropagation()}
         >

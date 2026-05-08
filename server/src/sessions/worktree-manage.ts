@@ -237,6 +237,50 @@ export async function pruneOrphan(input: {
     return { removed: false, error: "refused: branch is not under claude/" };
   }
 
+  // Bound the target path to inside the project. Without this, a caller
+  // could pair a legit `claude/xxx` branch with an arbitrary absolute
+  // `path` (e.g. `/Users/haowu/important`) and ride the final `fs.rmSync`
+  // on someone else's directory. Compare realpaths so /var ↔ /private/var
+  // and symlink'd project roots still match as "inside".
+  //
+  // If the worktree dir has already been nuked on disk (the "ghost"
+  // case), `realpathSync` on the path itself fails — walk up to the
+  // nearest existing ancestor so we still get a stable canonical form
+  // for the prefix check.
+  const resolvedPath = path.resolve(input.path);
+  const resolvedProject = path.resolve(input.projectPath);
+  const canonicalize = (p: string): string => {
+    let cur = p;
+    // Walk up until realpathSync succeeds. In the worst case we reach the
+    // root, which always resolves.
+    for (let i = 0; i < 64; i++) {
+      try {
+        const real = fs.realpathSync(cur);
+        // Re-attach any suffix we popped so the resulting string is
+        // equivalent to the original, just with symlinks resolved on
+        // the existing prefix.
+        if (cur === p) return real;
+        const suffix = path.relative(cur, p);
+        return path.join(real, suffix);
+      } catch {
+        const parent = path.dirname(cur);
+        if (parent === cur) return p; // reached root
+        cur = parent;
+      }
+    }
+    return p;
+  };
+  const realPath = canonicalize(resolvedPath);
+  const realProject = canonicalize(resolvedProject);
+  const projectPrefix = realProject.endsWith(path.sep)
+    ? realProject
+    : realProject + path.sep;
+  const inside =
+    realPath === realProject || realPath.startsWith(projectPrefix);
+  if (!inside) {
+    return { removed: false, error: "path_out_of_project" };
+  }
+
   let gitRemovedOk = false;
   try {
     await execFileP(
