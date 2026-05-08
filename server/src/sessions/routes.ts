@@ -13,6 +13,7 @@ import {
 import { ProjectStore } from "./projects.js";
 import { SessionStore } from "./store.js";
 import { ToolGrantStore } from "./grants.js";
+import { aggregatePendingDiffs } from "./diffs.js";
 import type { SessionManager } from "./manager.js";
 import {
   createWorktree,
@@ -143,6 +144,31 @@ export async function registerSessionRoutes(
         return reply.code(404).send({ error: "not_found" });
       const sinceSeq = q?.sinceSeq ? Number(q.sinceSeq) : -1;
       return { events: sessions.listEvents(id, sinceSeq) };
+    },
+  );
+
+  // GET /api/sessions/:id/pending-diffs
+  //
+  // Aggregates every diff-producing (Edit / Write / MultiEdit) tool call in
+  // the session that is *currently awaiting the user* — either because it
+  // has a live `permission_request` with no matching `permission_decision`,
+  // or because its `tool_use` event has no matching `tool_result` yet
+  // (in-flight under acceptEdits / bypass modes where the SDK doesn't ask).
+  //
+  // The computed `hunks` ship with the response so the full-screen Diff
+  // Review page (mockup s-06) can render without replaying the transcript
+  // client-side. Empty array is a valid response — no pending edits = nothing
+  // to review; the UI shows an empty state rather than a 404.
+  app.get(
+    "/api/sessions/:id/pending-diffs",
+    { preHandler: app.requireAuth as any },
+    async (req, reply) => {
+      const { id } = req.params as { id: string };
+      if (!sessions.findById(id))
+        return reply.code(404).send({ error: "not_found" });
+      const events = sessions.listEvents(id);
+      const diffs = aggregatePendingDiffs(events);
+      return reply.send({ diffs });
     },
   );
 

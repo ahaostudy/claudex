@@ -129,6 +129,76 @@ export const TurnEndUsage = z.object({
 });
 export type TurnEndUsage = z.infer<typeof TurnEndUsage>;
 
+// ============================================================================
+// Diff primitives — shared by server aggregation and web rendering.
+//
+// The web bundle has its own `web/src/lib/diff.ts` that computes these shapes
+// directly from a tool_use input. The server full-screen review page
+// (mockup s-06) aggregates across a session's event log and ships the pre-
+// computed `FileDiff` hunks over the wire, which means both ends must agree
+// on the shape.
+// ============================================================================
+
+export const DiffLineKind = z.enum(["ctx", "add", "del"]);
+export type DiffLineKind = z.infer<typeof DiffLineKind>;
+
+export const DiffLine = z.object({
+  kind: DiffLineKind,
+  oldNum: z.number().int().nullable(),
+  newNum: z.number().int().nullable(),
+  text: z.string(),
+});
+export type DiffLine = z.infer<typeof DiffLine>;
+
+export const DiffHunk = z.object({
+  header: z.string(),
+  lines: z.array(DiffLine),
+});
+export type DiffHunk = z.infer<typeof DiffHunk>;
+
+export const DiffKind = z.enum(["create", "edit", "overwrite"]);
+export type DiffKind = z.infer<typeof DiffKind>;
+
+export const FileDiff = z.object({
+  path: z.string(),
+  kind: DiffKind,
+  addCount: z.number().int().nonnegative(),
+  delCount: z.number().int().nonnegative(),
+  hunks: z.array(DiffHunk),
+});
+export type FileDiff = z.infer<typeof FileDiff>;
+
+// One entry in the `/api/sessions/:id/pending-diffs` response.
+//
+// `approvalId` is set when this diff is backed by a still-pending
+// `permission_request` — the UI can surface an Approve button and pipe it
+// through the same `permission_decision` WS frame. When undefined, the diff
+// is from an in-flight `tool_use` with no matching `tool_result` yet
+// (rarely happens for Edit/Write under the default permission mode, but the
+// UI still wants to show it so the user isn't blind).
+export const PendingDiffEntry = z.object({
+  toolUseId: z.string(),
+  filePath: z.string(),
+  // Matches the broad semantics of the original diff but keeps the labels
+  // the UI wants ("MultiEdit" is its own bucket rather than a sub-kind of
+  // Edit). `write` covers both create and overwrite at this level.
+  kind: z.enum(["edit", "write", "multiedit"]),
+  addCount: z.number().int().nonnegative(),
+  delCount: z.number().int().nonnegative(),
+  hunks: z.array(DiffHunk),
+  approvalId: z.string().optional(),
+  // Human-readable summary from the permission request's `title` field
+  // (populated by summarizePermission). Null when there's no matching
+  // permission_request — in-flight tool_use events have no such title.
+  title: z.string().nullable(),
+});
+export type PendingDiffEntry = z.infer<typeof PendingDiffEntry>;
+
+export const PendingDiffsResponse = z.object({
+  diffs: z.array(PendingDiffEntry),
+});
+export type PendingDiffsResponse = z.infer<typeof PendingDiffsResponse>;
+
 export const PendingApproval = z.object({
   id: z.string(),
   sessionId: z.string(),
@@ -310,6 +380,10 @@ export const CliSessionSummary = z.object({
   lineCount: z.number().int().nonnegative(), // bounded: we only read ~head
   fileSize: z.number().int().nonnegative(),
   lastModified: z.string(), // ISO 8601
+  // Absolute path to the underlying <uuid>.jsonl. The server uses this on
+  // import to seed `session_events` from the CLI's transcript. Shipped to
+  // the UI for transparency but the UI has no reason to render it.
+  filePath: z.string(),
 });
 export type CliSessionSummary = z.infer<typeof CliSessionSummary>;
 
@@ -428,3 +502,69 @@ export const UpdateRoutineRequest = z
     { message: "at least one field is required" },
   );
 export type UpdateRoutineRequest = z.infer<typeof UpdateRoutineRequest>;
+
+// ============================================================================
+// Usage analytics (full-screen `/usage` page)
+//
+// These endpoints aggregate `turn_end` payloads across non-archived sessions.
+// They intentionally do NOT try to mirror Claude's subscription-plan quota —
+// claudex doesn't see that data; it lives inside the `claude` CLI itself. The
+// UI surfaces an empty state for plan-period usage rather than faking a bar.
+//
+// Token math: per-turn tokens = `inputTokens + outputTokens +
+// cacheReadInputTokens + cacheCreationInputTokens`. Missing fields (older
+// rows) contribute zero rather than crashing the sum. See `usage.ts` / the
+// `TurnEndUsage` schema above for the "why cache fields are load-bearing"
+// discussion.
+// ============================================================================
+
+// Per-model breakdown for the "Today · tokens" tile and the stacked bars.
+export const UsagePerModel = z.object({
+  // The raw model id as persisted on sessions.model (no translation).
+  model: z.string(),
+  tokens: z.number().int().nonnegative(),
+});
+export type UsagePerModel = z.infer<typeof UsagePerModel>;
+
+// One entry in "Top sessions" — enough to render title + project + tokens
+// without the web bundle having to match these up against its own sessions
+// store.
+export const UsageTopSession = z.object({
+  sessionId: z.string(),
+  title: z.string(),
+  projectId: z.string(),
+  projectName: z.string().nullable(), // null if the project row is gone
+  tokens: z.number().int().nonnegative(),
+});
+export type UsageTopSession = z.infer<typeof UsageTopSession>;
+
+// Response for `GET /api/usage/today` — everything the three-tile header +
+// "Top sessions" card on the Usage screen needs. `windowStart` is ISO and
+// lets the UI show "Today · since 00:00" honestly.
+export const UsageTodayResponse = z.object({
+  windowStart: z.string(),
+  totalTokens: z.number().int().nonnegative(),
+  sessionCount: z.number().int().nonnegative(),
+  perModel: z.array(UsagePerModel),
+  topSessions: z.array(UsageTopSession),
+});
+export type UsageTodayResponse = z.infer<typeof UsageTodayResponse>;
+
+// One day's stacked token breakdown — drives the 7-day bar chart. `date` is
+// `YYYY-MM-DD` in the server's local timezone so the x-axis labels line up
+// with what the user considers "today".
+export const UsageRangeDay = z.object({
+  date: z.string(),
+  totalTokens: z.number().int().nonnegative(),
+  perModel: z.array(UsagePerModel),
+});
+export type UsageRangeDay = z.infer<typeof UsageRangeDay>;
+
+// Response for `GET /api/usage/range?days=N`. `byDay` is always exactly N
+// entries, oldest first, including days with zero tokens — so the chart
+// doesn't have to pad missing days client-side.
+export const UsageRangeResponse = z.object({
+  days: z.number().int().positive(),
+  byDay: z.array(UsageRangeDay),
+});
+export type UsageRangeResponse = z.infer<typeof UsageRangeResponse>;

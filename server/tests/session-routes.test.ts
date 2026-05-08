@@ -417,6 +417,146 @@ describe("session HTTP routes", () => {
   });
 
   // ---------------------------------------------------------------------------
+  // GET /api/sessions/:id/pending-diffs
+  //
+  // We seed events directly via the SessionStore so the test doesn't need to
+  // drive an actual Runner (the permission_request flow is already covered
+  // end-to-end in session-manager.test.ts). Here we just check the HTTP
+  // wiring: empty when no events, shaped right when a request is pending.
+  // ---------------------------------------------------------------------------
+  describe("GET /api/sessions/:id/pending-diffs", () => {
+    async function addProject(ctx: {
+      app: FastifyInstance;
+      cookie: string;
+      tmpDir: string;
+    }) {
+      const res = await ctx.app.inject({
+        method: "POST",
+        url: "/api/projects",
+        headers: { cookie: ctx.cookie },
+        payload: { name: "demo", path: ctx.tmpDir },
+      });
+      return res.json().project;
+    }
+
+    async function createSession(ctx: {
+      app: FastifyInstance;
+      cookie: string;
+      tmpDir: string;
+    }) {
+      const project = await addProject(ctx);
+      const s = await ctx.app.inject({
+        method: "POST",
+        url: "/api/sessions",
+        headers: { cookie: ctx.cookie },
+        payload: {
+          projectId: project.id,
+          title: "diffs",
+          model: "claude-opus-4-7",
+          mode: "default",
+          worktree: false,
+        },
+      });
+      return s.json().session as { id: string };
+    }
+
+    it("rejects unauthenticated", async () => {
+      const ctx = await bootstrap();
+      disposers.push(ctx.cleanup);
+      const s = await createSession(ctx);
+      const res = await ctx.app.inject({
+        method: "GET",
+        url: `/api/sessions/${s.id}/pending-diffs`,
+      });
+      expect(res.statusCode).toBe(401);
+    });
+
+    it("returns 404 for an unknown session", async () => {
+      const ctx = await bootstrap();
+      disposers.push(ctx.cleanup);
+      const res = await ctx.app.inject({
+        method: "GET",
+        url: "/api/sessions/nope/pending-diffs",
+        headers: { cookie: ctx.cookie },
+      });
+      expect(res.statusCode).toBe(404);
+    });
+
+    it("returns an empty array when the session has no pending edits", async () => {
+      const ctx = await bootstrap();
+      disposers.push(ctx.cleanup);
+      const s = await createSession(ctx);
+      const res = await ctx.app.inject({
+        method: "GET",
+        url: `/api/sessions/${s.id}/pending-diffs`,
+        headers: { cookie: ctx.cookie },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toEqual({ diffs: [] });
+    });
+
+    it("returns a single-entry diff list when a permission_request is pending", async () => {
+      const ctx = await bootstrap();
+      disposers.push(ctx.cleanup);
+      const s = await createSession(ctx);
+      // Seed directly into the event store — matches what SessionManager
+      // writes when it sees a permission_request RunnerEvent.
+      const now = new Date().toISOString();
+      ctx.dbh.db
+        .prepare(
+          `INSERT INTO session_events (id, session_id, kind, seq, created_at, payload)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          "ev-1",
+          s.id,
+          "permission_request",
+          0,
+          now,
+          JSON.stringify({
+            toolUseId: "tu-1",
+            toolName: "Edit",
+            input: {
+              file_path: "/repo/src/date.ts",
+              old_string: "locale?: string",
+              new_string: "locale = \"en-US\"",
+            },
+            title: "Edit file",
+          }),
+        );
+
+      const res = await ctx.app.inject({
+        method: "GET",
+        url: `/api/sessions/${s.id}/pending-diffs`,
+        headers: { cookie: ctx.cookie },
+      });
+      expect(res.statusCode).toBe(200);
+      const body = res.json() as {
+        diffs: Array<{
+          toolUseId: string;
+          approvalId?: string;
+          filePath: string;
+          kind: string;
+          addCount: number;
+          delCount: number;
+          hunks: Array<{ header: string; lines: unknown[] }>;
+          title: string | null;
+        }>;
+      };
+      expect(body.diffs).toHaveLength(1);
+      const d = body.diffs[0];
+      expect(d.toolUseId).toBe("tu-1");
+      expect(d.approvalId).toBe("tu-1");
+      expect(d.kind).toBe("edit");
+      expect(d.filePath).toBe("/repo/src/date.ts");
+      expect(d.addCount).toBe(1);
+      expect(d.delCount).toBe(1);
+      expect(d.hunks).toHaveLength(1);
+      expect(d.title).toBe("Edit file");
+    });
+  });
+
+  // ---------------------------------------------------------------------------
   // PATCH /api/sessions/:id
   //
   // A minimal recording runner — just enough to verify that a mode change

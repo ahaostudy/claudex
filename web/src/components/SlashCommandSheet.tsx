@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useImperativeHandle, useMemo, useRef, useState, forwardRef } from "react";
 import { X } from "lucide-react";
 import { cn } from "@/lib/cn";
 import {
@@ -17,25 +17,97 @@ import {
  * bottom; that keeps the code path single and is close enough to the mockup
  * for MVP.
  *
- * The `commands` list is provided by the parent: today it comes from
- * `GET /api/slash-commands`, which merges the CLI built-ins, the user's
- * `~/.claude/commands/*.md`, and the project's `.claude/commands/*.md`.
+ * Keyboard navigation is forwarded from the Chat composer textarea via the
+ * imperative ref: ↑/↓ moves the selected row, Enter inserts it, Escape
+ * closes. This lets the textarea keep native caret behavior while the
+ * picker still feels keyboard-driven.
+ *
+ * "Recent" group: the last 6 picks are persisted in localStorage under
+ * `claudex.slash.recents`. Shown as a dedicated section ABOVE the full
+ * list, but only when the query is empty — a Recent label next to an
+ * already-filtered list would be misleading.
  */
-export function SlashCommandSheet({
-  commands,
-  initialQuery,
-  onPick,
-  onClose,
-}: {
-  commands: SlashCommand[];
-  /** Text typed after the leading `/`, used to pre-filter. */
-  initialQuery: string;
-  /** Called with the bare command name (no leading slash). */
-  onPick: (command: SlashCommand) => void;
-  onClose: () => void;
-}) {
+
+export interface PickerHandle {
+  /** Move the highlighted row up or down, wrapping at either end. */
+  move: (dir: "up" | "down") => void;
+  /** Insert the currently highlighted row, if any. */
+  select: () => void;
+}
+
+const RECENTS_KEY = "claudex.slash.recents";
+const RECENTS_MAX = 6;
+
+function readRecents(): string[] {
+  try {
+    const raw = localStorage.getItem(RECENTS_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((v): v is string => typeof v === "string").slice(0, RECENTS_MAX);
+  } catch {
+    return [];
+  }
+}
+
+function pushRecent(name: string): void {
+  try {
+    const current = readRecents();
+    const next = [name, ...current.filter((v) => v !== name)].slice(0, RECENTS_MAX);
+    localStorage.setItem(RECENTS_KEY, JSON.stringify(next));
+  } catch {
+    /* localStorage quota / private mode — best effort only */
+  }
+}
+
+/**
+ * Wrap the first case-insensitive occurrence of `query` inside `target`
+ * in a klein-colored span. Returns a fragment keyed safely for lists.
+ * When `query` is empty or not found, returns the plain string.
+ */
+function highlightMatch(target: string, query: string) {
+  const q = query.trim().toLowerCase();
+  if (!q) return target;
+  const idx = target.toLowerCase().indexOf(q);
+  if (idx < 0) return target;
+  const before = target.slice(0, idx);
+  const match = target.slice(idx, idx + q.length);
+  const after = target.slice(idx + q.length);
+  return (
+    <>
+      {before}
+      <span className="text-klein">{match}</span>
+      {after}
+    </>
+  );
+}
+
+// A single row in the rendered list — either a command or a section header.
+// Keeping them in one flat array makes ↑/↓ arithmetic trivial (we just skip
+// header rows when moving).
+type Row =
+  | { kind: "header"; label: string }
+  | { kind: "cmd"; cmd: SlashCommand; group: "recent" | "main" };
+
+export const SlashCommandSheet = forwardRef<
+  PickerHandle,
+  {
+    commands: SlashCommand[];
+    /** Text typed after the leading `/`, used to pre-filter. */
+    initialQuery: string;
+    /** Called with the bare command name (no leading slash). */
+    onPick: (command: SlashCommand) => void;
+    onClose: () => void;
+  }
+>(function SlashCommandSheet(
+  { commands, initialQuery, onPick, onClose },
+  ref,
+) {
   const [query, setQuery] = useState(initialQuery);
+  const [selected, setSelected] = useState(0);
+  const [recentNames, setRecentNames] = useState<string[]>(() => readRecents());
   const inputRef = useRef<HTMLInputElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     setQuery(initialQuery);
@@ -44,11 +116,82 @@ export function SlashCommandSheet({
   // We intentionally don't autofocus the search input. Focus stays in the
   // Chat composer textarea so typing `@foo` after the trigger keeps going
   // to the textarea (and the parent passes `foo` back as `initialQuery`).
-  // Users who want to refine the query via this sheet can tap the search
-  // pill. That keeps delete / backspace / ESC behavior intuitive — the
-  // textarea stays responsive whether the picker is open or not.
 
-  const matches = filterSlashCommands(query, commands);
+  const matches = useMemo(
+    () => filterSlashCommands(query, commands),
+    [query, commands],
+  );
+
+  // Build the flat row list.
+  const rows = useMemo<Row[]>(() => {
+    const out: Row[] = [];
+    const hasQuery = query.trim().length > 0;
+    if (!hasQuery && recentNames.length > 0) {
+      // Resolve each recent name to the current canonical command entry so
+      // kind + description are accurate. Silently drop unknown entries.
+      const byName = new Map(commands.map((c) => [c.name, c] as const));
+      const recentCmds = recentNames
+        .map((n) => byName.get(n))
+        .filter((c): c is SlashCommand => !!c);
+      if (recentCmds.length > 0) {
+        out.push({ kind: "header", label: "Recent" });
+        for (const c of recentCmds) out.push({ kind: "cmd", cmd: c, group: "recent" });
+      }
+      for (const c of matches) out.push({ kind: "cmd", cmd: c, group: "main" });
+    } else {
+      for (const c of matches) out.push({ kind: "cmd", cmd: c, group: "main" });
+    }
+    return out;
+  }, [matches, recentNames, query, commands]);
+
+  // Indices into `rows` that are selectable commands.
+  const cmdIndices = useMemo(
+    () => rows.map((r, i) => (r.kind === "cmd" ? i : -1)).filter((i) => i >= 0),
+    [rows],
+  );
+
+  // Clamp selection when the underlying list changes.
+  useEffect(() => {
+    if (selected >= cmdIndices.length) {
+      setSelected(Math.max(0, cmdIndices.length - 1));
+    }
+  }, [cmdIndices.length, selected]);
+
+  function commitPick(cmd: SlashCommand) {
+    pushRecent(cmd.name);
+    setRecentNames(readRecents());
+    onPick(cmd);
+  }
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      move: (dir) => {
+        if (cmdIndices.length === 0) return;
+        setSelected((i) => {
+          if (dir === "down") return (i + 1) % cmdIndices.length;
+          return (i - 1 + cmdIndices.length) % cmdIndices.length;
+        });
+      },
+      select: () => {
+        const rowIdx = cmdIndices[selected];
+        if (rowIdx == null) return;
+        const row = rows[rowIdx];
+        if (row?.kind === "cmd") commitPick(row.cmd);
+      },
+    }),
+    [cmdIndices, selected, rows],
+  );
+
+  // Keep the selected row in view when it changes (keyboard nav).
+  useEffect(() => {
+    const el = listRef.current?.querySelector<HTMLElement>(
+      `[data-picker-row="${selected}"]`,
+    );
+    el?.scrollIntoView({ block: "nearest" });
+  }, [selected]);
+
+  const matchLabel = `${matches.length} ${matches.length === 1 ? "match" : "matches"}`;
 
   return (
     <div
@@ -56,7 +199,7 @@ export function SlashCommandSheet({
       onClick={onClose}
     >
       <div
-        className="w-full sm:max-w-xl bg-canvas border-t sm:border border-line rounded-t-[20px] sm:rounded-[14px] shadow-lift flex flex-col max-h-[80vh] sm:max-h-[70vh]"
+        className="w-full sm:max-w-xl bg-canvas border-t sm:border border-line rounded-t-[24px] sm:rounded-[14px] shadow-lift flex flex-col max-h-[80vh] sm:max-h-[70vh]"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Drag handle (mobile affordance) */}
@@ -64,7 +207,7 @@ export function SlashCommandSheet({
           <span className="h-1 w-12 bg-line-strong rounded-full" />
         </div>
 
-        {/* Header / search */}
+        {/* Header / search label + close */}
         <div className="px-4 pt-3 pb-2 flex items-center gap-2">
           <div className="min-w-0 flex-1">
             <div className="text-[11px] uppercase tracking-[0.14em] text-ink-muted">
@@ -79,85 +222,137 @@ export function SlashCommandSheet({
             <X className="w-4 h-4" />
           </button>
         </div>
+
+        {/* Search row — mockup s-09 iPhone slash sheet */}
         <div className="px-4 pb-3">
           <div className="flex items-center gap-2 h-10 px-3 rounded-[8px] bg-paper border border-line">
             <span className="mono text-klein text-[15px] leading-none">/</span>
             <input
               ref={inputRef}
               value={query}
-              onChange={(e) => setQuery(e.target.value)}
+              onChange={(e) => {
+                setQuery(e.target.value);
+                setSelected(0);
+              }}
               onKeyDown={(e) => {
                 if (e.key === "Escape") {
                   e.preventDefault();
                   onClose();
                 } else if (e.key === "Enter") {
                   e.preventDefault();
-                  if (matches[0]) onPick(matches[0]);
+                  const rowIdx = cmdIndices[selected];
+                  if (rowIdx != null) {
+                    const row = rows[rowIdx];
+                    if (row?.kind === "cmd") commitPick(row.cmd);
+                  }
+                } else if (e.key === "ArrowDown") {
+                  e.preventDefault();
+                  if (cmdIndices.length > 0) {
+                    setSelected((i) => (i + 1) % cmdIndices.length);
+                  }
+                } else if (e.key === "ArrowUp") {
+                  e.preventDefault();
+                  if (cmdIndices.length > 0) {
+                    setSelected(
+                      (i) => (i - 1 + cmdIndices.length) % cmdIndices.length,
+                    );
+                  }
                 }
               }}
               placeholder="Filter commands…"
               className="flex-1 bg-transparent outline-none text-[15px]"
             />
-            <span className="caps text-ink-muted">
-              {matches.length} {matches.length === 1 ? "match" : "matches"}
-            </span>
+            <span className="caps text-ink-muted">{matchLabel}</span>
           </div>
         </div>
 
         {/* List */}
-        <div className="flex-1 overflow-y-auto px-2 pb-2 space-y-0.5 border-t border-line">
-          {matches.length === 0 ? (
+        <div
+          ref={listRef}
+          className="flex-1 overflow-y-auto px-2 py-2 space-y-0.5 border-t border-line"
+        >
+          {rows.length === 0 ? (
             <div className="text-[13px] text-ink-muted text-center py-10">
               No commands match “{query}”.
             </div>
           ) : (
-            matches.map((cmd, i) => (
-              <button
-                key={`${cmd.kind}:${cmd.name}`}
-                onClick={() => onPick(cmd)}
-                className={cn(
-                  "w-full flex items-center gap-3 px-3 py-2.5 rounded-[8px] text-left",
-                  i === 0
-                    ? "bg-klein-wash/40 border border-klein/30"
-                    : "hover:bg-paper/60 border border-transparent",
-                )}
-              >
-                <span
+            rows.map((row, i) => {
+              if (row.kind === "header") {
+                return (
+                  <div
+                    key={`h:${row.label}:${i}`}
+                    className="px-3 pt-3 pb-1 caps text-ink-muted"
+                  >
+                    {row.label}
+                  </div>
+                );
+              }
+              const cmd = row.cmd;
+              const selIdx = cmdIndices.indexOf(i);
+              const isSelected = selIdx === selected;
+              const isSkill = cmd.kind === "plugin";
+              return (
+                <button
+                  key={`${cmd.kind}:${cmd.name}:${row.group}`}
+                  data-picker-row={selIdx}
+                  onClick={() => commitPick(cmd)}
+                  onMouseEnter={() => setSelected(selIdx)}
                   className={cn(
-                    "h-7 w-7 rounded-[6px] flex items-center justify-center mono text-[12px] shrink-0",
-                    i === 0
-                      ? "bg-klein text-canvas"
-                      : "bg-paper text-ink-muted",
+                    "w-full flex items-center gap-3 px-3 py-2.5 rounded-[8px] text-left",
+                    isSelected
+                      ? "bg-klein-wash/40 border border-klein/30"
+                      : "border border-transparent hover:bg-paper/60",
                   )}
                 >
-                  /
-                </span>
-                <div className="min-w-0 flex-1">
-                  <div className="text-[14px] font-medium mono">
-                    <span className={i === 0 ? "text-klein" : "text-ink"}>
-                      /{cmd.name}
-                    </span>
-                  </div>
-                  {cmd.description && (
-                    <div className="text-[12px] text-ink-muted truncate">
-                      {cmd.description}
+                  <span
+                    className={cn(
+                      "h-7 w-7 rounded-[6px] flex items-center justify-center mono text-[12px] shrink-0",
+                      isSelected
+                        ? "bg-klein text-canvas"
+                        : isSkill
+                        ? "bg-paper text-klein-ink"
+                        : "bg-paper text-ink-muted",
+                    )}
+                  >
+                    {isSkill ? "sk" : "/"}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <div
+                      className={cn(
+                        "text-[14px] mono truncate",
+                        isSelected && "font-medium",
+                      )}
+                    >
+                      /{highlightMatch(cmd.name, query)}
                     </div>
-                  )}
-                </div>
-                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[4px] border border-line bg-paper text-[10px] uppercase tracking-[0.1em] shrink-0">
-                  {cmd.kind}
-                </span>
-              </button>
-            ))
+                    {cmd.description && (
+                      <div className="text-[12px] text-ink-muted truncate">
+                        {cmd.description}
+                      </div>
+                    )}
+                  </div>
+                  <span
+                    className={cn(
+                      "inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[4px] text-[10px] uppercase tracking-[0.1em] shrink-0 border",
+                      isSkill
+                        ? "border-klein/30 bg-klein-wash text-klein-ink"
+                        : "border-line bg-paper",
+                    )}
+                  >
+                    {isSkill ? "skill" : cmd.kind}
+                  </span>
+                </button>
+              );
+            })
           )}
         </div>
 
-        {/* Footer hint — mirrors mockup's "Tap to insert · ⏎ select" */}
+        {/* Footer hint — mockup: "Tap to insert · long-press for details" + "⏎ select" */}
         <div className="px-4 py-3 border-t border-line flex items-center text-[11px] text-ink-muted">
-          <span>Tap to insert</span>
-          <span className="ml-auto mono">⏎ select first</span>
+          <span>Tap to insert · ↑↓ navigate</span>
+          <span className="ml-auto mono">⏎ select</span>
         </div>
       </div>
     </div>
   );
-}
+});

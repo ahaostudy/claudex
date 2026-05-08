@@ -69,7 +69,8 @@ function SessionRow({
     session.status === "error" && "bg-danger",
     session.status === "archived" && "bg-line-strong",
   );
-  const subline = session.branch ?? session.worktreePath ?? "—";
+  const rawBranch = session.branch?.trim();
+  const branch = rawBranch && rawBranch !== "-" ? rawBranch : null;
   const title = session.title || "Untitled";
 
   if (active) {
@@ -79,9 +80,11 @@ function SessionRow({
           <span className={statusDot} />
           <span className="text-[12px] font-medium truncate">{title}</span>
         </div>
-        <div className="mono text-[10px] text-ink-muted mt-0.5 truncate">
-          {subline}
-        </div>
+        {branch && (
+          <div className="mono text-[10px] text-ink-muted mt-0.5 truncate">
+            claude/{branch}
+          </div>
+        )}
       </div>
     );
   }
@@ -95,9 +98,11 @@ function SessionRow({
         <span className={statusDot} />
         <span className="text-[12px] truncate">{title}</span>
       </div>
-      <div className="mono text-[10px] text-ink-muted mt-0.5 truncate">
-        {subline}
-      </div>
+      {branch && (
+        <div className="mono text-[10px] text-ink-muted mt-0.5 truncate">
+          claude/{branch}
+        </div>
+      )}
     </Link>
   );
 }

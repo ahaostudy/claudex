@@ -36,7 +36,36 @@ export interface SessionUsage {
    * billed this turn" alongside the full context-body number.
    */
   lastTurnNewInput: number;
+  /**
+   * Whether `lastTurnInput` is trustworthy as a context-size estimate.
+   *
+   * False when:
+   *   - no `turn_end` with usage has been seen at all, OR
+   *   - the most recent turn was persisted before cache fields were emitted
+   *     by agent-runner (so the payload has only `inputTokens` +
+   *     `outputTokens`, yielding a total of a few dozen — well below any
+   *     real turn's context body which is always thousands of tokens).
+   *
+   * The UI uses this to render `—` instead of a misleading "0%" / "1%" on
+   * the context ring. Historical turns stay in this state until the user
+   * sends one more message (whose turn_end will carry the full cache
+   * breakdown).
+   */
+  lastTurnContextKnown: boolean;
 }
+
+/**
+ * Threshold below which `lastTurnInput` is treated as "historical row —
+ * no cache fields persisted" rather than a real context measurement.
+ *
+ * Rationale: any real turn ships at least the system prompt + tool
+ * definitions, which are thousands of tokens. `input_tokens` alone
+ * (without cache reads) is ~6-30 on a cache-warmed turn, so anything below
+ * this threshold is almost certainly a pre-cache-fields row. Using a
+ * number instead of an explicit "has cache fields" bit keeps the check
+ * honest even if the SDK ever returns `0` for cache reads on a cold turn.
+ */
+export const HISTORICAL_TURN_THRESHOLD = 500;
 
 /**
  * Known context window sizes (in tokens) per model id. Used by the Usage
@@ -158,6 +187,7 @@ export function computeSessionUsage(
     turnCount,
     lastTurnInput,
     lastTurnNewInput,
+    lastTurnContextKnown: lastTurnInput >= HISTORICAL_TURN_THRESHOLD,
   };
 }
 

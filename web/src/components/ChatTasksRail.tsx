@@ -71,10 +71,14 @@ export function ChatTasksRail({
 
   const contextWindow = session ? contextWindowTokens(session.model) : 200_000;
   const lastTurnInput = usage?.lastTurnInput ?? 0;
-  const pctKnown = lastTurnInput > 0;
+  const pctKnown = usage?.lastTurnContextKnown ?? false;
   const pct = pctKnown
     ? Math.max(0, Math.min(1, lastTurnInput / contextWindow))
     : 0;
+  const unknownReason =
+    usage && usage.turnCount === 0
+      ? "no turns yet"
+      : "historical turn — cache fields not persisted; next turn will reflect real context";
 
   return (
     <aside className="hidden md:flex border-l border-line bg-paper/40 flex-col w-[300px] shrink-0 min-h-0">
@@ -111,7 +115,7 @@ export function ChatTasksRail({
       </div>
       <div className="mt-auto p-3 border-t border-line">
         <div className="caps text-ink-muted mb-2">Context window</div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3" title={pctKnown ? undefined : unknownReason}>
           <ContextDonut pct={pct} known={pctKnown} />
           <div>
             <div className="text-[14px] font-medium">

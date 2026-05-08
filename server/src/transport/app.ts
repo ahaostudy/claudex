@@ -16,6 +16,7 @@ import { registerBrowseRoutes } from "../sessions/browse.js";
 import { registerSlashCommandRoutes } from "../sessions/slash-commands.js";
 import { registerUserEnvRoutes } from "../sessions/user-env.js";
 import { registerCliRoutes } from "../sessions/cli-routes.js";
+import { registerUsageRoutes } from "../sessions/usage-routes.js";
 import { registerWsRoute } from "./ws.js";
 import { registerPtyRoutes } from "./pty.js";
 import { agentRunnerFactory } from "../sessions/agent-runner.js";
@@ -107,6 +108,7 @@ export async function buildApp(
     db: deps.db,
     cliProjectsRoot: deps.cliProjectsRoot,
   });
+  await registerUsageRoutes(app, { db: deps.db });
 
   // Routines: periodic cron-driven session spawns. The scheduler owns a single
   // timer chained across all active routines and reloads itself on any CRUD.

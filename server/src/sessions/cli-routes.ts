@@ -73,12 +73,13 @@ export async function registerCliRoutes(
           continue;
         }
         try {
-          const result = importCliSession(
-            { sessions, projects },
+          const result = await importCliSession(
+            { sessions, projects, logger: req.log },
             {
               sessionId: match.sessionId,
               cwd: match.cwd,
               title: match.title,
+              filePath: match.filePath,
             },
           );
           imported.push(result.session);

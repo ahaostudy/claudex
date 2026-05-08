@@ -5,6 +5,7 @@ import type {
   CreateRoutineRequest,
   CreateSessionRequest,
   CreateSideSessionRequest,
+  PendingDiffsResponse,
   Project,
   Routine,
   Session,
@@ -14,6 +15,8 @@ import type {
   UpdateProjectRequest,
   UpdateRoutineRequest,
   UpdateSessionRequest,
+  UsageRangeResponse,
+  UsageTodayResponse,
   UserEnvResponse,
 } from "@claudex/shared";
 
@@ -113,6 +116,11 @@ export const api = {
       `/api/sessions/${sessionId}/events?sinceSeq=${sinceSeq}`,
     );
   },
+  listPendingDiffs(sessionId: string) {
+    return request<PendingDiffsResponse>(
+      `/api/sessions/${sessionId}/pending-diffs`,
+    );
+  },
   createSession(body: CreateSessionRequest) {
     return request<{ session: Session }>("/api/sessions", {
       method: "POST",
@@ -202,5 +210,11 @@ export const api = {
       method: "POST",
       json: { sessionIds },
     });
+  },
+  getUsageToday() {
+    return request<UsageTodayResponse>("/api/usage/today");
+  },
+  getUsageRange(days: number) {
+    return request<UsageRangeResponse>(`/api/usage/range?days=${days}`);
   },
 };

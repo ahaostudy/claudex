@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { X } from "lucide-react";
+import { Link } from "react-router-dom";
 import type { Session } from "@claudex/shared";
 import { api } from "@/api/client";
 import {
@@ -73,13 +74,20 @@ export function UsagePanel({
   // Context %: latest turn's inputTokens / known model context window. This
   // is an estimate (we don't get a live context gauge from the SDK), but
   // it's honest — prior turns' input overlaps with the current turn's, so
-  // only the most recent turn's input is a meaningful proxy.
+  // only the most recent turn's input is a meaningful proxy. Rows persisted
+  // before agent-runner started emitting cache fields carry only
+  // `input_tokens` (a few dozen on warm cache), which would misread as
+  // "0%"; `contextPctKnown` gates that case and the ring shows `—` instead.
   const contextWindow = contextWindowTokens(session.model);
   const lastTurnInput = usage?.lastTurnInput ?? 0;
-  const contextPctKnown = lastTurnInput > 0;
+  const contextPctKnown = usage?.lastTurnContextKnown ?? false;
   const contextPct = contextPctKnown
     ? Math.min(1, lastTurnInput / contextWindow)
     : 0;
+  const unknownReason =
+    usage && usage.turnCount === 0
+      ? "no turns yet — send a message"
+      : "historical turn — cache fields not persisted; next turn will reflect real context";
 
   return (
     <div
@@ -134,10 +142,13 @@ export function UsagePanel({
               label={contextPctKnown ? `${Math.round(contextPct * 100)}%` : "—"}
               sublabel="context"
             />
-            <div className="mt-2 text-[12px] text-ink-muted mono">
+            <div
+              className="mt-2 text-[12px] text-ink-muted mono text-center max-w-[34ch]"
+              title={contextPctKnown ? undefined : unknownReason}
+            >
               {contextPctKnown
                 ? `${formatTokens(lastTurnInput)} / ${formatTokens(contextWindow)} tokens`
-                : "no turns yet — send a message"}
+                : unknownReason}
             </div>
           </div>
 
@@ -204,6 +215,19 @@ export function UsagePanel({
               Does not account for prompt caching discounts, so this is an
               upper bound. Your actual plan billing may differ.
             </div>
+          </div>
+
+          {/* Mobile-only deep link to the full-screen analytics page.
+              Hidden md+ because desktop users reach /usage directly via the
+              sidebar nav or by clicking the desktop context ring. */}
+          <div className="md:hidden">
+            <Link
+              to={`/usage?session=${encodeURIComponent(session.id)}`}
+              onClick={onClose}
+              className="block text-center text-[13px] text-klein hover:underline"
+            >
+              Full usage →
+            </Link>
           </div>
         </div>
       </div>

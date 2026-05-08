@@ -24,6 +24,12 @@ export interface RunnerInitOptions {
   resumeSdkSessionId?: string;
   // Whether CLAUDE.md / settings files should be loaded. Default true.
   useProjectSettings?: boolean;
+  // Optional pino-shaped logger for diagnostic breadcrumbs (e.g. raw SDK
+  // usage on every turn_end). When absent the runner stays silent — tests
+  // don't need to thread a logger through.
+  logger?: {
+    info: (obj: Record<string, unknown>, msg: string) => void;
+  };
 }
 
 export type RunnerEvent =

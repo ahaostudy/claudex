@@ -143,6 +143,7 @@ async function summarizeJsonl(
     lineCount,
     fileSize: stat.size,
     lastModified: stat.mtime.toISOString(),
+    filePath,
   };
 }
 

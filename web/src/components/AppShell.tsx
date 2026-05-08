@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import {
   Bell,
+  BarChart3,
   Calendar,
   MessageSquare,
   Settings as SettingsIcon,
@@ -25,7 +26,12 @@ import { cn } from "@/lib/cn";
 // and the composer stuck to the bottom.
 // ---------------------------------------------------------------------------
 
-export type ShellTab = "sessions" | "routines" | "alerts" | "settings";
+export type ShellTab =
+  | "sessions"
+  | "routines"
+  | "alerts"
+  | "usage"
+  | "settings";
 
 interface NavItem {
   id: ShellTab;
@@ -34,12 +40,21 @@ interface NavItem {
   href: string;
 }
 
+// "Usage" sits below Alerts and above Settings — a secondary navigation slot.
+// Mobile keeps the four-tab bar as-is (Usage is desktop-focused); see the
+// MobileTabBar below.
 const NAV: NavItem[] = [
   { id: "sessions", label: "Sessions", icon: MessageSquare, href: "/sessions" },
   { id: "routines", label: "Routines", icon: Calendar, href: "/routines" },
   { id: "alerts", label: "Alerts", icon: Bell, href: "/alerts" },
+  { id: "usage", label: "Usage", icon: BarChart3, href: "/usage" },
   { id: "settings", label: "Settings", icon: SettingsIcon, href: "/settings" },
 ];
+
+// Mobile tab bar keeps the original four tabs — Usage is omitted because the
+// full-screen analytics page is desktop-only. Phone users still get the
+// in-chat UsagePanel bottom sheet.
+const MOBILE_NAV = NAV.filter((n) => n.id !== "usage");
 
 export function AppShell({
   tab,
@@ -48,11 +63,27 @@ export function AppShell({
   tab: ShellTab;
   children: React.ReactNode;
 }) {
+  // Alerts badge count: sessions that need the user — permission pending
+  // (`awaiting`) or errored. Mirrored in both the mobile tab bar and the
+  // desktop sidebar so the number is never hidden. Side-chat children are
+  // excluded because the parent surfaces its own alerts already.
+  const { sessions } = useSessions();
+  const alertCount = sessions.reduce(
+    (n, s) =>
+      n +
+      (s.parentSessionId
+        ? 0
+        : s.status === "awaiting" || s.status === "error"
+          ? 1
+          : 0),
+    0,
+  );
+
   return (
     <div className="min-h-[100dvh] bg-canvas flex md:flex-row flex-col">
       {/* Desktop sidebar — hidden below md; Chat never renders this because
           Chat bypasses AppShell entirely. */}
-      <DesktopSidebar tab={tab} />
+      <DesktopSidebar tab={tab} alertCount={alertCount} />
 
       {/* Main column. The bottom padding on mobile is to keep the tab bar
           from covering the tail of the content. */}
@@ -63,12 +94,12 @@ export function AppShell({
       {/* Mobile bottom tab bar. Fixed so it stays visible while the content
           scrolls; `pb-[env(safe-area-inset-bottom)]` keeps clear of the iOS
           home indicator. */}
-      <MobileTabBar tab={tab} />
+      <MobileTabBar tab={tab} alertCount={alertCount} />
     </div>
   );
 }
 
-function DesktopSidebar({ tab }: { tab: ShellTab }) {
+function DesktopSidebar({ tab, alertCount }: { tab: ShellTab; alertCount: number }) {
   const { user, logout } = useAuth();
   const { sessions } = useSessions();
   const [projects, setProjects] = useState<Project[]>([]);
@@ -124,7 +155,13 @@ function DesktopSidebar({ tab }: { tab: ShellTab }) {
           const count =
             id === "sessions"
               ? sessions.length
-              : undefined;
+              : id === "alerts" && alertCount > 0
+                ? alertCount
+                : undefined;
+          const countTone =
+            id === "alerts" && alertCount > 0
+              ? "bg-danger text-canvas"
+              : "text-ink-muted";
           return (
             <Link
               key={id}
@@ -139,7 +176,12 @@ function DesktopSidebar({ tab }: { tab: ShellTab }) {
               <Icon className="w-3.5 h-3.5" />
               {label}
               {typeof count === "number" && (
-                <span className="ml-auto mono text-[11px] text-ink-muted">
+                <span
+                  className={cn(
+                    "ml-auto mono text-[11px] rounded-full px-1.5 py-0.5 leading-none",
+                    countTone,
+                  )}
+                >
                   {count}
                 </span>
               )}
@@ -225,15 +267,16 @@ function DesktopSidebar({ tab }: { tab: ShellTab }) {
   );
 }
 
-function MobileTabBar({ tab }: { tab: ShellTab }) {
+function MobileTabBar({ tab, alertCount }: { tab: ShellTab; alertCount: number }) {
   const navigate = useNavigate();
   return (
     <nav
       className="md:hidden fixed bottom-0 left-0 right-0 z-30 border-t border-line bg-canvas/95 backdrop-blur flex items-center justify-around h-[58px] px-2"
       style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
     >
-      {NAV.map(({ id, label, icon: Icon, href }) => {
+      {MOBILE_NAV.map(({ id, label, icon: Icon, href }) => {
         const active = tab === id;
+        const showBadge = id === "alerts" && alertCount > 0;
         return (
           <button
             key={id}
@@ -245,7 +288,20 @@ function MobileTabBar({ tab }: { tab: ShellTab }) {
             )}
             aria-current={active ? "page" : undefined}
           >
-            <Icon className="w-4 h-4" />
+            <span className="relative">
+              <Icon className="w-4 h-4" />
+              {showBadge && (
+                <span
+                  aria-label={`${alertCount} alerts`}
+                  className={cn(
+                    "absolute -top-1 -right-2 min-w-[16px] h-[16px] px-1 rounded-full bg-danger text-canvas text-[10px] font-medium",
+                    "flex items-center justify-center leading-none",
+                  )}
+                >
+                  {alertCount > 9 ? "9+" : alertCount}
+                </span>
+              )}
+            </span>
             <span className="text-[10px] font-medium">{label}</span>
             {active && (
               <span className="absolute -bottom-1 h-[3px] w-8 bg-klein rounded-full" />

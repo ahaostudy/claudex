@@ -35,6 +35,61 @@ function shortModel(id: string): string {
   return id;
 }
 
+// ---------------------------------------------------------------------------
+// Filter chip rail (mockup s-02 lines 492–500).
+//
+// Six chips that slice the session list. Active chip pill-fills with ink;
+// inactive chips are canvas w/ a subtle border. Counts and status dots
+// (running = green, awaiting = warn) render inline so the rail surfaces
+// "what needs you" at a glance.
+//
+// State lives in the URL (`?filter=running`) so back/forward Just Works and
+// links to a filtered view are shareable. Clicking the active chip clears
+// the filter by removing the param.
+//
+// Caveats worth calling out:
+//   - "Scheduled" is visually present but greyed: the session model doesn't
+//     carry a `nextRunAt` link to routines today, so we have nothing to
+//     filter by. It'll light up the day we wire routines→sessions.
+//   - "Mine" is a no-op on a single-user install. Rendered at 60% opacity
+//     so it's visible (preserves the mockup's chip set) without lying.
+//   - "Archived" swaps the data source to `listSessions({archived:true})` —
+//     see `archivedSessions` state. The default source excludes archived.
+// ---------------------------------------------------------------------------
+
+type FilterId =
+  | "all"
+  | "running"
+  | "awaiting"
+  | "scheduled"
+  | "mine"
+  | "archived";
+
+function chipMatches(s: Session, filter: FilterId): boolean {
+  switch (filter) {
+    case "all":
+      // Default view is non-archived; archived rows are fetched separately
+      // and only surfaced via the "archived" chip.
+      return s.status !== "archived";
+    case "running":
+      return s.status === "running";
+    case "awaiting":
+      return s.status === "awaiting";
+    case "scheduled":
+      // No session<->routine link exists yet. Render the chip but match
+      // nothing so the list empties to the "no matches" message.
+      return false;
+    case "mine":
+      // Single-user: every session is "mine". Acts as a no-op / identity
+      // filter and lets the chip appear without deceiving.
+      return s.status !== "archived";
+    case "archived":
+      // `archivedSessions` is the source set here, so everything already
+      // passes; kept explicit for symmetry.
+      return s.status === "archived";
+  }
+}
+
 export function HomeScreen() {
   const { user } = useAuth();
   const {
@@ -48,16 +103,41 @@ export function HomeScreen() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const activeProjectId = searchParams.get("project");
+  const activeFilter = (searchParams.get("filter") ?? "all") as FilterId;
   const [showNew, setShowNew] = useState(false);
   const [showProjects, setShowProjects] = useState(false);
   const [showWsDiag, setShowWsDiag] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [projects, setProjects] = useState<Project[]>([]);
+  const [archivedSessions, setArchivedSessions] = useState<Session[]>([]);
 
   useEffect(() => {
     init();
     refreshSessions();
   }, [init, refreshSessions]);
+
+  // Archived-chip data: fetched on demand so the default list call can stay
+  // cheap. We keep this separate from the global sessions store because
+  // archived rows don't get live WS updates anyway (they're read-only) and
+  // merging them into the store would confuse every other screen.
+  useEffect(() => {
+    if (activeFilter !== "archived") return;
+    let cancelled = false;
+    api
+      .listSessions({ archived: true })
+      .then((r) => {
+        if (cancelled) return;
+        // The server returns archived + live in one list when archived=1;
+        // narrow to archived so the chip's filter is honest.
+        setArchivedSessions(r.sessions.filter((s) => s.status === "archived"));
+      })
+      .catch(() => {
+        /* best-effort */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeFilter]);
 
   // Projects list is its own fetch — sessions carry projectId but no name,
   // and we want the group header to show the project's display name even if
@@ -81,9 +161,18 @@ export function HomeScreen() {
   // sort sessions inside each bucket newest-first, sort groups by their
   // newest session's timestamp. Wrapped in useMemo so the layout is stable
   // across renders caused by WS status ticks.
+  // The source set depends on the active filter chip. "Archived" switches
+  // to the separately-fetched archived list; everything else uses the live
+  // sessions store (which already excludes archived). "All" is the default.
+  const sourceSessions =
+    activeFilter === "archived" ? archivedSessions : sessions;
   const groups = useMemo(() => {
     const byProject = new Map<string, Session[]>();
-    for (const s of sessions) {
+    for (const s of sourceSessions) {
+      // Hide side-chat children from the Home list. They appear inline in
+      // their parent chat's side drawer, not as top-level rows.
+      if (s.parentSessionId) continue;
+      if (!chipMatches(s, activeFilter)) continue;
       const list = byProject.get(s.projectId);
       if (list) list.push(s);
       else byProject.set(s.projectId, [s]);
@@ -104,7 +193,7 @@ export function HomeScreen() {
       (a, b) => sortKey(b.sessions[0]) - sortKey(a.sessions[0]),
     );
     return out;
-  }, [sessions, projects]);
+  }, [sourceSessions, projects, activeFilter]);
 
   const filteredGroups = useMemo(() => {
     if (!activeProjectId) return groups;
@@ -125,6 +214,24 @@ export function HomeScreen() {
     (n, g) => n + g.sessions.length,
     0,
   );
+
+  // Counts surfaced on the filter chips. Running / awaiting come from the
+  // live list (archived rows can't be in either state). "All" is the
+  // non-archived top-level count — the same set "All" would show when
+  // clicked, minus any project filter which is orthogonal.
+  const filterCounts = useMemo(() => {
+    let all = 0;
+    let running = 0;
+    let awaiting = 0;
+    for (const s of sessions) {
+      if (s.parentSessionId) continue;
+      if (s.status === "archived") continue;
+      all += 1;
+      if (s.status === "running") running += 1;
+      else if (s.status === "awaiting") awaiting += 1;
+    }
+    return { all, running, awaiting };
+  }, [sessions]);
 
   return (
     <AppShell tab="sessions">
@@ -184,6 +291,16 @@ export function HomeScreen() {
       </header>
 
       <section className="flex-1 min-h-0 overflow-y-auto pb-20 md:pb-6">
+        <FilterChipRail
+          active={activeFilter}
+          counts={filterCounts}
+          onPick={(id) => {
+            const next = new URLSearchParams(searchParams);
+            if (id === "all" || id === activeFilter) next.delete("filter");
+            else next.set("filter", id);
+            setSearchParams(next, { replace: true });
+          }}
+        />
         <div className="px-4 md:px-6 py-3 flex items-center gap-3">
           <span className="mono text-[11px] text-ink-muted">
             {loadingSessions
@@ -210,7 +327,13 @@ export function HomeScreen() {
           </div>
         ) : filteredGroups.length === 0 ? (
           <div className="px-4 md:px-6 pb-6 text-[13px] text-ink-muted">
-            No sessions in this project yet.
+            {activeFilter === "all"
+              ? "No sessions in this project yet."
+              : activeFilter === "scheduled"
+                ? "No scheduled sessions yet — set up a routine and it'll surface here once routines link to sessions."
+                : activeFilter === "archived"
+                  ? "No archived sessions."
+                  : `No ${activeFilter} sessions right now.`}
           </div>
         ) : (
           <div className="pb-6">
@@ -470,6 +593,114 @@ function EmptyState({ onNew }: { onNew: () => void }) {
     </div>
   );
 }
+
+// Horizontal chip rail mirroring mockup s-02 (lines 492–500). Stays above
+// the session list; scrolls horizontally on narrow viewports so the last
+// chip ("Group by project") stays reachable without wrapping the row.
+function FilterChipRail({
+  active,
+  counts,
+  onPick,
+}: {
+  active: FilterId;
+  counts: { all: number; running: number; awaiting: number };
+  onPick: (id: FilterId) => void;
+}) {
+  // Chip set is fixed; we render it fully so the filter's affordance is
+  // always visible. `disabled` chips use opacity + pointer-events:none so
+  // they look present but don't mislead (Scheduled / Mine).
+  const chips: Array<{
+    id: FilterId;
+    label: string;
+    count?: number;
+    dot?: "running" | "awaiting";
+    disabled?: boolean;
+    title?: string;
+  }> = [
+    { id: "all", label: "All", count: counts.all },
+    { id: "running", label: "Running", dot: "running" },
+    {
+      id: "awaiting",
+      label: "Needs approval",
+      count: counts.awaiting || undefined,
+      dot: "awaiting",
+    },
+    {
+      id: "scheduled",
+      label: "Scheduled",
+      disabled: true,
+      title: "Scheduled sessions surface here once routines link to sessions",
+    },
+    {
+      id: "mine",
+      label: "Mine",
+      disabled: true,
+      title: "Single-user install — every session is yours",
+    },
+    { id: "archived", label: "Archived" },
+  ];
+
+  return (
+    <div className="sticky top-0 z-10 bg-canvas/90 backdrop-blur border-b border-line px-4 md:px-6 py-2">
+      <div className="flex items-center gap-2 overflow-x-auto whitespace-nowrap -mx-1 px-1">
+        {chips.map((c) => {
+          const isActive = active === c.id;
+          const base = cn(
+            "inline-flex items-center gap-1.5 h-7 px-2.5 rounded-full border text-[12px] transition-colors shrink-0",
+            isActive
+              ? "bg-ink text-canvas border-ink"
+              : "bg-canvas text-ink-soft border-line hover:bg-paper",
+            c.disabled && "opacity-60 pointer-events-none",
+          );
+          return (
+            <button
+              key={c.id}
+              type="button"
+              onClick={() => onPick(c.id)}
+              title={c.title}
+              className={base}
+              aria-pressed={isActive}
+            >
+              {c.dot === "running" && (
+                <span
+                  className={cn(
+                    "h-1.5 w-1.5 rounded-full shrink-0",
+                    isActive ? "bg-canvas" : "bg-success",
+                    !isActive && "animate-pulse",
+                  )}
+                />
+              )}
+              {c.dot === "awaiting" && (
+                <span
+                  className={cn(
+                    "h-1.5 w-1.5 rounded-full shrink-0",
+                    isActive ? "bg-canvas" : "bg-warn",
+                  )}
+                />
+              )}
+              <span>{c.label}</span>
+              {typeof c.count === "number" && (
+                <span
+                  className={cn(
+                    "mono text-[11px] -mr-0.5",
+                    isActive ? "text-canvas/80" : "text-ink-muted",
+                  )}
+                >
+                  {c.count}
+                </span>
+              )}
+            </button>
+          );
+        })}
+        <span className="ml-auto mono text-[11px] text-ink-muted hidden sm:inline pl-2 shrink-0">
+          Group by project
+        </span>
+      </div>
+    </div>
+  );
+}
+
+
 
 function NewSessionSheet({
   onClose,

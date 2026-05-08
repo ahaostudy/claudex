@@ -48,7 +48,7 @@ export function SettingsScreen() {
       <div className="flex-1 min-h-0 overflow-y-auto">
         <div className="max-w-[1100px] mx-auto flex flex-col lg:flex-row">
           {/* Tab list: horizontal filter-chip bar on mobile, left rail on desktop. */}
-          <aside className="lg:w-[220px] lg:shrink-0 border-b lg:border-b-0 lg:border-r border-line bg-paper/30 sticky top-[61px] lg:top-0 z-[5] bg-canvas/90 lg:bg-paper/30 backdrop-blur lg:backdrop-blur-0">
+          <aside className="lg:w-[220px] lg:shrink-0 border-b lg:border-b-0 lg:border-r border-line bg-paper/30">
             <nav
               className={cn(
                 "flex lg:flex-col gap-1.5 px-3 py-2.5 lg:py-3 overflow-x-auto no-scrollbar",

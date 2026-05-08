@@ -4,9 +4,11 @@ import { useAuth } from "@/state/auth";
 import { LoginScreen } from "@/screens/Login";
 import { HomeScreen } from "@/screens/Home";
 import { ChatScreen } from "@/screens/Chat";
+import { DiffReviewScreen } from "@/screens/DiffReview";
 import { SettingsScreen } from "@/screens/Settings";
 import { RoutinesScreen } from "@/screens/Routines";
 import { AlertsScreen } from "@/screens/Alerts";
+import { UsagePage } from "@/screens/UsagePage";
 
 function Guard({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
@@ -56,10 +58,26 @@ export default function App() {
         }
       />
       <Route
+        path="/usage"
+        element={
+          <Guard>
+            <UsagePage />
+          </Guard>
+        }
+      />
+      <Route
         path="/session/:id"
         element={
           <Guard>
             <ChatScreen />
+          </Guard>
+        }
+      />
+      <Route
+        path="/session/:id/diff"
+        element={
+          <Guard>
+            <DiffReviewScreen />
           </Guard>
         }
       />

@@ -122,6 +122,7 @@ export class SessionManager {
       // Resume the SDK-side conversation if we've seen one before. Null on
       // first ever spawn; set after the SDK's system/init echoes its id back.
       resumeSdkSessionId: session.sdkSessionId ?? undefined,
+      logger: this.deps.logger,
     };
     const runner = this.deps.runnerFactory.create(opts);
     const off = runner.on((event) => this.handleEvent(sessionId, event));

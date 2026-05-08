@@ -1,46 +1,65 @@
 import { useEffect, useState } from "react";
-import { GitBranch, Trash2, X } from "lucide-react";
+import { GitBranch, X } from "lucide-react";
 import { api, ApiError } from "@/api/client";
 import type {
   ModelId,
   PermissionMode,
+  Project,
   Session,
   ToolGrant,
 } from "@claudex/shared";
 
 /**
- * Session settings side sheet. Mirrors mockup screen 10:
- * model 3-way, permission mode 4-way, editable title, read-only worktree
- * panel, and the "Approved in this session" list with per-row Revoke.
+ * Session settings sheet. Rebuilt to match mockup s-10.
  *
- * On mobile: full-height right slide-over. On desktop ≥sm we still render as
- * a right rail rather than centering — matches the mockup's desktop layout.
+ * Mobile (<md): full-height bottom-sheet-ish right slide-over with a small
+ * left-aligned X header and caps+display title.
+ * Desktop (≥md): 380px right rail with the mockup's right-rail header
+ * (caps+display on the left, X button on the right).
+ *
+ * Only ships sections we can back with real data today. Notable omissions
+ * vs. the mockup (documented in docs/FEATURES.md):
+ *  - Effort slider (we don't expose thinking.budget_tokens today)
+ *  - Worktree "Relocate…" (no backend)
+ *  - Workspace "Status · clean / N staged" (no git-status reader)
+ *  - "Change with ⌘⇧M" helper text (no shortcut bound)
+ *  - "Duplicate session" (no clone endpoint)
  */
 export function SessionSettingsSheet({
   session,
+  project,
   onClose,
   onUpdated,
 }: {
   session: Session;
+  project?: Project | null;
   onClose: () => void;
   onUpdated: (next: Session) => void;
 }) {
-  const [title, setTitle] = useState(session.title);
   const [model, setModel] = useState<ModelId>(session.model);
   const [mode, setMode] = useState<PermissionMode>(session.mode);
   const [warnings, setWarnings] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [archiving, setArchiving] = useState(false);
 
   const [grants, setGrants] = useState<ToolGrant[] | null>(null);
   const [grantsErr, setGrantsErr] = useState<string | null>(null);
 
   // Re-hydrate editable state when the parent swaps a fresh session in.
   useEffect(() => {
-    setTitle(session.title);
     setModel(session.model);
     setMode(session.mode);
-  }, [session.id, session.title, session.model, session.mode]);
+  }, [session.id, session.model, session.mode]);
+
+  // Escape closes the sheet.
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") onClose();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
 
   async function loadGrants() {
     setGrantsErr(null);
@@ -58,11 +77,7 @@ export function SessionSettingsSheet({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session.id]);
 
-  async function patch(partial: {
-    title?: string;
-    model?: ModelId;
-    mode?: PermissionMode;
-  }) {
+  async function patch(partial: { model?: ModelId; mode?: PermissionMode }) {
     setSaving(true);
     setErr(null);
     try {
@@ -76,12 +91,6 @@ export function SessionSettingsSheet({
     }
   }
 
-  async function saveTitle() {
-    const next = title.trim();
-    if (!next || next === session.title) return;
-    await patch({ title: next });
-  }
-
   async function revoke(id: string) {
     try {
       await api.revokeGrant(id);
@@ -91,13 +100,74 @@ export function SessionSettingsSheet({
     }
   }
 
+  async function archive() {
+    if (archived || archiving) return;
+    setArchiving(true);
+    setErr(null);
+    try {
+      await api.archiveSession(session.id);
+      onClose();
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.code : "archive_failed");
+      setArchiving(false);
+    }
+  }
+
   const archived = session.status === "archived";
+  const hasWorktree = !!session.worktreePath;
+  const archiveLabel = hasWorktree
+    ? "Archive session & remove worktree"
+    : "Archive";
+
+  const MODELS: Array<{ id: ModelId; label: string; sub: string; subDesktop: string }> = [
+    { id: "claude-opus-4-7", label: "Opus 4.7", sub: "latest", subDesktop: "latest · adaptive" },
+    { id: "claude-sonnet-4-6", label: "Sonnet 4.6", sub: "balanced", subDesktop: "balanced" },
+    { id: "claude-haiku-4-5", label: "Haiku 4.5", sub: "fast", subDesktop: "fast" },
+  ];
+
+  const MODES: Array<[PermissionMode, string]> = [
+    ["default", "Ask"],
+    ["acceptEdits", "Accept"],
+    ["plan", "Plan"],
+    ["auto", "Auto"],
+    ["bypassPermissions", "Bypass"],
+  ];
+
+  const modeHint: Record<PermissionMode, string> = {
+    default: "Claude will ask before every edit or command.",
+    acceptEdits: "Auto-accept file edits and safe filesystem ops.",
+    plan: "Read-only exploration. Claude won't edit files.",
+    auto: "Autonomous mode — falls back to Ask until the server-side classifier ships.",
+    bypassPermissions: "No prompts. Only use in sandboxed environments.",
+  };
 
   return (
-    <div className="fixed inset-0 z-20 bg-ink/30 flex justify-end">
-      <div className="w-full sm:w-[380px] bg-canvas border-l border-line shadow-lift flex flex-col max-h-screen">
-        {/* Header — matches mockup desktop right-rail header */}
-        <div className="px-5 py-3 border-b border-line flex items-center">
+    <div
+      className="fixed inset-0 z-20 bg-ink/30 flex justify-end"
+      onMouseDown={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <div className="w-full md:w-[380px] bg-canvas md:border-l border-line shadow-lift flex flex-col max-h-screen h-full">
+        {/* Mobile header: X on the left, caps+display stacked. */}
+        <div className="md:hidden px-4 py-2.5 border-b border-line flex items-center gap-2">
+          <button
+            onClick={onClose}
+            className="h-8 w-8 rounded-[8px] bg-paper border border-line flex items-center justify-center"
+            aria-label="Close"
+          >
+            <X className="w-4 h-4" />
+          </button>
+          <div>
+            <div className="text-[11px] uppercase tracking-[0.14em] text-ink-muted">
+              Session
+            </div>
+            <div className="display text-[17px] leading-tight">Settings</div>
+          </div>
+        </div>
+
+        {/* Desktop header: caps+display on the left, X on the right. */}
+        <div className="hidden md:flex px-5 py-3 border-b border-line items-center">
           <div>
             <div className="text-[11px] uppercase tracking-[0.14em] text-ink-muted">
               Settings
@@ -115,30 +185,12 @@ export function SessionSettingsSheet({
           </button>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-5 space-y-6">
+        <div className="flex-1 overflow-y-auto p-4 md:p-5 space-y-5 md:space-y-6">
           {archived && (
             <div className="text-[12px] text-ink-muted rounded-[8px] border border-dashed border-line-strong bg-paper/50 px-3 py-2">
               This session is archived — settings are read-only.
             </div>
           )}
-
-          {/* Title */}
-          <div>
-            <div className="text-[11px] uppercase tracking-[0.14em] text-ink-muted mb-2">
-              Title
-            </div>
-            <input
-              disabled={archived || saving}
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              onBlur={saveTitle}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") (e.target as HTMLInputElement).blur();
-              }}
-              className="w-full h-10 px-3 bg-canvas border border-line rounded-[8px] text-[14px] disabled:opacity-60"
-              placeholder="Untitled"
-            />
-          </div>
 
           {/* Model */}
           <div>
@@ -146,17 +198,7 @@ export function SessionSettingsSheet({
               Model
             </div>
             <div className="grid grid-cols-3 gap-1.5 p-1 bg-paper border border-line rounded-[8px]">
-              {(
-                [
-                  { id: "claude-opus-4-7", label: "Opus 4.7", sub: "latest" },
-                  {
-                    id: "claude-sonnet-4-6",
-                    label: "Sonnet 4.6",
-                    sub: "balanced",
-                  },
-                  { id: "claude-haiku-4-5", label: "Haiku 4.5", sub: "fast" },
-                ] as Array<{ id: ModelId; label: string; sub: string }>
-              ).map((m) => {
+              {MODELS.map((m) => {
                 const active = model === m.id;
                 return (
                   <button
@@ -166,7 +208,7 @@ export function SessionSettingsSheet({
                       setModel(m.id);
                       if (m.id !== session.model) patch({ model: m.id });
                     }}
-                    className={`h-11 rounded-[6px] text-[13px] font-medium leading-tight transition-colors ${
+                    className={`h-10 md:h-11 rounded-[6px] text-[12px] md:text-[13px] font-medium leading-tight transition-colors ${
                       active
                         ? "bg-canvas shadow-card border border-line text-ink"
                         : "text-ink-muted"
@@ -178,7 +220,8 @@ export function SessionSettingsSheet({
                         active ? "text-ink-muted" : "opacity-70"
                       }`}
                     >
-                      {m.sub}
+                      <span className="md:hidden">{m.sub}</span>
+                      <span className="hidden md:inline">{m.subDesktop}</span>
                     </div>
                   </button>
                 );
@@ -192,47 +235,43 @@ export function SessionSettingsSheet({
             )}
           </div>
 
-          {/* Permission mode — 4-way (the SDK "auto" is swallowed into default) */}
+          {/* Permission mode — 5-segment on desktop. Mobile keeps the same
+              segmented control rather than the mockup's collapsed picker,
+              because we don't have a dedicated sub-sheet and the 5 slots
+              still fit at 390px. */}
           <div>
             <div className="text-[11px] uppercase tracking-[0.14em] text-ink-muted mb-2">
               Permission mode
             </div>
-            <div className="grid grid-cols-4 gap-1 p-1 bg-paper border border-line rounded-[8px]">
-              {(
-                [
-                  ["default", "Ask"],
-                  ["acceptEdits", "Accept"],
-                  ["plan", "Plan"],
-                  ["bypassPermissions", "Bypass"],
-                ] as Array<[PermissionMode, string]>
-              ).map(([id, label]) => (
-                <button
-                  key={id}
-                  disabled={archived || saving}
-                  onClick={() => {
-                    setMode(id);
-                    if (id !== session.mode) patch({ mode: id });
-                  }}
-                  className={`h-9 rounded-[6px] text-[12px] font-medium ${
-                    mode === id
-                      ? "bg-canvas shadow-card border border-line text-ink"
-                      : "text-ink-muted"
-                  }`}
-                >
-                  {label}
-                </button>
-              ))}
+            <div className="grid grid-cols-5 gap-1 md:gap-1.5 p-1 bg-paper border border-line rounded-[8px]">
+              {MODES.map(([id, label]) => {
+                const active = mode === id;
+                const dim = id === "bypassPermissions" && !active;
+                return (
+                  <button
+                    key={id}
+                    disabled={archived || saving}
+                    onClick={() => {
+                      setMode(id);
+                      if (id !== session.mode) patch({ mode: id });
+                    }}
+                    className={`h-9 rounded-[6px] text-[12px] font-medium ${
+                      active
+                        ? "bg-canvas shadow-card border border-line text-ink"
+                        : "text-ink-muted"
+                    } ${dim ? "opacity-60" : ""}`}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
             </div>
             <div className="text-[12px] text-ink-muted mt-2">
-              {mode === "default" && "Claude will ask before every edit or command."}
-              {mode === "acceptEdits" && "Auto-accept file edits and safe filesystem ops."}
-              {mode === "plan" && "Read-only exploration. Claude won't edit files."}
-              {mode === "bypassPermissions" &&
-                "No prompts. Only use in sandboxed environments."}
+              {modeHint[mode]}
             </div>
           </div>
 
-          {/* Workspace — Worktree info, read-only for now */}
+          {/* Workspace — read-only. Branch + worktree (or project root). */}
           <div>
             <div className="text-[11px] uppercase tracking-[0.14em] text-ink-muted mb-2">
               Workspace
@@ -242,30 +281,27 @@ export function SessionSettingsSheet({
                 <span className="text-[11px] uppercase tracking-[0.14em] text-ink-muted w-20 shrink-0">
                   Branch
                 </span>
-                <span className="mono text-[12px] truncate flex items-center gap-1.5">
-                  <GitBranch className="w-3 h-3 text-ink-muted" />
-                  {session.branch ?? (
-                    <span className="text-ink-faint">— none —</span>
-                  )}
+                <span className="mono text-[12px] truncate flex items-center gap-1.5 min-w-0">
+                  <GitBranch className="w-3 h-3 text-ink-muted shrink-0" />
+                  <span className="truncate">
+                    {session.branch ?? (
+                      <span className="text-ink-faint">— none —</span>
+                    )}
+                  </span>
                 </span>
               </div>
               <div className="flex items-baseline gap-3">
                 <span className="text-[11px] uppercase tracking-[0.14em] text-ink-muted w-20 shrink-0">
                   Worktree
                 </span>
-                <span className="mono text-[12px] truncate">
+                <span className="mono text-[12px] truncate min-w-0">
                   {session.worktreePath ?? (
-                    <span className="text-ink-faint">project root</span>
+                    project?.path ? (
+                      <span className="text-ink-muted">{project.path}</span>
+                    ) : (
+                      <span className="text-ink-faint">project root</span>
+                    )
                   )}
-                </span>
-              </div>
-              <div className="flex items-baseline gap-3">
-                <span className="text-[11px] uppercase tracking-[0.14em] text-ink-muted w-20 shrink-0">
-                  Status
-                </span>
-                <span className="flex items-center gap-1.5 text-[12px] text-ink-muted">
-                  <span className="h-1.5 w-1.5 rounded-full bg-line-strong" />
-                  worktree creation arrives in P4
                 </span>
               </div>
             </div>
@@ -293,7 +329,11 @@ export function SessionSettingsSheet({
                           ? "bg-klein-wash text-klein-ink border border-klein/30"
                           : "bg-paper text-ink-muted border border-line"
                       }`}
-                      title={g.scope === "global" ? "Applies to every session" : "This session only"}
+                      title={
+                        g.scope === "global"
+                          ? "Applies to every session"
+                          : "This session only"
+                      }
                     >
                       {g.scope}
                     </span>
@@ -305,9 +345,9 @@ export function SessionSettingsSheet({
                     </span>
                     <button
                       onClick={() => revoke(g.id)}
-                      className="h-6 px-2 text-[11px] rounded-[4px] border border-line hover:bg-paper inline-flex items-center gap-1 text-ink-soft hover:text-danger"
+                      disabled={archived}
+                      className="h-6 px-2 text-[11px] rounded-[4px] border border-line hover:bg-paper text-ink-soft hover:text-danger disabled:opacity-60"
                     >
-                      <Trash2 className="w-3 h-3" />
                       Revoke
                     </button>
                   </div>
@@ -322,6 +362,24 @@ export function SessionSettingsSheet({
           {err && (
             <div className="text-[13px] text-danger bg-danger-wash rounded-[8px] px-3 py-2 border border-danger/30">
               {err}
+            </div>
+          )}
+
+          {/* Archive row.
+              Mobile mockup places this inside the Worktree card's divided
+              list; desktop mockup places it as a bordered footer row. We
+              always render as a footer-style row — single affordance that
+              reads the same on both breakpoints and doesn't fake a
+              "Relocate…" row we don't ship. */}
+          {!archived && (
+            <div className="pt-4 border-t border-line flex">
+              <button
+                onClick={archive}
+                disabled={archiving}
+                className="h-9 px-3 rounded-[8px] border border-line text-[13px] text-danger hover:bg-danger-wash disabled:opacity-60"
+              >
+                {archiving ? "Archiving…" : archiveLabel}
+              </button>
             </div>
           )}
         </div>

@@ -214,7 +214,22 @@ export class AgentRunner implements Runner {
         }
         return;
       }
-      case "result":
+      case "result": {
+        // Diagnostic: log the raw usage payload the SDK actually emits on
+        // each turn. The Usage ring's context % depends on
+        // `cache_read_input_tokens` + `cache_creation_input_tokens` being
+        // present — with prompt caching on, `input_tokens` alone is only a
+        // few dozen tokens on warm cache turns and makes the ring read "0%".
+        // We've been burned by this blind spot twice; the log is a
+        // permanent breadcrumb so future sessions can be diagnosed from the
+        // server log alone.
+        const rawUsage = (msg as { usage?: unknown }).usage ?? null;
+        if (this.opts.logger) {
+          this.opts.logger.info(
+            { sessionId: this.sessionId, usage: rawUsage },
+            "turn_end usage",
+          );
+        }
         this.emit({
           type: "turn_end",
           stopReason: msg.subtype ?? "end_turn",
@@ -233,6 +248,7 @@ export class AgentRunner implements Runner {
         });
         this.emit({ type: "status", status: "idle" });
         return;
+      }
     }
   }
 

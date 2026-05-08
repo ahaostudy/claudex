@@ -26,11 +26,11 @@ describe("importCliSession", () => {
     while (cleanups.length) cleanups.pop()!();
   });
 
-  it("creates a project + session and stamps the sdk_session_id", () => {
+  it("creates a project + session and stamps the sdk_session_id", async () => {
     const { projects, sessions, cleanup } = setup();
     cleanups.push(cleanup);
 
-    const { session, wasNew } = importCliSession(
+    const { session, wasNew } = await importCliSession(
       { projects, sessions },
       {
         sessionId: "uuid-1",
@@ -50,15 +50,15 @@ describe("importCliSession", () => {
     expect(project?.trusted).toBe(true);
   });
 
-  it("is idempotent: re-importing the same sessionId returns the same row", () => {
+  it("is idempotent: re-importing the same sessionId returns the same row", async () => {
     const { projects, sessions, cleanup } = setup();
     cleanups.push(cleanup);
 
-    const first = importCliSession(
+    const first = await importCliSession(
       { projects, sessions },
       { sessionId: "uuid-2", cwd: "/p/proj", title: "hi" },
     );
-    const second = importCliSession(
+    const second = await importCliSession(
       { projects, sessions },
       { sessionId: "uuid-2", cwd: "/p/proj", title: "hi (again)" },
     );
@@ -72,7 +72,7 @@ describe("importCliSession", () => {
     expect(projects.list()).toHaveLength(1);
   });
 
-  it("reuses an existing project when the cwd already has one", () => {
+  it("reuses an existing project when the cwd already has one", async () => {
     const { projects, sessions, cleanup } = setup();
     cleanups.push(cleanup);
 
@@ -81,7 +81,7 @@ describe("importCliSession", () => {
       path: "/p/shared",
       trusted: false,
     });
-    const { session } = importCliSession(
+    const { session } = await importCliSession(
       { projects, sessions },
       { sessionId: "uuid-3", cwd: "/p/shared", title: "adopt" },
     );
@@ -89,12 +89,12 @@ describe("importCliSession", () => {
     expect(projects.list()).toHaveLength(1);
   });
 
-  it("falls back to cwd as project name when basename is empty", () => {
+  it("falls back to cwd as project name when basename is empty", async () => {
     const { projects, sessions, cleanup } = setup();
     cleanups.push(cleanup);
 
     // `basename("/")` is empty — ensure we pick something non-empty.
-    const { session } = importCliSession(
+    const { session } = await importCliSession(
       { projects, sessions },
       { sessionId: "uuid-4", cwd: "/", title: "root session" },
     );

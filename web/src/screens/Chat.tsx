@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
+  AlertTriangle,
   Check,
   ChevronDown,
   ChevronLeft,
@@ -13,6 +14,7 @@ import {
   Settings2,
   StopCircle,
   Terminal,
+  X,
 } from "lucide-react";
 import { ChatSessionsRail } from "@/components/ChatSessionsRail";
 import { ChatTasksRail } from "@/components/ChatTasksRail";
@@ -29,7 +31,7 @@ import { DiffView, toolCallToDiff } from "@/components/DiffView";
 import { diffForToolCall } from "@/lib/diff";
 import { SessionSettingsSheet } from "@/components/SessionSettingsSheet";
 import { SideChatDrawer } from "@/components/SideChatDrawer";
-import { SlashCommandSheet } from "@/components/SlashCommandSheet";
+import { SlashCommandSheet, type PickerHandle } from "@/components/SlashCommandSheet";
 import { FileMentionSheet } from "@/components/FileMentionSheet";
 import { TerminalDrawer } from "@/components/TerminalDrawer";
 import { ViewModePicker } from "@/components/ViewModePicker";
@@ -160,6 +162,21 @@ export function ChatScreen() {
     [pieces, viewMode],
   );
 
+  // Any still-pending permission request for a diff-producing tool
+  // (Edit / Write / MultiEdit) surfaces a "Review diff" klein chip in the
+  // desktop header so the full-screen review page is one click away.
+  // We derive this from the live transcript instead of calling
+  // /pending-diffs — the permission pieces are already in memory.
+  const pendingDiffApprovalId = useMemo(() => {
+    for (let i = pieces.length - 1; i >= 0; i--) {
+      const p = pieces[i];
+      if (p.kind !== "permission_request") continue;
+      const d = diffForToolCall(p.toolName, p.input);
+      if (d) return p.approvalId;
+    }
+    return null;
+  }, [pieces]);
+
   const scroller = useRef<HTMLDivElement>(null);
   useEffect(() => {
     scroller.current?.scrollTo({
@@ -168,7 +185,10 @@ export function ChatScreen() {
     });
   }, [visiblePieces.length]);
 
-  const [headerContextPct, setHeaderContextPct] = useState(0);
+  const [headerContext, setHeaderContext] = useState<{ pct: number; known: boolean }>({
+    pct: 0,
+    known: false,
+  });
   useEffect(() => {
     if (!session) return;
     let cancelled = false;
@@ -178,7 +198,10 @@ export function ChatScreen() {
         if (cancelled) return;
         const u = computeSessionUsage(res.events, session.model);
         const w = contextWindowTokens(session.model);
-        setHeaderContextPct(w > 0 ? Math.min(1, u.lastTurnInput / w) : 0);
+        const pct = w > 0 && u.lastTurnContextKnown
+          ? Math.min(1, u.lastTurnInput / w)
+          : 0;
+        setHeaderContext({ pct, known: u.lastTurnContextKnown });
       } catch {
         /* leave at last value */
       }
@@ -264,8 +287,8 @@ export function ChatScreen() {
           </div>
         </div>
         <ContextRingButton
-          pct={headerContextPct}
-          known={headerContextPct > 0}
+          pct={headerContext.pct}
+          known={headerContext.known}
           disabled={!session}
           onClick={() => setShowUsage(true)}
         />
@@ -300,6 +323,16 @@ export function ChatScreen() {
           </div>
         </div>
         <div className="ml-auto flex items-center gap-1.5">
+          {pendingDiffApprovalId && session?.status === "awaiting" && (
+            <Link
+              to={`/session/${id}/diff?approvalId=${encodeURIComponent(pendingDiffApprovalId)}`}
+              className="h-8 px-2.5 rounded-[6px] bg-klein text-canvas text-[12px] font-medium flex items-center gap-1.5 shadow-card"
+              title="Review full diff"
+            >
+              <Check className="w-3.5 h-3.5" />
+              Review diff
+            </Link>
+          )}
           <ViewModePicker mode={viewMode} onChange={setViewMode} />
           <PillPicker
             label={session ? MODEL_LABEL[session.model] ?? session.model : "—"}
@@ -322,10 +355,14 @@ export function ChatScreen() {
             onPick={(m) => patchSession({ mode: m as PermissionMode })}
           />
           <ContextRingButton
-            pct={headerContextPct}
-            known={headerContextPct > 0}
+            pct={headerContext.pct}
+            known={headerContext.known}
             disabled={!session}
-            onClick={() => setShowUsage(true)}
+            onClick={() =>
+              session
+                ? navigate(`/usage?session=${encodeURIComponent(session.id)}`)
+                : undefined
+            }
           />
           {/* /btw button — kept on desktop header because the chip rail
               also has it, but desktop users are pointer-first so the direct
@@ -390,6 +427,8 @@ export function ChatScreen() {
             key={i}
             p={p}
             viewMode={viewMode}
+            session={session}
+            project={project}
             onDecide={(approvalId, decision) =>
               id && resolvePermission(id, approvalId, decision)
             }
@@ -437,6 +476,7 @@ export function ChatScreen() {
       {showSettings && session && (
         <SessionSettingsSheet
           session={session}
+          project={project}
           onClose={() => setShowSettings(false)}
           onUpdated={(next) => setSession(next)}
         />
@@ -663,10 +703,14 @@ function SheetAction({
 function Piece({
   p,
   viewMode,
+  session,
+  project,
   onDecide,
 }: {
   p: UIPiece;
   viewMode: ViewMode;
+  session: Session | null;
+  project: Project | null;
   onDecide: (
     approvalId: string,
     decision: "allow_once" | "allow_always" | "deny",
@@ -742,6 +786,8 @@ function Piece({
             toolName={p.toolName}
             input={p.input}
             summary={p.summary}
+            session={session}
+            project={project}
             onDecide={onDecide}
           />
         </div>
@@ -919,65 +965,528 @@ function ToolResultBlock({
   );
 }
 
+// ---------------------------------------------------------------------------
+// PermissionCard — matches mockup s-05.
+//
+// Mobile (<md): bottom-sheet shape with stacked action buttons.
+// Desktop (md+): modal-card shape with footer actions, 1-up "Blast radius"
+// tile (Duration and Network tiles are intentionally omitted — we don't
+// track those today, see docs/FEATURES.md Permissions row), and a
+// "Remember this decision" checkbox that upgrades "Allow once" to
+// "allow_always".
+//
+// Actions always call onDecide(approvalId, "allow_once" | "allow_always" |
+// "deny") so the existing resolvePermission plumbing is unchanged.
+// ---------------------------------------------------------------------------
 function PermissionCard({
   approvalId,
   toolName,
   input,
-  summary,
+  summary: _summary,
+  session,
+  project,
   onDecide,
 }: {
   approvalId: string;
   toolName: string;
   input: Record<string, unknown>;
   summary: string;
+  session: Session | null;
+  project: Project | null;
   onDecide: (
     approvalId: string,
     decision: "allow_once" | "allow_always" | "deny",
   ) => void;
 }) {
+  const { id: sessionId } = useParams<{ id: string }>();
+  const [remember, setRemember] = useState(false);
+  const cardRef = useRef<HTMLDivElement>(null);
+
+  const title = deriveTitle(toolName, input);
+  const cwd = deriveCwd(session, project);
+  const metaLine = deriveMetaLine(session, project);
+  const alwaysLabel = deriveAlwaysLabel(toolName, input);
+  const command = deriveCommand(toolName, input);
+  const blast = deriveBlastRadius(toolName, input);
   const diff = toolCallToDiff(toolName, input);
+
+  // Desktop "Allow once" submits via Enter while the card has focus.
+  useEffect(() => {
+    const el = cardRef.current;
+    if (!el) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key !== "Enter") return;
+      // Ignore Enter typed into a field (none today, but keep safe).
+      const target = e.target as HTMLElement | null;
+      if (target && (target.tagName === "TEXTAREA" || target.tagName === "INPUT")) {
+        return;
+      }
+      e.preventDefault();
+      const decision = remember ? "allow_always" : "allow_once";
+      onDecide(approvalId, decision);
+    };
+    el.addEventListener("keydown", handler);
+    return () => el.removeEventListener("keydown", handler);
+  }, [approvalId, remember, onDecide]);
+
+  const allowOnceDecision = remember ? "allow_always" : "allow_once";
+
   return (
-    <div className="rounded-[12px] border border-warn/40 bg-warn-wash/40 p-3 space-y-3">
-      <div>
-        <div className="flex items-center gap-2 mb-1.5">
-          <span className="h-2 w-2 rounded-full bg-warn" />
-          <span className="text-[11px] uppercase tracking-[0.12em] text-[#7a4700]">
-            permission · {toolName}
-          </span>
+    <>
+      {/* Mobile — bottom-sheet shape */}
+      <div
+        className="md:hidden rounded-t-[24px] bg-canvas border-t border-x border-line shadow-lift"
+        ref={cardRef}
+        tabIndex={-1}
+      >
+        <div className="flex justify-center pt-3">
+          <span className="h-1 w-12 bg-line-strong rounded-full" />
         </div>
-        <div className="display text-[16px] leading-tight">{summary}</div>
+        <div className="px-5 pt-3 pb-5">
+          <div className="flex items-center gap-2">
+            <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-[6px] border border-warn/30 bg-warn-wash text-[#7a4700] text-[10px] font-medium uppercase tracking-[0.1em]">
+              <span className="h-1.5 w-1.5 rounded-full bg-warn" />
+              permission
+            </span>
+            <span className="caps text-ink-muted">ask mode</span>
+          </div>
+          <h3 className="display text-[22px] leading-tight mt-2">{title}</h3>
+          <p className="text-[13.5px] text-ink-muted mt-1">
+            Claude wants to run this in{" "}
+            <span className="mono text-ink">{cwd}</span>
+          </p>
+
+          {diff ? (
+            <div className="mt-3 w-full space-y-1.5">
+              <DiffView diff={diff} />
+              {sessionId && (
+                <Link
+                  to={`/session/${sessionId}/diff?approvalId=${encodeURIComponent(approvalId)}`}
+                  className="block text-right mono text-[11px] text-klein-ink hover:underline"
+                >
+                  Review full diff →
+                </Link>
+              )}
+            </div>
+          ) : (
+            <CommandBlock command={command} />
+          )}
+
+          {/* Blast radius summary */}
+          <div
+            className={cn(
+              "mt-3 rounded-[8px] border p-3",
+              blast.danger
+                ? "border-danger/30 bg-danger-wash/60"
+                : "border-line bg-paper/60",
+            )}
+          >
+            <div className="caps text-ink-muted mb-1.5">Blast radius</div>
+            <div className="flex items-center gap-3 text-[12px]">
+              <div className="flex-1">
+                <div className="text-ink font-medium">{blast.title}</div>
+                <div className="text-ink-muted mt-0.5">{blast.subtitle}</div>
+              </div>
+            </div>
+          </div>
+
+          {/* Actions — stacked on mobile */}
+          <div className="mt-4 space-y-2">
+            <button
+              type="button"
+              onClick={() => onDecide(approvalId, "allow_once")}
+              className="w-full h-12 rounded-[8px] bg-ink text-canvas font-medium flex items-center justify-center gap-2"
+            >
+              <Check className="w-4 h-4" />
+              Allow once
+            </button>
+            <button
+              type="button"
+              onClick={() => onDecide(approvalId, "allow_always")}
+              className="w-full h-12 rounded-[8px] bg-canvas border border-line font-medium text-ink flex items-center justify-center gap-2"
+            >
+              Always allow{" "}
+              <span className="mono text-[12px] text-ink-muted">
+                {alwaysLabel}
+              </span>
+            </button>
+            <button
+              type="button"
+              onClick={() => onDecide(approvalId, "deny")}
+              className="w-full h-12 rounded-[8px] bg-canvas border border-line font-medium text-danger"
+            >
+              Deny
+            </button>
+          </div>
+          <div className="mt-3 text-[11px] text-ink-muted flex items-center justify-between">
+            <span>
+              Saved in <span className="mono">claudex</span>
+            </span>
+          </div>
+        </div>
       </div>
-      {diff ? (
-        <div className="w-full">
-          <DiffView diff={diff} />
+
+      {/* Desktop — modal-card shape */}
+      <div
+        className="hidden md:block w-[560px] max-w-full mx-auto rounded-[14px] bg-canvas border border-line shadow-lift overflow-hidden"
+        ref={cardRef}
+        tabIndex={-1}
+      >
+        <div className="px-6 pt-5 pb-4 border-b border-line flex items-start gap-4">
+          <span className="h-10 w-10 rounded-[10px] bg-warn-wash border border-warn/40 flex items-center justify-center text-warn shrink-0">
+            <AlertTriangle className="w-5 h-5" />
+          </span>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2">
+              <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-[6px] border border-warn/30 bg-warn-wash text-[#7a4700] text-[10px] font-medium uppercase tracking-[0.1em]">
+                <span className="h-1.5 w-1.5 rounded-full bg-warn" />
+                permission · ask mode
+              </span>
+            </div>
+            <h3 className="display text-[24px] leading-tight mt-1">{title}</h3>
+            <div className="mono text-[12px] text-ink-muted mt-1 truncate">
+              {metaLine}
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => onDecide(approvalId, "deny")}
+            aria-label="Dismiss (deny)"
+            className="h-8 w-8 rounded-[8px] border border-line hover:bg-paper flex items-center justify-center shrink-0"
+          >
+            <X className="w-4 h-4 text-ink-soft" />
+          </button>
         </div>
-      ) : (
-        <div className="mono text-[12px] text-canvas bg-ink rounded-[8px] px-3 py-2 whitespace-pre-wrap overflow-x-auto">
-          {JSON.stringify(input, null, 2)}
+
+        <div className="px-6 py-4 space-y-4">
+          {diff ? (
+            <div className="w-full space-y-1.5">
+              <DiffView diff={diff} />
+              {sessionId && (
+                <Link
+                  to={`/session/${sessionId}/diff?approvalId=${encodeURIComponent(approvalId)}`}
+                  className="block text-right mono text-[11px] text-klein-ink hover:underline"
+                >
+                  Review full diff →
+                </Link>
+              )}
+            </div>
+          ) : (
+            <CommandBlock command={command} cwd={cwd} desktop />
+          )}
+
+          {/* 1-up card row (Duration/Network tiles intentionally omitted — see FEATURES.md). */}
+          <div className="grid grid-cols-1 gap-2">
+            <div
+              className={cn(
+                "border rounded-[8px] p-3",
+                blast.danger
+                  ? "border-danger/30 bg-danger-wash/60"
+                  : "border-line bg-paper/50",
+              )}
+            >
+              <div className="caps text-ink-muted">Blast radius</div>
+              <div className="text-[13px] mt-1 font-medium">{blast.title}</div>
+              <div className="text-[11px] text-ink-muted mt-0.5">
+                {blast.subtitle}
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-[8px] border border-line bg-canvas p-3">
+            <div className="caps text-ink-muted mb-2">Why Claude is asking</div>
+            <div className="text-[13px] text-ink-muted">
+              Your permission mode is{" "}
+              <span className="mono text-ink">ask</span> and you haven't
+              approved <span className="mono text-ink">{alwaysLabel}</span>{" "}
+              before.
+            </div>
+            <label className="flex items-center gap-2 mt-3 text-[13px] cursor-pointer select-none">
+              <span
+                className={cn(
+                  "h-4 w-4 rounded-[4px] border border-line-strong bg-canvas flex items-center justify-center shrink-0",
+                )}
+              >
+                {remember && (
+                  <span className="h-2 w-2 bg-klein rounded-[1px]" />
+                )}
+              </span>
+              <input
+                type="checkbox"
+                className="sr-only"
+                checked={remember}
+                onChange={(e) => setRemember(e.target.checked)}
+              />
+              Remember this decision for matching commands
+            </label>
+          </div>
         </div>
+
+        <div className="px-6 py-4 border-t border-line flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => onDecide(approvalId, "deny")}
+            className="h-10 px-4 rounded-[8px] border border-line bg-canvas text-danger text-[14px] font-medium"
+          >
+            Deny
+          </button>
+          <button
+            type="button"
+            onClick={() => onDecide(approvalId, "allow_always")}
+            className="h-10 px-4 rounded-[8px] border border-line bg-canvas text-ink text-[14px] font-medium"
+          >
+            Always allow{" "}
+            <span className="mono text-[12px] text-ink-muted ml-1">
+              {alwaysLabel}
+            </span>
+          </button>
+          <button
+            type="button"
+            onClick={() => onDecide(approvalId, allowOnceDecision)}
+            className="h-10 px-4 rounded-[8px] bg-ink text-canvas text-[14px] font-medium ml-auto inline-flex items-center gap-1.5"
+          >
+            <Check className="w-4 h-4" />
+            Allow once
+            <kbd className="ml-1 mono text-[11px] px-1 py-0.5 rounded border border-canvas/20 text-canvas/70">
+              ⏎
+            </kbd>
+          </button>
+        </div>
+      </div>
+    </>
+  );
+}
+
+// Command block — dark terminal-style rendering. Used by the PermissionCard
+// when the tool isn't a diff-producing Edit/Write/MultiEdit.
+function CommandBlock({
+  command,
+  cwd,
+  desktop,
+}: {
+  command: { header: string; lines: CommandLine[] };
+  cwd?: string;
+  desktop?: boolean;
+}) {
+  return (
+    <div
+      className={cn(
+        "rounded-[10px] border border-line overflow-hidden bg-ink",
+        !desktop && "mt-3",
       )}
-      <div className="flex flex-wrap gap-2">
-        <button
-          onClick={() => onDecide(approvalId, "allow_once")}
-          className="flex-1 min-w-[120px] h-10 rounded-[8px] bg-ink text-canvas font-medium text-[13px]"
-        >
-          Allow once
-        </button>
-        <button
-          onClick={() => onDecide(approvalId, "allow_always")}
-          className="flex-1 min-w-[120px] h-10 rounded-[8px] border border-line bg-canvas text-ink text-[13px]"
-        >
-          Always
-        </button>
-        <button
-          onClick={() => onDecide(approvalId, "deny")}
-          className="h-10 px-3 rounded-[8px] border border-line bg-canvas text-danger text-[13px]"
-        >
-          Deny
-        </button>
+    >
+      <div className="flex items-center gap-2 px-3 py-1.5 bg-ink-soft border-b border-canvas/10">
+        <span className="h-2 w-2 rounded-full bg-[#febc2e]" />
+        <span className="mono text-[11px] text-canvas/70">{command.header}</span>
+        {desktop && cwd && (
+          <span className="ml-auto mono text-[11px] text-canvas/50">
+            cwd = {cwd}
+          </span>
+        )}
+      </div>
+      <div
+        className={cn(
+          "mono text-[13px] text-canvas leading-[1.55] overflow-x-auto",
+          desktop ? "px-4 py-3" : "px-3 py-3",
+        )}
+      >
+        {command.lines.map((line, i) => (
+          <div key={i} className="whitespace-pre">
+            {line.kind === "bash-first" ? (
+              <>
+                <span className="text-klein-soft">{line.binary}</span>
+                {line.rest && <span className="text-canvas">{line.rest}</span>}
+              </>
+            ) : line.kind === "bash-cont" ? (
+              <span className="text-canvas/60">{line.text}</span>
+            ) : (
+              <span className="text-canvas">{line.text}</span>
+            )}
+          </div>
+        ))}
       </div>
     </div>
   );
+}
+
+// ---------------------------------------------------------------------------
+// PermissionCard derivations — mapping our generic tool input onto the
+// mockup's Bash-flavored copy. Rules follow the instructions in the rebuild
+// brief; when a tile can't be computed honestly we omit rather than fake.
+// ---------------------------------------------------------------------------
+
+type CommandLine =
+  | { kind: "bash-first"; binary: string; rest: string }
+  | { kind: "bash-cont"; text: string }
+  | { kind: "plain"; text: string };
+
+function basename(p: string): string {
+  if (!p) return p;
+  const clean = p.replace(/\/+$/, "");
+  const i = clean.lastIndexOf("/");
+  return i >= 0 ? clean.slice(i + 1) : clean;
+}
+
+function deriveTitle(toolName: string, input: Record<string, unknown>): string {
+  switch (toolName) {
+    case "Bash":
+      return "Run a shell command?";
+    case "Edit":
+      return `Edit ${basename(String(input.file_path ?? ""))}?`;
+    case "Write":
+      return `Write to ${basename(String(input.file_path ?? ""))}?`;
+    case "MultiEdit": {
+      const edits = Array.isArray(input.edits) ? input.edits.length : 0;
+      return `Apply ${edits} edits to ${basename(String(input.file_path ?? ""))}?`;
+    }
+    case "WebFetch":
+      return "Fetch a URL?";
+    default:
+      return `Use ${toolName}?`;
+  }
+}
+
+function deriveCwd(
+  session: Session | null,
+  project: Project | null,
+): string {
+  if (session?.worktreePath) return session.worktreePath;
+  if (project?.path) return project.path;
+  return "this session";
+}
+
+function deriveMetaLine(
+  session: Session | null,
+  project: Project | null,
+): string {
+  const name = project?.name ?? "session";
+  const branch = session?.branch ?? "main";
+  const cwd = session?.worktreePath ?? project?.path ?? "";
+  return cwd ? `${name} · ${branch} · ${cwd}` : `${name} · ${branch}`;
+}
+
+function deriveAlwaysLabel(
+  toolName: string,
+  input: Record<string, unknown>,
+): string {
+  if (toolName === "Bash") {
+    const cmd = String(input.command ?? "").trim();
+    const first = cmd.split(/\s+/)[0] ?? "";
+    const second = cmd.split(/\s+/)[1] ?? "";
+    if (first && second) return `${first} ${second} *`;
+    if (first) return `${first} *`;
+    return "Bash *";
+  }
+  if (toolName === "Edit" || toolName === "Write" || toolName === "MultiEdit") {
+    return `${toolName} ${basename(String(input.file_path ?? ""))}`;
+  }
+  if (toolName === "WebFetch") {
+    const url = String(input.url ?? "");
+    try {
+      const u = new URL(url);
+      return `WebFetch ${u.hostname}`;
+    } catch {
+      return `WebFetch *`;
+    }
+  }
+  return `${toolName} *`;
+}
+
+function deriveCommand(
+  toolName: string,
+  input: Record<string, unknown>,
+): { header: string; lines: CommandLine[] } {
+  if (toolName === "Bash") {
+    const raw = String(input.command ?? "");
+    // Split on backslash-continuation then on explicit newlines.
+    // The mockup shows "pnpm vitest run \\ --reporter=default \\ --changed origin/main"
+    // rendering as three lines; we mimic that by treating backslash-EOL and
+    // actual \n identically.
+    const segments = raw
+      .split(/\\\n|\n/)
+      .map((s) => s.replace(/\s+$/, ""));
+    const lines: CommandLine[] = segments.map((seg, idx) => {
+      if (idx === 0) {
+        const trimmed = seg.replace(/^\s+/, "");
+        const sp = trimmed.indexOf(" ");
+        if (sp === -1) {
+          return { kind: "bash-first", binary: trimmed, rest: "" };
+        }
+        return {
+          kind: "bash-first",
+          binary: trimmed.slice(0, sp),
+          rest: trimmed.slice(sp),
+        };
+      }
+      return { kind: "bash-cont", text: seg };
+    });
+    return { header: "bash · shell", lines };
+  }
+  // Non-Bash — pretty-print input JSON inside the same dark block.
+  const pretty = safeStringify(input);
+  const lines: CommandLine[] = pretty
+    .split("\n")
+    .map((text) => ({ kind: "plain", text }));
+  return { header: `${toolName} · tool`, lines };
+}
+
+function deriveBlastRadius(
+  toolName: string,
+  input: Record<string, unknown>,
+): { title: string; subtitle: string; danger: boolean } {
+  if (toolName === "Bash") {
+    const cmd = String(input.command ?? "");
+    if (/\b(rm|mv|cp -r|truncate|curl .* \| sh)\b/.test(cmd)) {
+      return {
+        title: "Destructive shell command",
+        subtitle: "May modify or remove files",
+        danger: true,
+      };
+    }
+    if (/^(pnpm|npm|yarn|bun|vitest|jest|cargo|go test)\b/.test(cmd.trim())) {
+      return {
+        title: "Test / build command",
+        subtitle: "Will not modify source files",
+        danger: false,
+      };
+    }
+    return {
+      title: "Shell command",
+      subtitle: "Unclear impact",
+      danger: false,
+    };
+  }
+  if (toolName === "Edit" || toolName === "Write" || toolName === "MultiEdit") {
+    const filename = basename(String(input.file_path ?? ""));
+    const diff = toolCallToDiff(toolName, input);
+    const subtitle = diff
+      ? `+${diff.addCount} −${diff.delCount}`
+      : "pending";
+    return {
+      title: `Edits ${filename}`,
+      subtitle,
+      danger: false,
+    };
+  }
+  if (toolName === "WebFetch") {
+    const url = String(input.url ?? "");
+    let domain = url;
+    try {
+      domain = new URL(url).hostname;
+    } catch {
+      /* leave as-is */
+    }
+    return {
+      title: "Network read",
+      subtitle: domain,
+      danger: false,
+    };
+  }
+  return {
+    title: toolName,
+    subtitle: "Unclear impact",
+    danger: false,
+  };
 }
 
 // --------------------------------------------------------------------------
@@ -1043,6 +1552,9 @@ function Composer({
   // moment the user types a *new* `@` or `/`.
   const [suppressedAt, setSuppressedAt] = useState<number | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  // Forwarded ↑/↓/⏎ from the composer textarea into whichever picker is open.
+  // Each picker registers move/select via its imperative handle.
+  const pickerRef = useRef<PickerHandle | null>(null);
 
   // Detect / update the active trigger from (text, cursor). Pure — only
   // reads from state, never writes.
@@ -1272,14 +1784,35 @@ function Composer({
       </div>
 
       <div className="shrink-0 border-t border-line bg-canvas px-3 pt-2 pb-3 mt-2">
-        <div className="rounded-[12px] border border-line bg-paper/60 p-2">
-          <textarea
-            ref={textareaRef}
+        <div className="rounded-[12px] border border-line bg-paper/60 p-2 focus-within:border-klein focus-within:ring-2 focus-within:ring-klein/15 transition-colors">
+          <HighlightedComposer
+            textareaRef={textareaRef}
             value={text}
             onChange={(e) =>
               onInputChange(e.target.value, e.target.selectionEnd ?? 0)
             }
             onKeyDown={(e) => {
+              // When a picker is open, route arrow keys + Enter to it so
+              // ↑/↓ scroll the list and ⏎ inserts the highlighted row. We
+              // keep focus in the textarea so typing / backspacing past the
+              // trigger still works naturally.
+              if (trigger && pickerRef.current) {
+                if (e.key === "ArrowDown") {
+                  e.preventDefault();
+                  pickerRef.current.move("down");
+                  return;
+                }
+                if (e.key === "ArrowUp") {
+                  e.preventDefault();
+                  pickerRef.current.move("up");
+                  return;
+                }
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  pickerRef.current.select();
+                  return;
+                }
+              }
               if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();
                 send();
@@ -1290,13 +1823,11 @@ function Composer({
                 dismissPicker();
               }
             }}
-            rows={1}
             placeholder={
               busy
                 ? "Type while claude thinks — will queue…"
                 : "Type a message…  try / or @"
             }
-            className="w-full bg-transparent outline-none text-[15px] resize-none min-h-[24px] max-h-40 py-1 px-2"
           />
           <div className="flex items-center justify-between px-1 mt-1">
             {/* Mobile: show model · mode here (mockup 929). Desktop already
@@ -1334,6 +1865,7 @@ function Composer({
 
       {trigger?.kind === "slash" && (
         <SlashCommandSheet
+          ref={pickerRef}
           commands={slashCommands}
           initialQuery={trigger.query}
           onPick={handlePickSlash}
@@ -1342,6 +1874,7 @@ function Composer({
       )}
       {trigger?.kind === "mention" && project && (
         <FileMentionSheet
+          ref={pickerRef}
           projectRoot={project.path}
           initialQuery={trigger.query}
           onPick={handlePickMention}
@@ -1375,6 +1908,108 @@ function Composer({
       setText(next);
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+// HighlightedComposer — a textarea that renders its content with syntax
+// highlighting for `/command` and `@file` tokens. The trick: stack a
+// transparent `<textarea>` on top of a `<pre>` mirror that has identical
+// padding/font/line-height. The textarea owns the caret + selection, the
+// mirror owns the colors. We sync scroll so long-wrapped text stays aligned.
+//
+// The textarea is the source of truth — its `value`/`onChange` wiring is
+// untouched so the parent Composer's trigger detection keeps working.
+// ---------------------------------------------------------------------------
+function HighlightedComposer({
+  textareaRef,
+  value,
+  onChange,
+  onKeyDown,
+  placeholder,
+}: {
+  textareaRef: React.RefObject<HTMLTextAreaElement>;
+  value: string;
+  onChange: (e: React.ChangeEvent<HTMLTextAreaElement>) => void;
+  onKeyDown: (e: React.KeyboardEvent<HTMLTextAreaElement>) => void;
+  placeholder?: string;
+}) {
+  const mirrorRef = useRef<HTMLPreElement>(null);
+
+  // Keep the mirror's scroll position in sync with the textarea so that
+  // long content stays visually aligned. Fires on both input and scroll
+  // (e.g. when the caret moves to a line outside the viewport).
+  function syncScroll() {
+    const t = textareaRef.current;
+    const m = mirrorRef.current;
+    if (!t || !m) return;
+    m.scrollTop = t.scrollTop;
+    m.scrollLeft = t.scrollLeft;
+  }
+
+  const highlighted = useMemo(() => renderHighlighted(value), [value]);
+
+  return (
+    <div className="relative">
+      <pre
+        ref={mirrorRef}
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-0 m-0 overflow-hidden whitespace-pre-wrap break-words font-sans text-[15px] leading-[1.5] text-ink py-1 px-2"
+      >
+        {highlighted}
+      </pre>
+      <textarea
+        ref={textareaRef}
+        value={value}
+        onChange={(e) => {
+          onChange(e);
+          // Run after the textarea updates its own scroll metrics.
+          requestAnimationFrame(syncScroll);
+        }}
+        onKeyDown={onKeyDown}
+        onScroll={syncScroll}
+        rows={1}
+        placeholder={placeholder}
+        spellCheck={false}
+        className="relative w-full bg-transparent outline-none text-[15px] leading-[1.5] resize-none min-h-[24px] max-h-40 py-1 px-2 text-transparent caret-ink selection:bg-klein/20 selection:text-transparent placeholder:text-ink-muted"
+      />
+    </div>
+  );
+}
+
+// Tokenize the composer's raw text into a React fragment list where slash
+// commands and file mentions are wrapped in colored spans. Everything else
+// renders as plain text so whitespace is preserved.
+//
+// Regex notes:
+// - `/cmd`   must be followed by a word boundary (whitespace or end). Slash-
+//   only is NOT a token — users typing "/" shouldn't see a flash of color.
+// - `@path`  matches until the next whitespace. `@` alone is also not a token.
+// The trailing newline quirk (textarea vs pre sizing): if the string ends
+// with `\n`, append a zero-width space so the mirror keeps a full final line.
+function renderHighlighted(text: string): React.ReactNode {
+  const display = text.endsWith("\n") ? text + "​" : text;
+  const pattern = /(\/[a-z][a-z0-9-]*)(?=\s|$)|(@\S+)/g;
+  const parts: React.ReactNode[] = [];
+  let last = 0;
+  let match: RegExpExecArray | null;
+  let key = 0;
+  while ((match = pattern.exec(display)) !== null) {
+    const start = match.index;
+    const token = match[0];
+    if (start > last) {
+      parts.push(display.slice(last, start));
+    }
+    parts.push(
+      <span key={key++} className="text-klein">
+        {token}
+      </span>,
+    );
+    last = start + token.length;
+  }
+  if (last < display.length) {
+    parts.push(display.slice(last));
+  }
+  return parts;
 }
 
 function summarizeInput(input: Record<string, unknown>): string {
