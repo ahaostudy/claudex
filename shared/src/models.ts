@@ -277,6 +277,56 @@ export const VerifyTotpResponse = z.object({
 });
 export type VerifyTotpResponse = z.infer<typeof VerifyTotpResponse>;
 
+// Alternate second-factor path when the user's authenticator is unavailable:
+// redeem one of the 10 single-use recovery codes that were issued at `init`
+// (or later, via the Regenerate flow on the Security tab). Same
+// challenge-then-cookie shape as `/verify-totp`. The `code` field accepts the
+// user-visible `xxxx-xxxx-xxxx-xxxx` spelling and also tolerates whitespace
+// or case variation — normalization happens server-side before bcrypt
+// comparison — so the schema only enforces a coarse length bound.
+export const VerifyRecoveryCodeRequest = z.object({
+  challengeId: z.string(),
+  // Min 16 (bare chars) / max 32 (with separators) gives us some slack for
+  // users who paste extra whitespace.
+  code: z.string().min(16).max(64),
+});
+export type VerifyRecoveryCodeRequest = z.infer<
+  typeof VerifyRecoveryCodeRequest
+>;
+
+export const VerifyRecoveryCodeResponse = z.object({
+  ok: z.literal(true),
+  /** How many unused codes remain after this consumption. Useful for UIs
+   * that want to nag the user to regenerate before they run out. */
+  remaining: z.number().int().nonnegative(),
+});
+export type VerifyRecoveryCodeResponse = z.infer<
+  typeof VerifyRecoveryCodeResponse
+>;
+
+export const RecoveryCodesStateResponse = z.object({
+  remaining: z.number().int().nonnegative(),
+  /** ISO timestamp of the most recent regenerate. Absent if the user has
+   * never generated any codes (shouldn't happen for installs created after
+   * migration 12 — init.ts seeds them — but the field is optional so the
+   * UI can render a degrade gracefully for older installs). */
+  generatedAt: z.string().optional(),
+});
+export type RecoveryCodesStateResponse = z.infer<
+  typeof RecoveryCodesStateResponse
+>;
+
+export const RegenerateRecoveryCodesResponse = z.object({
+  /** The plaintext codes, exactly 10 entries, rendered as
+   * `xxxx-xxxx-xxxx-xxxx`. Returned to the client **exactly once** — the
+   * server only stores hashes, so there is no "show them again" endpoint. */
+  codes: z.array(z.string()).length(10),
+  generatedAt: z.string(),
+});
+export type RegenerateRecoveryCodesResponse = z.infer<
+  typeof RegenerateRecoveryCodesResponse
+>;
+
 export const WhoAmIResponse = z.object({
   user: User,
 });
@@ -905,3 +955,27 @@ export const AuditListResponse = z.object({
   totalCount: z.number().int().nonnegative(),
 });
 export type AuditListResponse = z.infer<typeof AuditListResponse>;
+
+// ============================================================================
+// Project memory (CLAUDE.md preview)
+//
+// Returned by `GET /api/projects/:id/memory` — read-only surfacing of the
+// CLAUDE.md files the `claude` CLI treats as ambient memory. Up to two entries:
+// one project-scoped (<project>/CLAUDE.md or <project>/.claude/CLAUDE.md, first
+// match wins) and one user-scoped (~/.claude/CLAUDE.md). `content` is capped at
+// 64 KB server-side; `truncated: true` signals the UI should say so.
+// ============================================================================
+
+export const MemoryFile = z.object({
+  scope: z.enum(["project", "user"]),
+  path: z.string(),
+  bytes: z.number().int().nonnegative(),
+  content: z.string(),
+  truncated: z.boolean().optional(),
+});
+export type MemoryFile = z.infer<typeof MemoryFile>;
+
+export const MemoryResponse = z.object({
+  files: z.array(MemoryFile),
+});
+export type MemoryResponse = z.infer<typeof MemoryResponse>;

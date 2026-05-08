@@ -4,10 +4,13 @@ import {
   Bell,
   BellOff,
   ChevronLeft,
+  Copy,
+  Download,
   FolderOpen,
   KeyRound,
   Palette,
   Plug,
+  RefreshCw,
   Server,
   Shield,
   Sliders,
@@ -541,10 +544,12 @@ function SecurityPanel() {
         </div>
 
         <div className="px-5 py-3 border-t border-line bg-paper/40 text-[12.5px] text-ink-muted">
-          Recovery codes, "last used", paired browsers, regenerate/disable flows
-          are planned. Rotate via <span className="mono">pnpm reset-credentials</span> for now.
+          Disable-2FA, paired browsers, and "last used" tracking are planned.
+          Rotate via <span className="mono">pnpm reset-credentials</span> for now.
         </div>
       </div>
+
+      <RecoveryCodesCard />
 
       <TrustedProjectsCard />
 
@@ -561,6 +566,260 @@ function SecurityPanel() {
           setSearchParams(next, { replace: true });
         }}
       />
+    </div>
+  );
+}
+
+// Recovery-codes card — sits between the 2FA card and the Trusted projects
+// card on the Security tab. Mirrors the TrustedProjectsCard's two-click
+// commit pattern for the dangerous action (Regenerate invalidates every
+// previous code) and renders plaintext exactly once, in a modal, after a
+// successful regenerate. `remaining === 0` surfaces a warning pill so the
+// user nags themselves into rotating before they're locked out.
+function RecoveryCodesCard() {
+  const [state, setState] = useState<
+    { remaining: number; generatedAt?: string } | null
+  >(null);
+  const [err, setErr] = useState<string | null>(null);
+  // Two-click arming for the Regenerate button — analogous to the Untrust
+  // flow elsewhere on this tab. Cleared on a 3s timeout so a stray first
+  // click doesn't linger as a hot button.
+  const [armed, setArmed] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [freshCodes, setFreshCodes] = useState<string[] | null>(null);
+
+  async function refresh() {
+    setErr(null);
+    try {
+      const res = await api.getRecoveryCodesState();
+      setState({
+        remaining: res.remaining,
+        ...(res.generatedAt ? { generatedAt: res.generatedAt } : {}),
+      });
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.code : "load failed");
+    }
+  }
+
+  useEffect(() => {
+    void refresh();
+  }, []);
+
+  useEffect(() => {
+    if (!armed) return;
+    const t = window.setTimeout(() => setArmed(false), 3000);
+    return () => window.clearTimeout(t);
+  }, [armed]);
+
+  async function regenerate() {
+    if (!armed) {
+      setArmed(true);
+      return;
+    }
+    setArmed(false);
+    setBusy(true);
+    setErr(null);
+    try {
+      const res = await api.regenerateRecoveryCodes();
+      setFreshCodes(res.codes);
+      await refresh();
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.code : "regenerate failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const remaining = state?.remaining ?? 0;
+  const generatedAt = state?.generatedAt;
+  const exhausted = state !== null && remaining === 0;
+
+  return (
+    <div className="rounded-[12px] border border-line bg-canvas overflow-hidden">
+      <div className="flex items-center gap-3 px-5 py-4 border-b border-line">
+        <div className="h-9 w-9 rounded-[8px] bg-paper border border-line flex items-center justify-center shrink-0">
+          <KeyRound className="w-4 h-4 text-ink-muted" />
+        </div>
+        <div className="min-w-0">
+          <div className="display text-[18px] leading-tight">
+            Recovery codes
+          </div>
+          <div className="text-[13px] text-ink-muted mt-0.5">
+            Single-use fallbacks if you lose your authenticator. Each code
+            works once.
+          </div>
+        </div>
+        {exhausted ? (
+          <span className="ml-auto inline-flex items-center gap-1.5 px-2 py-0.5 rounded-[6px] border border-warn/40 bg-warn-wash text-[#7a4700] text-[10px] font-medium uppercase tracking-[0.1em] shrink-0">
+            no codes left
+          </span>
+        ) : (
+          <span className="ml-auto inline-flex items-center gap-1.5 px-2 py-0.5 rounded-[6px] border border-line bg-paper text-ink-soft text-[10px] font-medium uppercase tracking-[0.1em] shrink-0">
+            {state === null ? "…" : `${remaining} of 10`}
+          </span>
+        )}
+      </div>
+
+      <div className="px-5 py-4 text-[13px] text-ink-soft">
+        {state === null ? (
+          <span className="mono text-ink-muted">loading…</span>
+        ) : (
+          <>
+            <div>
+              <span className="font-medium">{remaining} of 10 unused.</span>{" "}
+              {generatedAt
+                ? `Generated ${relativeTimeShort(generatedAt)} ago.`
+                : "No codes generated yet."}
+            </div>
+            {exhausted && (
+              <div className="mt-2 text-[12.5px] text-[#7a4700]">
+                You have no recovery codes left. Regenerate before you lose your
+                authenticator — otherwise you'll need to reset from the CLI.
+              </div>
+            )}
+          </>
+        )}
+      </div>
+
+      <div className="px-5 py-3 border-t border-line bg-paper/40 flex items-center gap-2 flex-wrap">
+        <button
+          type="button"
+          onClick={regenerate}
+          disabled={busy}
+          className={cn(
+            "h-9 px-3 rounded-[8px] text-[13px] inline-flex items-center gap-1.5 disabled:opacity-50",
+            armed
+              ? "border border-danger/40 bg-danger-wash text-danger font-medium"
+              : "border border-line bg-canvas text-ink-soft hover:bg-paper",
+          )}
+        >
+          <RefreshCw className="w-3.5 h-3.5" />
+          {busy
+            ? "Generating…"
+            : armed
+              ? "Click again to replace all"
+              : "Regenerate codes"}
+        </button>
+        <span className="text-[11.5px] text-ink-muted ml-1">
+          Replaces the existing batch; old printouts stop working.
+        </span>
+      </div>
+
+      {err && (
+        <div className="m-4 text-[13px] text-danger bg-danger-wash rounded-[8px] px-3 py-2 border border-danger/30">
+          {err}
+        </div>
+      )}
+
+      {freshCodes && (
+        <RecoveryCodesModal
+          codes={freshCodes}
+          onClose={() => setFreshCodes(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+// One-time display of the 10 plaintext codes after a successful regenerate.
+// Server stores only hashes so there's no "show me again" path — the modal
+// is the single, final chance to capture them. Copy-all + Download-as-.txt
+// affordances make that capture trivial on mobile.
+function RecoveryCodesModal({
+  codes,
+  onClose,
+}: {
+  codes: string[];
+  onClose: () => void;
+}) {
+  const [copied, setCopied] = useState(false);
+
+  async function copyAll() {
+    try {
+      await navigator.clipboard.writeText(codes.join("\n"));
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
+    } catch {
+      /* no clipboard access — user can still tap-hold to select */
+    }
+  }
+
+  function download() {
+    const header = [
+      "# claudex recovery codes",
+      `# generated ${new Date().toISOString()}`,
+      "# each code works ONCE; keep offline",
+      "",
+    ].join("\n");
+    const blob = new Blob([header + codes.join("\n") + "\n"], {
+      type: "text/plain",
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "claudex-recovery-codes.txt";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  return (
+    <div className="fixed inset-0 z-30 bg-ink/30 flex items-end sm:items-center justify-center">
+      <div className="w-full max-w-md bg-canvas border-t sm:border border-line rounded-t-[20px] sm:rounded-[14px] shadow-lift p-5">
+        <div className="flex items-center mb-4">
+          <div>
+            <div className="caps text-ink-muted">Security</div>
+            <h2 className="display text-[1.25rem] leading-tight mt-0.5">
+              New recovery codes
+            </h2>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="ml-auto h-8 w-8 rounded-[8px] border border-line flex items-center justify-center"
+            aria-label="Close"
+          >
+            ✕
+          </button>
+        </div>
+        <div className="text-[13px] text-ink-muted mb-3">
+          Save these now — they will not be shown again. Each code signs you in
+          once if you lose access to your authenticator.
+        </div>
+        <ul className="mono text-[13.5px] rounded-[8px] border border-line bg-paper/40 divide-y divide-line">
+          {codes.map((c) => (
+            <li key={c} className="px-3 py-2">
+              {c}
+            </li>
+          ))}
+        </ul>
+        <div className="mt-4 flex items-center gap-2 flex-wrap">
+          <button
+            type="button"
+            onClick={copyAll}
+            className="h-9 px-3 rounded-[8px] border border-line bg-canvas text-[13px] inline-flex items-center gap-1.5"
+          >
+            <Copy className="w-3.5 h-3.5" />
+            {copied ? "Copied" : "Copy all"}
+          </button>
+          <button
+            type="button"
+            onClick={download}
+            className="h-9 px-3 rounded-[8px] border border-line bg-canvas text-[13px] inline-flex items-center gap-1.5"
+          >
+            <Download className="w-3.5 h-3.5" />
+            Download as .txt
+          </button>
+          <button
+            type="button"
+            onClick={onClose}
+            className="ml-auto h-9 px-3 rounded-[8px] bg-ink text-canvas text-[13px] font-medium"
+          >
+            Done
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

@@ -112,7 +112,7 @@ describe("db migrations", () => {
       .prepare("SELECT id FROM _migrations ORDER BY id")
       .all() as Array<{ id: number }>;
     expect(migrations.map((m) => m.id)).toEqual([
-      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11,
+      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12,
     ]);
   });
 });

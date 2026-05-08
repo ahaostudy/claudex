@@ -624,6 +624,22 @@ export class SessionManager {
     this.deps.broadcast(sessionId, { type: "refresh_transcript" });
   }
 
+  /**
+   * Broadcast a `queue_update` frame to every authenticated tab via the
+   * global WS channel. The queue runner and HTTP routes call this through
+   * the QueueStore `onChange` hook; callers here pass the current timestamp
+   * so clients can display "just now" in the Queue screen without an extra
+   * round-trip. Not tied to any session — uses empty-string `sessionId`
+   * because the frame is cross-session by design (see ws.ts
+   * GLOBAL_FRAME_TYPES).
+   */
+  notifyQueueUpdate(): void {
+    this.deps.broadcast("", {
+      type: "queue_update",
+      at: new Date().toISOString(),
+    });
+  }
+
   async interrupt(sessionId: string): Promise<void> {
     const entry = this.runners.get(sessionId);
     if (!entry) return;

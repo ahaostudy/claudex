@@ -3,8 +3,12 @@ import type Database from "better-sqlite3";
 import {
   ChangePasswordRequest,
   LoginRequest,
+  VerifyRecoveryCodeRequest,
   VerifyTotpRequest,
   type LoginResponse,
+  type RecoveryCodesStateResponse,
+  type RegenerateRecoveryCodesResponse,
+  type VerifyRecoveryCodeResponse,
   type VerifyTotpResponse,
   type WhoAmIResponse,
 } from "@claudex/shared";
@@ -18,6 +22,11 @@ import {
   verifyPassword,
   verifyTotp,
 } from "./index.js";
+import {
+  generateRecoveryCodes,
+  hashRecoveryCodes,
+  RECOVERY_CODE_BATCH_SIZE,
+} from "./recovery-codes.js";
 import { SlidingWindowLimiter } from "./rate-limit.js";
 import type { AuditStore } from "../audit/store.js";
 
@@ -241,6 +250,76 @@ export async function registerAuthRoutes(
     return reply.send(body);
   });
 
+  // Recovery-code path for the second factor. Mirrors `/verify-totp`:
+  //   1. Shares the per-challenge sliding-window limiter (10 failed attempts
+  //      per 15min keyed on `challengeId`) — an attacker who cleared bcrypt
+  //      cannot bypass TOTP *and then* shift to the recovery endpoint to
+  //      grind untracked; the limiter is one pool.
+  //   2. Wrong code does NOT consume the challenge (peek-then-consume), so a
+  //      user who fat-fingered a group can retry without redoing bcrypt.
+  //   3. Successful redemption flips `used_at` on the matched row and issues
+  //      the same session cookie `/verify-totp` would have.
+  // A matched code is permanently spent; if remaining hits zero the user is
+  // warned from the Security tab to regenerate before they run out.
+  app.post("/api/auth/verify-recovery-code", async (req, reply) => {
+    const parsed = VerifyRecoveryCodeRequest.safeParse(req.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ error: "bad_request" });
+    }
+    const { challengeId, code } = parsed.data;
+
+    const gate = totpLimiter.check(challengeId);
+    if (!gate.allowed) {
+      deps.audit.append({
+        event: "totp_rate_limited",
+        detail: `challenge=${challengeId} (recovery)`,
+        ...reqCtx(req),
+      });
+      reply.header("Retry-After", String(gate.retryAfterSec ?? 1));
+      return reply
+        .code(429)
+        .send({ error: "rate_limited", retryAfterSec: gate.retryAfterSec });
+    }
+
+    const userId = deps.challenges.peek(challengeId);
+    if (!userId) {
+      return reply.code(401).send({ error: "invalid_challenge" });
+    }
+    const row = users.findById(userId);
+    if (!row) {
+      deps.challenges.consume(challengeId);
+      return reply.code(401).send({ error: "user_gone" });
+    }
+
+    const matched = await users.consumeRecoveryCode(row.id, code);
+    if (!matched) {
+      totpLimiter.recordFailure(challengeId);
+      deps.audit.append({
+        userId: row.id,
+        event: "recovery_code_failed",
+        ...reqCtx(req),
+      });
+      return reply.code(401).send({ error: "invalid_recovery_code" });
+    }
+
+    totpLimiter.reset(challengeId);
+    deps.challenges.consume(challengeId);
+    const token = await signAccessToken(deps.jwtSecret, row.id);
+    reply.setCookie(ACCESS_COOKIE_NAME, token, {
+      ...cookieOpts(req),
+      maxAge: 60 * 60 * 24 * 30,
+    });
+    const remaining = users.countRemainingRecoveryCodes(row.id);
+    deps.audit.append({
+      userId: row.id,
+      event: "recovery_code_used",
+      detail: `remaining=${remaining}`,
+      ...reqCtx(req),
+    });
+    const body: VerifyRecoveryCodeResponse = { ok: true, remaining };
+    return reply.send(body);
+  });
+
   app.post("/api/auth/logout", async (req, reply) => {
     reply.clearCookie(ACCESS_COOKIE_NAME, cookieOpts(req));
     // Audit: best-effort user id — clearCookie happens regardless, but we
@@ -320,6 +399,50 @@ export async function registerAuthRoutes(
         ...reqCtx(req),
       });
       return reply.send({ ok: true });
+    },
+  );
+
+  // How many recovery codes does the logged-in user have left, and when were
+  // they last regenerated? Login-gated — pre-login callers have no business
+  // polling this surface. Plaintext codes never leave `/regenerate` and only
+  // on creation; there is no "show them again" endpoint by design.
+  app.get(
+    "/api/auth/recovery-codes/state",
+    { preHandler: app.requireAuth as any },
+    async (req, reply) => {
+      const uid = req.userId!;
+      const remaining = users.countRemainingRecoveryCodes(uid);
+      const generatedAt = users.recoveryCodesGeneratedAt(uid);
+      const body: RecoveryCodesStateResponse = {
+        remaining,
+        ...(generatedAt ? { generatedAt } : {}),
+      };
+      return reply.send(body);
+    },
+  );
+
+  // Regenerate wipes the previous batch (used or unused) and issues 10 fresh
+  // codes. Returns plaintext — exactly once — so the UI can show them in a
+  // one-time modal with copy/download affordances. The server only stores
+  // bcrypt hashes, so there is deliberately no way to retrieve the same
+  // plaintext after this response ends.
+  app.post(
+    "/api/auth/recovery-codes/regenerate",
+    { preHandler: app.requireAuth as any },
+    async (req, reply) => {
+      const uid = req.userId!;
+      const codes = generateRecoveryCodes(RECOVERY_CODE_BATCH_SIZE);
+      const hashes = await hashRecoveryCodes(codes);
+      users.setRecoveryCodeHashes(uid, hashes);
+      const generatedAt = users.recoveryCodesGeneratedAt(uid) ?? new Date().toISOString();
+      deps.audit.append({
+        userId: uid,
+        event: "recovery_codes_regenerated",
+        detail: `count=${codes.length}`,
+        ...reqCtx(req),
+      });
+      const body: RegenerateRecoveryCodesResponse = { codes, generatedAt };
+      return reply.send(body);
     },
   );
 }

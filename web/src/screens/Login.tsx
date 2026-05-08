@@ -6,16 +6,29 @@ import { cn } from "@/lib/cn";
 
 export function LoginScreen() {
   const navigate = useNavigate();
-  const { login, verifyTotp, challengeId, error, clearError, user } =
+  const { login, verifyTotp, verifyRecoveryCode, challengeId, error, clearError, user } =
     useAuth();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [code, setCode] = useState("");
+  const [recoveryCode, setRecoveryCode] = useState("");
+  // On the TOTP step, swap the six-digit input for a recovery-code input.
+  // Reset whenever the challenge changes (so going back to credentials and
+  // logging in fresh defaults to TOTP again).
+  const [useRecovery, setUseRecovery] = useState(false);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     if (user) navigate("/", { replace: true });
   }, [user, navigate]);
+
+  useEffect(() => {
+    if (!challengeId) {
+      setUseRecovery(false);
+      setCode("");
+      setRecoveryCode("");
+    }
+  }, [challengeId]);
 
   const onCredentials = async (e: FormEvent) => {
     e.preventDefault();
@@ -43,6 +56,18 @@ export function LoginScreen() {
     }
   };
 
+  const onRecovery = async (e: FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
+    try {
+      await verifyRecoveryCode(recoveryCode);
+    } catch {
+      setRecoveryCode("");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const step = challengeId ? "totp" : "credentials";
 
   return (
@@ -57,12 +82,18 @@ export function LoginScreen() {
         </div>
 
         <h1 className="display text-[2.1rem] leading-[1.05] mb-2">
-          {step === "credentials" ? "Welcome back." : "One last step."}
+          {step === "credentials"
+            ? "Welcome back."
+            : useRecovery
+              ? "Use a recovery code."
+              : "One last step."}
         </h1>
         <p className="text-[15px] text-ink-muted mb-7">
           {step === "credentials"
             ? "Sign in to this claudex instance."
-            : "Enter the six-digit code from your authenticator."}
+            : useRecovery
+              ? "Paste one of the single-use codes you saved during setup."
+              : "Enter the six-digit code from your authenticator."}
         </p>
 
         <Stepper current={step === "credentials" ? 0 : 1} />
@@ -107,23 +138,77 @@ export function LoginScreen() {
               </div>
             </form>
           ) : (
-            <form onSubmit={onCode} className="space-y-4">
-              <TotpInput value={code} onChange={setCode} />
-              {error && <ErrorBanner>{error}</ErrorBanner>}
-              <button
-                type="submit"
-                disabled={busy || code.length !== 6}
-                className={cn(
-                  "w-full h-12 rounded-[8px] bg-ink text-canvas font-medium transition-opacity",
-                  "disabled:opacity-50 disabled:pointer-events-none",
-                )}
-              >
-                {busy ? "Verifying…" : "Unlock"}
-              </button>
-              <div className="text-[12px] text-ink-muted pt-1">
-                Codes rotate every 30 seconds.
-              </div>
-            </form>
+            <>
+              {useRecovery ? (
+                <form onSubmit={onRecovery} className="space-y-4">
+                  <RecoveryCodeInput
+                    value={recoveryCode}
+                    onChange={(v) => {
+                      clearError();
+                      setRecoveryCode(v);
+                    }}
+                  />
+                  {error && <ErrorBanner>{error}</ErrorBanner>}
+                  <button
+                    type="submit"
+                    disabled={busy || recoveryCode.replace(/[\s-]/g, "").length < 16}
+                    className={cn(
+                      "w-full h-12 rounded-[8px] bg-ink text-canvas font-medium transition-opacity",
+                      "disabled:opacity-50 disabled:pointer-events-none",
+                    )}
+                  >
+                    {busy ? "Verifying…" : "Unlock"}
+                  </button>
+                  <div className="flex items-center justify-between text-[12px] pt-1">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        clearError();
+                        setUseRecovery(false);
+                        setRecoveryCode("");
+                      }}
+                      className="text-klein underline underline-offset-2 hover:text-ink"
+                    >
+                      Back to authenticator
+                    </button>
+                    <span className="text-ink-muted">
+                      Each code works once.
+                    </span>
+                  </div>
+                </form>
+              ) : (
+                <form onSubmit={onCode} className="space-y-4">
+                  <TotpInput value={code} onChange={setCode} />
+                  {error && <ErrorBanner>{error}</ErrorBanner>}
+                  <button
+                    type="submit"
+                    disabled={busy || code.length !== 6}
+                    className={cn(
+                      "w-full h-12 rounded-[8px] bg-ink text-canvas font-medium transition-opacity",
+                      "disabled:opacity-50 disabled:pointer-events-none",
+                    )}
+                  >
+                    {busy ? "Verifying…" : "Unlock"}
+                  </button>
+                  <div className="flex items-center justify-between text-[12px] pt-1">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        clearError();
+                        setUseRecovery(true);
+                        setCode("");
+                      }}
+                      className="text-klein underline underline-offset-2 hover:text-ink"
+                    >
+                      Use a recovery code
+                    </button>
+                    <span className="text-ink-muted">
+                      Codes rotate every 30 seconds.
+                    </span>
+                  </div>
+                </form>
+              )}
+            </>
           )}
         </div>
       </div>
@@ -245,6 +330,40 @@ function TotpInput({
           );
         })}
       </label>
+    </div>
+  );
+}
+
+function RecoveryCodeInput({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  return (
+    <div>
+      <div className="text-[13px] font-medium mb-1.5 text-ink-soft">
+        Recovery code
+      </div>
+      <div className="flex items-center gap-2 px-3 h-12 bg-canvas border border-line rounded-[8px] focus-within:border-klein focus-within:shadow-[0_0_0_3px_rgba(204,120,92,0.22)] transition-shadow">
+        <Lock className="w-4 h-4 text-ink-muted" />
+        <input
+          type="text"
+          inputMode="text"
+          autoFocus
+          autoCapitalize="none"
+          autoCorrect="off"
+          spellCheck={false}
+          placeholder="xxxx-xxxx-xxxx-xxxx"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          className="flex-1 bg-transparent outline-none text-[15px] mono tracking-wide"
+        />
+      </div>
+      <div className="text-[11.5px] text-ink-muted mt-1.5">
+        Sixteen characters, dashes optional. Each code works once.
+      </div>
     </div>
   );
 }

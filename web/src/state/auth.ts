@@ -10,6 +10,11 @@ interface AuthState {
   checkSession: () => Promise<void>;
   login: (username: string, password: string) => Promise<void>;
   verifyTotp: (code: string) => Promise<void>;
+  /**
+   * Redeem a single-use recovery code in place of the rolling TOTP. Same
+   * challenge-consumed / cookie-issued semantics as `verifyTotp`.
+   */
+  verifyRecoveryCode: (code: string) => Promise<void>;
   logout: () => Promise<void>;
   clearError: () => void;
 }
@@ -62,6 +67,34 @@ export const useAuth = create<AuthState>((set, get) => ({
             : code === "invalid_challenge"
               ? "会话已过期，请重新登录"
               : code,
+      });
+      if (code === "invalid_challenge") set({ challengeId: null });
+      throw err;
+    }
+  },
+
+  async verifyRecoveryCode(code) {
+    const challengeId = get().challengeId;
+    if (!challengeId) {
+      set({ error: "missing_challenge" });
+      throw new Error("missing_challenge");
+    }
+    set({ error: null });
+    try {
+      await api.verifyRecoveryCode({ challengeId, code });
+      const res = await api.whoami();
+      set({ user: res.user, challengeId: null });
+    } catch (err) {
+      const code = err instanceof ApiError ? err.code : "unknown";
+      set({
+        error:
+          code === "invalid_recovery_code"
+            ? "恢复码不正确，请重试"
+            : code === "invalid_challenge"
+              ? "会话已过期，请重新登录"
+              : code === "rate_limited"
+                ? "尝试次数过多，请稍后再试"
+                : code,
       });
       if (code === "invalid_challenge") set({ challengeId: null });
       throw err;

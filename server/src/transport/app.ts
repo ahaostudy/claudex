@@ -21,6 +21,7 @@ import { registerCliRoutes } from "../sessions/cli-routes.js";
 import { registerUsageRoutes } from "../sessions/usage-routes.js";
 import { registerSessionExportRoutes } from "../sessions/export-routes.js";
 import { registerWorktreeRoutes } from "../sessions/worktree-routes.js";
+import { registerMemoryRoutes } from "../sessions/memory-routes.js";
 import { registerSearchRoutes } from "../search/routes.js";
 import { AuditStore } from "../audit/store.js";
 import { registerAuditRoutes } from "../audit/routes.js";
@@ -211,6 +212,7 @@ export async function buildApp(
   await registerUsageRoutes(app, { db: deps.db });
   await registerSessionExportRoutes(app, { db: deps.db });
   await registerWorktreeRoutes(app, { db: deps.db });
+  await registerMemoryRoutes(app, { db: deps.db });
   await registerSearchRoutes(app, { db: deps.db });
   await registerAuditRoutes(app, { db: deps.db, audit });
 
@@ -228,9 +230,19 @@ export async function buildApp(
 
   // Queue: batch of prompts dispatched one at a time. The runner polls every
   // QUEUE_TICK_INTERVAL_MS (2s) for queued rows; tests set NODE_ENV=test so
-  // we skip auto-start and drive `tick()` directly.
+  // we skip auto-start and drive `tick()` directly. Share a single QueueStore
+  // across the runner and the HTTP routes so the `onChange` subscription
+  // registered below fires for mutations from either side.
+  const queueStore = new QueueStore(deps.db);
+  // Bridge queue changes to the global WS channel so the web Queue screen
+  // can drop its 5s poll. attachBroadcaster (inside registerWsRoute, below)
+  // wires the real broadcaster into `manager`; this listener invokes it
+  // lazily at fire-time so we don't depend on registration order.
+  queueStore.onChange(() => {
+    manager.notifyQueueUpdate();
+  });
   const queueRunner = new QueueRunner({
-    queue: new QueueStore(deps.db),
+    queue: queueStore,
     sessions: new SessionStore(deps.db),
     projects: new ProjectStore(deps.db),
     manager,
@@ -239,7 +251,7 @@ export async function buildApp(
   if (process.env.NODE_ENV !== "test") {
     queueRunner.start();
   }
-  await registerQueueRoutes(app, { db: deps.db, manager });
+  await registerQueueRoutes(app, { db: deps.db, manager, queue: queueStore });
 
   await registerWsRoute(app, {
     manager,

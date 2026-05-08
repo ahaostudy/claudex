@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
 import type { FastifyInstance } from "fastify";
 import { bootstrapAuthedApp, tempConfig } from "./helpers.js";
 import type {
@@ -103,6 +103,7 @@ describe("queue HTTP routes", () => {
       { method: "DELETE", url: "/api/queue/anything" },
       { method: "POST", url: "/api/queue/anything/up" },
       { method: "POST", url: "/api/queue/anything/down" },
+      { method: "POST", url: "/api/queue/anything/move" },
     ];
     for (const ep of endpoints) {
       const res = await ctx.app.inject({ method: ep.method, url: ep.url });
@@ -334,6 +335,217 @@ describe("queue HTTP routes", () => {
     });
     expect(conflict.statusCode).toBe(409);
   });
+
+  it("POST /api/queue/:id/move reorders a queued row to a new absolute index", async () => {
+    const ctx = await bootstrap();
+    disposers.push(ctx.cleanup);
+    const projectId = await seedProject(ctx);
+
+    const mk = async (prompt: string) =>
+      (
+        await ctx.app.inject({
+          method: "POST",
+          url: "/api/queue",
+          headers: { cookie: ctx.cookie },
+          payload: { projectId, prompt },
+        })
+      ).json().queued.id as string;
+    const a = await mk("a");
+    const b = await mk("b");
+    const c = await mk("c");
+    const d = await mk("d");
+
+    // Move d from index 3 → index 0 (jump three rows in one drop).
+    const res = await ctx.app.inject({
+      method: "POST",
+      url: `/api/queue/${d}/move`,
+      headers: { cookie: ctx.cookie },
+      payload: { seq: 0 },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().moved).toBe(true);
+
+    const listed = await ctx.app.inject({
+      method: "GET",
+      url: "/api/queue",
+      headers: { cookie: ctx.cookie },
+    });
+    const order = listed.json().queue.map((r: any) => r.id);
+    expect(order).toEqual([d, a, b, c]);
+  });
+
+  it("POST /api/queue/:id/move returns 409 on running rows", async () => {
+    const ctx = await bootstrap();
+    disposers.push(ctx.cleanup);
+    const projectId = await seedProject(ctx);
+
+    const created = await ctx.app.inject({
+      method: "POST",
+      url: "/api/queue",
+      headers: { cookie: ctx.cookie },
+      payload: { projectId, prompt: "running" },
+    });
+    const id = created.json().queued.id as string;
+    const store = new QueueStore(ctx.dbh.db);
+    store.setStatus(id, "running", {
+      sessionId: "fake",
+      startedAt: new Date().toISOString(),
+    });
+
+    const res = await ctx.app.inject({
+      method: "POST",
+      url: `/api/queue/${id}/move`,
+      headers: { cookie: ctx.cookie },
+      payload: { seq: 0 },
+    });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error).toBe("not_reorderable");
+  });
+
+  it("POST /api/queue/:id/move rejects non-integer / missing seq with 400", async () => {
+    const ctx = await bootstrap();
+    disposers.push(ctx.cleanup);
+    const projectId = await seedProject(ctx);
+    const created = await ctx.app.inject({
+      method: "POST",
+      url: "/api/queue",
+      headers: { cookie: ctx.cookie },
+      payload: { projectId, prompt: "a" },
+    });
+    const id = created.json().queued.id as string;
+
+    const missing = await ctx.app.inject({
+      method: "POST",
+      url: `/api/queue/${id}/move`,
+      headers: { cookie: ctx.cookie },
+      payload: {},
+    });
+    expect(missing.statusCode).toBe(400);
+
+    const notInt = await ctx.app.inject({
+      method: "POST",
+      url: `/api/queue/${id}/move`,
+      headers: { cookie: ctx.cookie },
+      payload: { seq: "zero" },
+    });
+    expect(notInt.statusCode).toBe(400);
+  });
+
+  it("POST /api/queue/:id/move clamps out-of-range seq instead of erroring", async () => {
+    // UX rule (documented on reorderTo): dropping past the last queued row
+    // should be a tolerated no-op / clamp rather than a 400.
+    const ctx = await bootstrap();
+    disposers.push(ctx.cleanup);
+    const projectId = await seedProject(ctx);
+    const mk = async (prompt: string) =>
+      (
+        await ctx.app.inject({
+          method: "POST",
+          url: "/api/queue",
+          headers: { cookie: ctx.cookie },
+          payload: { projectId, prompt },
+        })
+      ).json().queued.id as string;
+    const a = await mk("a");
+    const b = await mk("b");
+    const c = await mk("c");
+
+    // Move `a` to seq=9999 → should land at the end (index 2).
+    const res = await ctx.app.inject({
+      method: "POST",
+      url: `/api/queue/${a}/move`,
+      headers: { cookie: ctx.cookie },
+      payload: { seq: 9999 },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().moved).toBe(true);
+
+    const listed = await ctx.app.inject({
+      method: "GET",
+      url: "/api/queue",
+      headers: { cookie: ctx.cookie },
+    });
+    const order = listed.json().queue.map((r: any) => r.id);
+    expect(order).toEqual([b, c, a]);
+
+    // Negative seq should clamp to the front.
+    const back = await ctx.app.inject({
+      method: "POST",
+      url: `/api/queue/${a}/move`,
+      headers: { cookie: ctx.cookie },
+      payload: { seq: -5 },
+    });
+    expect(back.statusCode).toBe(200);
+    expect(back.json().moved).toBe(true);
+    const listedAfter = await ctx.app.inject({
+      method: "GET",
+      url: "/api/queue",
+      headers: { cookie: ctx.cookie },
+    });
+    expect(listedAfter.json().queue.map((r: any) => r.id)).toEqual([a, b, c]);
+  });
+
+  it("broadcasts a queue_update on every mutation (create / patch / delete / move)", async () => {
+    // Spy on notifyQueueUpdate by swapping it out before each action. The
+    // manager's real broadcaster is wired by the WS layer which we don't
+    // hit in inject() calls — this is the tightest seam we have.
+    const ctx = await bootstrap();
+    disposers.push(ctx.cleanup);
+    const projectId = await seedProject(ctx);
+    const spy = vi.fn();
+    ctx.manager.notifyQueueUpdate = spy;
+
+    // create
+    const created = await ctx.app.inject({
+      method: "POST",
+      url: "/api/queue",
+      headers: { cookie: ctx.cookie },
+      payload: { projectId, prompt: "a" },
+    });
+    const id = created.json().queued.id as string;
+    const afterCreate = spy.mock.calls.length;
+    expect(afterCreate).toBeGreaterThanOrEqual(1);
+
+    // patch
+    await ctx.app.inject({
+      method: "PATCH",
+      url: `/api/queue/${id}`,
+      headers: { cookie: ctx.cookie },
+      payload: { prompt: "b" },
+    });
+    expect(spy.mock.calls.length).toBeGreaterThan(afterCreate);
+    const afterPatch = spy.mock.calls.length;
+
+    // create another so we have something to move
+    const second = await ctx.app.inject({
+      method: "POST",
+      url: "/api/queue",
+      headers: { cookie: ctx.cookie },
+      payload: { projectId, prompt: "c" },
+    });
+    const id2 = second.json().queued.id as string;
+    const afterSecond = spy.mock.calls.length;
+    expect(afterSecond).toBeGreaterThan(afterPatch);
+
+    // move
+    await ctx.app.inject({
+      method: "POST",
+      url: `/api/queue/${id2}/move`,
+      headers: { cookie: ctx.cookie },
+      payload: { seq: 0 },
+    });
+    expect(spy.mock.calls.length).toBeGreaterThan(afterSecond);
+    const afterMove = spy.mock.calls.length;
+
+    // delete (cancel)
+    await ctx.app.inject({
+      method: "DELETE",
+      url: `/api/queue/${id}`,
+      headers: { cookie: ctx.cookie },
+    });
+    // delete path calls setStatus('cancelled') which fires emitChange.
+    expect(spy.mock.calls.length).toBeGreaterThan(afterMove);
+  });
 });
 
 // ---- Runner ----------------------------------------------------------------
@@ -469,6 +681,33 @@ describe("QueueRunner", () => {
     s.sessions.setStatus(running.sessionId!, "error");
     await s.runner.tick();
     expect(s.queue.findById(row.id)!.status).toBe("failed");
+  });
+
+  it("fires store.onChange when the runner mutates row status", async () => {
+    // The production app wires a broadcaster onto this same hook to push
+    // `queue_update` frames out to the web. Here we just assert that the
+    // hook fires at all — the bridging is covered in the HTTP-route broadcast
+    // spy test above.
+    const s = setup();
+    const changes: number[] = [];
+    s.queue.onChange(() => {
+      changes.push(Date.now());
+    });
+    const beforeCreate = changes.length;
+    const row = s.queue.create({ projectId: s.project.id, prompt: "x" });
+    expect(changes.length).toBeGreaterThan(beforeCreate);
+
+    await s.runner.tick();
+    await new Promise((r) => setImmediate(r));
+    // Tick flipped the row to 'running' via setStatus → emitChange fires.
+    const afterDispatch = changes.length;
+    expect(afterDispatch).toBeGreaterThan(beforeCreate + 1);
+
+    // Settle the session → next tick flips row to 'done', another emitChange.
+    const running = s.queue.findById(row.id)!;
+    s.sessions.setStatus(running.sessionId!, "idle");
+    await s.runner.tick();
+    expect(changes.length).toBeGreaterThan(afterDispatch);
   });
 
   it("ordering is deterministic when two rows carry the same seq", () => {

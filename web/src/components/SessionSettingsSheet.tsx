@@ -2,8 +2,10 @@ import { useEffect, useRef, useState } from "react";
 import { GitBranch, X } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { api, ApiError } from "@/api/client";
+import { Markdown } from "@/components/Markdown";
 import { useSessions } from "@/state/sessions";
 import type {
+  MemoryResponse,
   ModelId,
   PermissionMode,
   Project,
@@ -56,6 +58,8 @@ export function SessionSettingsSheet({
 
   const [grants, setGrants] = useState<ToolGrant[] | null>(null);
   const [grantsErr, setGrantsErr] = useState<string | null>(null);
+  const [memory, setMemory] = useState<MemoryResponse | null>(null);
+  const [memoryErr, setMemoryErr] = useState<string | null>(null);
   const [exportOpen, setExportOpen] = useState(false);
   const exportMenuRef = useRef<HTMLDivElement | null>(null);
 
@@ -89,6 +93,28 @@ export function SessionSettingsSheet({
     loadGrants();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session.id]);
+
+  // Lazy-load the CLAUDE.md preview. We fetch on sheet mount rather than on
+  // Chat mount because it's only needed once the user opens settings — and
+  // the sheet itself only mounts when it's opened.
+  useEffect(() => {
+    let cancelled = false;
+    setMemoryErr(null);
+    setMemory(null);
+    api
+      .getProjectMemory(session.projectId)
+      .then((r) => {
+        if (!cancelled) setMemory(r);
+      })
+      .catch((e) => {
+        if (cancelled) return;
+        setMemoryErr(e instanceof ApiError ? e.code : "load_failed");
+        setMemory({ files: [] });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [session.projectId]);
 
   async function patch(partial: { model?: ModelId; mode?: PermissionMode }) {
     setSaving(true);
@@ -384,6 +410,68 @@ export function SessionSettingsSheet({
             </div>
           </div>
 
+          {/* Memory — read-only CLAUDE.md preview. Shows up to two files:
+              the project-scoped CLAUDE.md (first match of `<project>/CLAUDE.md`
+              or `<project>/.claude/CLAUDE.md`) and the user-global
+              `~/.claude/CLAUDE.md`. Content is capped at 64 KB server-side;
+              larger files are truncated with a flag. Fetched on sheet mount
+              — not at Chat mount — so we only pay for it when the user
+              actually opens settings. */}
+          <div>
+            <div className="text-[11px] uppercase tracking-[0.14em] text-ink-muted mb-2">
+              Memory
+            </div>
+            <div className="rounded-[8px] border border-line bg-canvas overflow-hidden">
+              {memory === null ? (
+                <div className="px-4 py-3 text-[12px] text-ink-muted">
+                  Reading memory…
+                </div>
+              ) : memory.files.length === 0 ? (
+                <div className="px-4 py-3 text-[12px] text-ink-muted">
+                  No CLAUDE.md found.
+                  {project?.path ? (
+                    <>
+                      {" "}
+                      Create one at{" "}
+                      <span className="mono">{project.path}/CLAUDE.md</span>.
+                    </>
+                  ) : null}
+                </div>
+              ) : (
+                memory.files.map((f) => {
+                  const homeDir = deriveHomeDir(memory);
+                  return (
+                    <div
+                      key={f.path}
+                      className="border-b border-line last:border-b-0"
+                    >
+                      <div className="flex items-center gap-2 px-4 py-2 bg-paper/50">
+                        <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-[6px] border border-line bg-canvas text-[10px] font-medium uppercase tracking-[0.1em]">
+                          {f.scope}
+                        </span>
+                        <span className="mono text-[11px] text-ink-muted truncate flex-1">
+                          {shortenPath(f.path, homeDir)}
+                        </span>
+                        <span className="mono text-[11px] text-ink-faint">
+                          {formatBytes(f.bytes)}
+                          {f.truncated ? " · truncated" : ""}
+                        </span>
+                      </div>
+                      <div className="max-h-[240px] overflow-y-auto px-4 py-3">
+                        <Markdown source={f.content} />
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+              {memoryErr && memory !== null && memory.files.length === 0 && (
+                <div className="px-4 py-2 text-[12px] text-danger border-t border-line">
+                  {memoryErr}
+                </div>
+              )}
+            </div>
+          </div>
+
           {/* Approved in this session */}
           <div>
             <div className="text-[11px] uppercase tracking-[0.14em] text-ink-muted mb-2">
@@ -516,4 +604,38 @@ export function SessionSettingsSheet({
       </div>
     </div>
   );
+}
+
+// Shorten an absolute path for display. Replaces the host's home directory
+// with `~` so the CLAUDE.md header row doesn't sprawl.
+//
+// The browser has no reliable handle on the host's $HOME, so we derive it
+// from the user-scope CLAUDE.md path when the memory response includes one:
+// the server always returns that as `<home>/.claude/CLAUDE.md`. When no
+// user-scope file is visible we fall back to the raw absolute path — not
+// as nice, but correct and never wrong.
+function shortenPath(abs: string, homeDir: string | null): string {
+  if (homeDir && abs === homeDir) return "~";
+  if (homeDir && abs.startsWith(homeDir + "/")) {
+    return "~" + abs.slice(homeDir.length);
+  }
+  return abs;
+}
+
+function deriveHomeDir(memory: MemoryResponse | null): string | null {
+  if (!memory) return null;
+  const user = memory.files.find((f) => f.scope === "user");
+  if (!user) return null;
+  // Strip the trailing `/.claude/CLAUDE.md` (14 chars including leading
+  // slash). Guard against a server response that doesn't follow the shape.
+  const suffix = "/.claude/CLAUDE.md";
+  if (user.path.endsWith(suffix)) {
+    return user.path.slice(0, -suffix.length);
+  }
+  return null;
+}
+
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  return `${Math.round(n / 1024)} KB`;
 }

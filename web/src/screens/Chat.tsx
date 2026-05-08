@@ -41,6 +41,8 @@ import { ViewModePicker } from "@/components/ViewModePicker";
 import { ContextRingButton, UsagePanel } from "@/components/UsagePanel";
 import { Markdown } from "@/components/Markdown";
 import { ImageLightbox } from "@/components/ImageLightbox";
+import { MessageActions } from "@/components/MessageActions";
+import { ToastHost } from "@/lib/toast";
 import type { SlashCommand } from "@/lib/slash-commands";
 import { BUILTIN_FALLBACK_SLASH_COMMANDS } from "@/lib/slash-commands";
 import type { UIPiece, ViewMode } from "@/state/sessions";
@@ -689,6 +691,7 @@ export function ChatScreen() {
           onClose={() => setLightbox(null)}
         />
       )}
+      <ToastHost />
     </div>
   );
 }
@@ -935,12 +938,17 @@ function Piece({
           }
           attachmentLock={!!isLastUserMessage && hasAttachments}
           onSubmitEdit={onEditLastUserMessage}
+          sessionId={session?.id ?? ""}
+          seq={p.seq}
         />
       );
     }
     case "assistant_text":
       return (
-        <div className="max-w-[72ch]">
+        <div
+          className="group relative max-w-[72ch]"
+          data-event-seq={p.seq}
+        >
           <div className="flex items-center gap-2 mb-1.5">
             <svg viewBox="0 0 32 32" className="w-3.5 h-3.5">
               <path d="M9 22 L16 8 L23 22 Z" fill="#cc785c" />
@@ -949,6 +957,14 @@ function Piece({
             <span className="mono text-[11px] text-ink-muted">claude</span>
           </div>
           <Markdown source={p.text} />
+          {session?.id && (
+            <MessageActions
+              text={p.text}
+              markdown={p.text}
+              sessionId={session.id}
+              seq={p.seq}
+            />
+          )}
         </div>
       );
     case "thinking":
@@ -978,12 +994,24 @@ function Piece({
     }
     case "tool_result":
       return (
-        <ToolResultBlock
-          content={p.content}
-          isError={p.isError}
-          verbose={verbose}
-          onOpenLightbox={onOpenLightbox}
-        />
+        <div
+          className="group relative"
+          data-event-seq={p.seq}
+        >
+          <ToolResultBlock
+            content={p.content}
+            isError={p.isError}
+            verbose={verbose}
+            onOpenLightbox={onOpenLightbox}
+          />
+          {session?.id && (
+            <MessageActions
+              text={p.content}
+              sessionId={session.id}
+              seq={p.seq}
+            />
+          )}
+        </div>
       );
     case "permission_request":
       return (
@@ -1213,6 +1241,8 @@ function UserBubble({
   editable,
   attachmentLock,
   onSubmitEdit,
+  sessionId,
+  seq,
 }: {
   text: string;
   onOpenLightbox: (images: ImageRef[], index: number) => void;
@@ -1225,6 +1255,12 @@ function UserBubble({
   /** Resolves when the server has accepted the edit. Required when
    * `editable` is true. */
   onSubmitEdit?: (text: string) => Promise<void>;
+  /** Session id + persisted event seq for the per-message action row. The
+   * action row is rendered only when we have a session id (always true in
+   * Chat screen) and is placed alongside the pencil — pencil stays top-left,
+   * actions row renders top-right. */
+  sessionId: string;
+  seq?: number;
 }) {
   const { images, remainingText } = useMemo(
     () => extractImagesFromText(text),
@@ -1333,7 +1369,7 @@ function UserBubble({
   }
 
   return (
-    <div className="flex justify-end group">
+    <div className="flex justify-end group" data-event-seq={seq}>
       <div className="relative max-w-[88%] bg-ink text-canvas rounded-[14px] rounded-br-[4px] px-3.5 py-2.5 shadow-card text-[14px] leading-[1.55]">
         {editable && (
           <button
@@ -1349,6 +1385,13 @@ function UserBubble({
           >
             <Pencil className="h-3 w-3" />
           </button>
+        )}
+        {sessionId && (
+          <MessageActions
+            text={text}
+            sessionId={sessionId}
+            seq={seq}
+          />
         )}
         {images.length > 0 && (
           <ImageThumbs
@@ -1980,6 +2023,76 @@ function Composer({
 }) {
   const [text, setText] = useState("");
   const [trigger, setTrigger] = useState<Trigger | null>(null);
+  // Prompt history recall (↑ / ↓ like bash/readline). Scoped per-session via
+  // localStorage key `claudex.prompt-history.<sessionId>` → JSON array, most-
+  // recent LAST, capped at 30. Loaded into a ref (not state) because the
+  // history itself doesn't drive rendering; only `historyIndex` and `stashed`
+  // do, and those are stored as component state so React schedules updates.
+  //
+  // historyIndex semantics:
+  //   null → not recalling
+  //   n    → showing history[history.length - 1 - n]; 0 = most recent entry
+  const historyRef = useRef<string[]>([]);
+  const [historyIndex, setHistoryIndex] = useState<number | null>(null);
+  const [stashed, setStashed] = useState<string>("");
+  // Reload history when the session changes so switching sessions doesn't
+  // leak history across them. Silent fallback on malformed JSON.
+  useEffect(() => {
+    historyRef.current = [];
+    setHistoryIndex(null);
+    setStashed("");
+    const sid = session?.id;
+    if (!sid) return;
+    try {
+      const raw = localStorage.getItem(`claudex.prompt-history.${sid}`);
+      if (!raw) return;
+      const arr = JSON.parse(raw);
+      if (Array.isArray(arr)) {
+        historyRef.current = arr.filter((x): x is string => typeof x === "string").slice(-30);
+      }
+    } catch {
+      /* ignore — treat as empty history */
+    }
+  }, [session?.id]);
+
+  function pushHistory(entry: string) {
+    const trimmed = entry.trim();
+    if (!trimmed) return;
+    const sid = session?.id;
+    if (!sid) return;
+    const cur = historyRef.current;
+    // Dedup adjacent duplicates — if last entry is same, don't append.
+    if (cur.length > 0 && cur[cur.length - 1] === trimmed) return;
+    const next = [...cur, trimmed].slice(-30);
+    historyRef.current = next;
+    try {
+      localStorage.setItem(
+        `claudex.prompt-history.${sid}`,
+        JSON.stringify(next),
+      );
+    } catch {
+      /* quota / privacy mode — history just won't persist */
+    }
+  }
+
+  function setTextAndMoveCaretToEnd(next: string) {
+    setText(next);
+    requestAnimationFrame(() => {
+      const t = textareaRef.current;
+      if (!t) return;
+      t.focus();
+      try {
+        t.setSelectionRange(next.length, next.length);
+      } catch {
+        /* ignore */
+      }
+    });
+  }
+
+  function exitRecall() {
+    setHistoryIndex(null);
+    setStashed("");
+  }
   // Attachments currently staged on the composer — uploaded but not yet sent.
   // Cleared on send (server links them to the appended user_message seq) or
   // on × tap (DELETE /api/attachments/:id removes unlinked rows + the file).
@@ -2083,6 +2196,12 @@ function Composer({
     // either fixing it or typing something else entirely, either way the
     // hint is stale.
     if (blockedSlash) setBlockedSlash(null);
+    // If the user mutates text while recalling, exit recall mode without
+    // restoring `stashed` — the user is editing the recalled entry and
+    // taking ownership of it.
+    if (historyIndex !== null && nextText !== text) {
+      exitRecall();
+    }
     setText(nextText);
     setTrigger(detectTrigger(nextText, cursor));
   }
@@ -2227,6 +2346,11 @@ function Composer({
       text,
       attachments.length > 0 ? attachments.map((a) => a.id) : undefined,
     );
+    // Record in per-session prompt history for ↑/↓ recall. Push the raw
+    // text (trimmed inside pushHistory) so the next up-arrow replays exactly
+    // what the user sent.
+    pushHistory(text);
+    exitRecall();
     setText("");
     setTrigger(null);
     setAttachments([]);
@@ -2443,7 +2567,8 @@ function Composer({
               // When a picker is open, route arrow keys + Enter to it so
               // ↑/↓ scroll the list and ⏎ inserts the highlighted row. We
               // keep focus in the textarea so typing / backspacing past the
-              // trigger still works naturally.
+              // trigger still works naturally. This guard MUST run first so
+              // prompt-history recall never steals ↑/↓ from the picker.
               if (trigger && pickerRef.current) {
                 if (e.key === "ArrowDown") {
                   e.preventDefault();
@@ -2460,6 +2585,77 @@ function Composer({
                   pickerRef.current.select();
                   return;
                 }
+              }
+              // Prompt-history recall (↑/↓ like bash/readline). Only fires
+              // when no picker is open (handled above), for a session with
+              // prior history, and when the caret is at a sensible edge:
+              //   ArrowUp  — caret at 0,0 OR value is empty
+              //   ArrowDown — active recall AND caret at end of value
+              if (e.key === "ArrowUp" && !e.shiftKey && !e.altKey && !e.metaKey && !e.ctrlKey) {
+                const history = historyRef.current;
+                if (history.length === 0) {
+                  // No recorded prompts yet for this session — do nothing
+                  // and let the native caret behavior take over.
+                } else {
+                  const ta = e.currentTarget;
+                  const atStart =
+                    (ta.selectionStart === 0 && ta.selectionEnd === 0) ||
+                    ta.value.length === 0;
+                  if (atStart) {
+                    e.preventDefault();
+                    if (historyIndex === null) {
+                      setStashed(text);
+                      setHistoryIndex(0);
+                      setTextAndMoveCaretToEnd(history[history.length - 1]);
+                    } else if (historyIndex < history.length - 1) {
+                      const next = historyIndex + 1;
+                      setHistoryIndex(next);
+                      setTextAndMoveCaretToEnd(
+                        history[history.length - 1 - next],
+                      );
+                    }
+                    return;
+                  }
+                }
+              }
+              if (
+                e.key === "ArrowDown" &&
+                !e.shiftKey &&
+                !e.altKey &&
+                !e.metaKey &&
+                !e.ctrlKey &&
+                historyIndex !== null
+              ) {
+                const ta = e.currentTarget;
+                const atEnd =
+                  ta.selectionStart === ta.value.length &&
+                  ta.selectionEnd === ta.value.length;
+                if (atEnd) {
+                  e.preventDefault();
+                  const history = historyRef.current;
+                  if (historyIndex > 0) {
+                    const next = historyIndex - 1;
+                    setHistoryIndex(next);
+                    setTextAndMoveCaretToEnd(
+                      history[history.length - 1 - next],
+                    );
+                  } else {
+                    // historyIndex === 0 — restore the user's draft.
+                    const toRestore = stashed;
+                    exitRecall();
+                    setTextAndMoveCaretToEnd(toRestore);
+                  }
+                  return;
+                }
+              }
+              if (e.key === "Escape" && historyIndex !== null && !trigger) {
+                // Escape while recalling (and no picker is eating the key)
+                // cancels the recall and restores the stashed draft.
+                e.preventDefault();
+                const toRestore = stashed;
+                exitRecall();
+                setTextAndMoveCaretToEnd(toRestore);
+                return;
               }
               if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();

@@ -7,6 +7,7 @@ import { authenticator } from "otplib";
 import { nanoid } from "nanoid";
 import type Database from "better-sqlite3";
 import type { Config } from "../lib/config.js";
+import { verifyRecoveryCodeAgainstHash } from "./recovery-codes.js";
 
 // -----------------------------------------------------------------------------
 // Password hashing
@@ -189,6 +190,92 @@ export class UserStore {
     this.db
       .prepare("UPDATE users SET password_hash = ? WHERE id = ?")
       .run(passwordHash, id);
+  }
+
+  /**
+   * Replace the user's entire set of recovery-code hashes atomically.
+   * Regenerate semantics: any previously issued code (used or unused) is
+   * wiped out before the new batch lands, so old printouts stop working as
+   * soon as the user clicks Regenerate. Stamped `created_at = now()` for each
+   * row — shared across the batch so the UI can render "generated <relative>"
+   * off the first row without needing a dedicated column on `users`.
+   */
+  setRecoveryCodeHashes(userId: string, hashes: string[]): void {
+    const createdAt = new Date().toISOString();
+    const del = this.db.prepare("DELETE FROM recovery_codes WHERE user_id = ?");
+    const ins = this.db.prepare(
+      `INSERT INTO recovery_codes (user_id, code_hash, used_at, created_at)
+       VALUES (?, ?, NULL, ?)`,
+    );
+    const tx = this.db.transaction((hs: string[]) => {
+      del.run(userId);
+      for (const h of hs) ins.run(userId, h, createdAt);
+    });
+    tx(hashes);
+  }
+
+  /** Count the number of unused recovery codes remaining for this user. */
+  countRemainingRecoveryCodes(userId: string): number {
+    const row = this.db
+      .prepare(
+        `SELECT COUNT(*) as c FROM recovery_codes
+         WHERE user_id = ? AND used_at IS NULL`,
+      )
+      .get(userId) as { c: number };
+    return row.c;
+  }
+
+  /**
+   * ISO timestamp of when the user's current recovery-code batch was issued,
+   * or null if they've never generated any. Read off the first row because
+   * `setRecoveryCodeHashes` stamps a shared `created_at` across the batch.
+   */
+  recoveryCodesGeneratedAt(userId: string): string | null {
+    const row = this.db
+      .prepare(
+        `SELECT created_at FROM recovery_codes
+         WHERE user_id = ?
+         ORDER BY created_at DESC
+         LIMIT 1`,
+      )
+      .get(userId) as { created_at: string } | undefined;
+    return row?.created_at ?? null;
+  }
+
+  /**
+   * Try to consume a single recovery code. Walks every *unused* row for this
+   * user and bcrypt-compares against each until a match. On match, marks the
+   * row `used_at = now()` and returns true. Returns false on no match or on
+   * an already-used code (the row wouldn't even be in the candidate set).
+   *
+   * Note on cost: bcrypt at rounds=10 is ~65ms per compare, so the worst case
+   * here is ~0.65s for a 10-code batch. That's fine for a user-initiated
+   * manual recovery flow gated by an external rate limiter.
+   */
+  async consumeRecoveryCode(userId: string, code: string): Promise<boolean> {
+    interface Row {
+      rowid: number;
+      code_hash: string;
+    }
+    const rows = this.db
+      .prepare(
+        `SELECT rowid, code_hash FROM recovery_codes
+         WHERE user_id = ? AND used_at IS NULL
+         ORDER BY rowid ASC`,
+      )
+      .all(userId) as Row[];
+    for (const r of rows) {
+      const ok = await verifyRecoveryCodeAgainstHash(code, r.code_hash);
+      if (ok) {
+        this.db
+          .prepare(
+            "UPDATE recovery_codes SET used_at = ? WHERE rowid = ? AND used_at IS NULL",
+          )
+          .run(new Date().toISOString(), r.rowid);
+        return true;
+      }
+    }
+    return false;
   }
 }
 

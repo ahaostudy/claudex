@@ -12,6 +12,11 @@ import {
   loadOrCreateJwtSecret,
   totpUri,
 } from "../auth/index.js";
+import {
+  generateRecoveryCodes,
+  hashRecoveryCodes,
+  RECOVERY_CODE_BATCH_SIZE,
+} from "../auth/recovery-codes.js";
 
 interface InitInputs {
   username: string;
@@ -110,11 +115,18 @@ async function main() {
   const qr = await QRCode.toString(uri, { type: "terminal", small: true });
 
   const passwordHash = await hashPassword(inputs.password);
-  users.create({
+  const user = users.create({
     username: inputs.username,
     passwordHash,
     totpSecret,
   });
+
+  // Seed the 10 one-time recovery codes at setup so a user who loses their
+  // authenticator on day one isn't locked out. The server only stores
+  // hashes — what we print below is the ONLY chance to capture them.
+  const recoveryCodes = generateRecoveryCodes(RECOVERY_CODE_BATCH_SIZE);
+  const recoveryHashes = await hashRecoveryCodes(recoveryCodes);
+  users.setRecoveryCodeHashes(user.id, recoveryHashes);
 
   output.write(`\nScan this QR code with your authenticator app:\n\n`);
   output.write(qr);
@@ -123,6 +135,17 @@ async function main() {
   output.write(`\n✓ Admin user "${inputs.username}" created.\n`);
   output.write(`  State directory: ${config.stateDir}\n`);
   output.write(`  DB: ${config.dbPath}\n`);
+  output.write(
+    `\nRecovery codes — save these somewhere safe. Each one works ONCE if you\n` +
+      `lose your authenticator app. They are NOT shown again.\n\n`,
+  );
+  for (const code of recoveryCodes) {
+    output.write(`  ${code}\n`);
+  }
+  output.write(
+    `\nYou can regenerate these later from Settings → Security (this invalidates\n` +
+      `the current batch).\n`,
+  );
   output.write(`\nNext: run \`pnpm dev\` and visit http://127.0.0.1:5173/.\n`);
   close();
 }

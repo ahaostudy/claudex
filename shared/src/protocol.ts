@@ -147,6 +147,16 @@ export const ServerUserMessage = z.object({
   createdAt: z.string(),
 });
 
+// Broadcast when the queued_prompts table changes in any way (create, patch,
+// delete, reorder, or runner-driven status transitions). Payload-free beyond
+// a server-side timestamp — clients refetch `/api/queue` to reconcile. This
+// replaces the 5s poll on the Queue screen; any authenticated tab receives
+// it via the global channel (see ws.ts GLOBAL_FRAME_TYPES).
+export const ServerQueueUpdate = z.object({
+  type: z.literal("queue_update"),
+  at: z.string(),
+});
+
 // Broadcast when the server has appended events to a session out-of-band —
 // notably the CLI-JSONL resync-on-open path, which discovers new CLI turns
 // and streams them into `session_events` without going through the live
@@ -178,6 +188,7 @@ export const ServerFrame = z.discriminatedUnion("type", [
   ServerTurnEnd,
   ServerUserMessage,
   ServerRefreshTranscript,
+  ServerQueueUpdate,
   ServerError,
 ]);
 export type ServerFrame = z.infer<typeof ServerFrame>;

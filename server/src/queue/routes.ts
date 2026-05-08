@@ -4,6 +4,7 @@ import {
   CreateQueuedPromptRequest,
   UpdateQueuedPromptRequest,
 } from "@claudex/shared";
+import { z } from "zod";
 import { ProjectStore } from "../sessions/projects.js";
 import { QueueStore } from "./store.js";
 import type { SessionManager } from "../sessions/manager.js";
@@ -11,13 +12,24 @@ import type { SessionManager } from "../sessions/manager.js";
 export interface QueueRoutesDeps {
   db: Database.Database;
   manager: SessionManager;
+  /**
+   * Optional pre-built QueueStore. Passed in so the routes and the runner
+   * share one instance — letting a single `onChange` listener cover both
+   * code paths. When omitted (tests that don't need broadcasts), we build
+   * our own local store as before.
+   */
+  queue?: QueueStore;
 }
+
+const MoveQueuedRequest = z.object({
+  seq: z.number().int(),
+});
 
 export async function registerQueueRoutes(
   app: FastifyInstance,
   deps: QueueRoutesDeps,
 ): Promise<void> {
-  const queue = new QueueStore(deps.db);
+  const queue = deps.queue ?? new QueueStore(deps.db);
   const projects = new ProjectStore(deps.db);
 
   app.get(
@@ -136,6 +148,33 @@ export async function registerQueueRoutes(
         return reply.code(409).send({ error: "not_reorderable" });
       }
       const moved = queue.swapNeighbor(id, "down");
+      return reply.send({ ok: true, moved });
+    },
+  );
+
+  // Move a queued row to a specific target index within the queued set.
+  // Drives the desktop drag-and-drop reorder on the web Queue screen —
+  // the client computes an absolute target index from the drop point and
+  // posts it here. `seq` is the zero-based index in the queued list, not
+  // the row's `seq` column value — the store clamps it to the valid range
+  // so the route tolerates "drop past the end" without erroring. Only
+  // queued rows can move; running / done / failed / cancelled rows are
+  // historical and don't participate.
+  app.post(
+    "/api/queue/:id/move",
+    { preHandler: app.requireAuth as any },
+    async (req, reply) => {
+      const { id } = req.params as { id: string };
+      const parsed = MoveQueuedRequest.safeParse(req.body);
+      if (!parsed.success) {
+        return reply.code(400).send({ error: "bad_request" });
+      }
+      const existing = queue.findById(id);
+      if (!existing) return reply.code(404).send({ error: "not_found" });
+      if (existing.status !== "queued") {
+        return reply.code(409).send({ error: "not_reorderable" });
+      }
+      const moved = queue.reorderTo(id, parsed.data.seq);
       return reply.send({ ok: true, moved });
     },
   );

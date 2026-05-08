@@ -355,6 +355,30 @@ const MIGRATIONS: { id: number; name: string; up: string }[] = [
       SELECT 1;
     `,
   },
+  {
+    id: 12,
+    name: "recovery_codes",
+    // One-time-use 2FA recovery codes. Ten bcrypt-hashed rows per user,
+    // regenerated as a set (regenerate deletes the user's old rows before
+    // inserting a fresh batch). `used_at` is NULL while the code is live;
+    // a successful verify stamps it to the consumption timestamp so the
+    // same code can't be replayed. Index is on `(user_id, used_at)` so the
+    // hot "list my unused codes" query stays cheap as the table accumulates
+    // used rows across regenerations.
+    //
+    // No FK on user_id — the rest of auth follows the same pattern (audit
+    // events also skip the FK) so that rows survive credential rotations
+    // that rebuild the users row.
+    up: `
+      CREATE TABLE recovery_codes (
+        user_id TEXT NOT NULL,
+        code_hash TEXT NOT NULL,
+        used_at TEXT,
+        created_at TEXT NOT NULL
+      );
+      CREATE INDEX idx_recovery_codes_user ON recovery_codes(user_id, used_at);
+    `,
+  },
 ];
 
 export function openDb(config: Config, log: Logger): ClaudexDb {

@@ -11,6 +11,8 @@ import type {
   PendingDiffsResponse,
   Project,
   QueuedPrompt,
+  RecoveryCodesStateResponse,
+  RegenerateRecoveryCodesResponse,
   Routine,
   Session,
   SessionEvent,
@@ -25,6 +27,7 @@ import type {
   UsageTodayResponse,
   UserEnvResponse,
   SearchResponse,
+  MemoryResponse,
 } from "@claudex/shared";
 
 export class ApiError extends Error {
@@ -73,6 +76,18 @@ export const api = {
       method: "POST",
       json: body,
     });
+  },
+  /**
+   * Alternate second-factor path: redeem one of the 10 single-use recovery
+   * codes instead of a rolling TOTP. Server validates, flips `used_at` on the
+   * matched row, and issues the same session cookie as `verifyTotp`. Returns
+   * how many codes remain so the login UI can nag if the user's running low.
+   */
+  verifyRecoveryCode(body: { challengeId: string; code: string }) {
+    return request<{ ok: true; remaining: number }>(
+      "/api/auth/verify-recovery-code",
+      { method: "POST", json: body },
+    );
   },
   logout() {
     return request<{ ok: true }>("/api/auth/logout", { method: "POST" });
@@ -276,11 +291,45 @@ export const api = {
       { method: "POST" },
     );
   },
+  /**
+   * Move a queued row to an absolute index within the queued sub-list.
+   * Drives the desktop drag-and-drop reorder on the Queue screen — the
+   * server clamps `seq` to the valid range so "drop past the end" is a
+   * tolerated no-op rather than a 400.
+   */
+  moveQueued(id: string, seq: number) {
+    return request<{ ok: true; moved: boolean }>(`/api/queue/${id}/move`, {
+      method: "POST",
+      json: { seq },
+    });
+  },
   changePassword(body: ChangePasswordRequest) {
     return request<{ ok: true }>("/api/auth/change-password", {
       method: "POST",
       json: body,
     });
+  },
+  /**
+   * How many recovery codes are still unused, and when was the current batch
+   * issued. Never returns plaintext codes — only `regenerateRecoveryCodes`
+   * ever emits plaintext, exactly once per call.
+   */
+  getRecoveryCodesState() {
+    return request<RecoveryCodesStateResponse>(
+      "/api/auth/recovery-codes/state",
+    );
+  },
+  /**
+   * Wipe the existing recovery-code batch and issue 10 fresh ones. The
+   * plaintext is returned exactly once — display in a one-time modal with
+   * copy/download affordances and then forget it. Any previously issued code
+   * (used or not) stops working the moment this resolves.
+   */
+  regenerateRecoveryCodes() {
+    return request<RegenerateRecoveryCodesResponse>(
+      "/api/auth/recovery-codes/regenerate",
+      { method: "POST" },
+    );
   },
   getUserEnv() {
     return request<UserEnvResponse>("/api/user/env");
@@ -380,6 +429,16 @@ export const api = {
       qs.set("events", opts.events.join(","));
     const q = qs.toString();
     return request<AuditListResponse>(`/api/audit${q ? `?${q}` : ""}`);
+  },
+  /**
+   * Read-only CLAUDE.md preview for a project. Backs the "Memory" section in
+   * the session settings sheet. Returns an empty `files` array when neither
+   * the project nor the user-global CLAUDE.md exists.
+   */
+  getProjectMemory(projectId: string) {
+    return request<MemoryResponse>(
+      `/api/projects/${encodeURIComponent(projectId)}/memory`,
+    );
   },
   /**
    * List every claudex-managed `claude/*` git worktree across the user's

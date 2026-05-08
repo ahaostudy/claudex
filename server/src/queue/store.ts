@@ -63,9 +63,40 @@ export interface QueueUpdateInput {
  * the runner share the same API — mirroring how `RoutineStore` / `SessionStore`
  * are organized. Intentionally simple — the runner is where the coordination
  * lives; this class just moves rows around.
+ *
+ * Change notification: callers can register an `onChange` listener to be
+ * notified any time a row mutates. The runner and the HTTP routes hook this
+ * up to broadcast a `queue_update` WS frame so the web Queue screen can
+ * refetch without polling. The listener is fired *after* the mutation
+ * commits so readers see the new state. Failures inside a listener are
+ * swallowed — a bad subscriber should not break the SQL write.
  */
 export class QueueStore {
+  private listeners = new Set<() => void>();
+
   constructor(private readonly db: Database.Database) {}
+
+  /**
+   * Register a change listener. Returns an unsubscribe fn for symmetry with
+   * node's event APIs, though in practice the server keeps the store alive
+   * for the process lifetime.
+   */
+  onChange(listener: () => void): () => void {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
+  }
+
+  private emitChange(): void {
+    for (const l of this.listeners) {
+      try {
+        l();
+      } catch {
+        // Swallow — a noisy subscriber shouldn't affect the SQL path.
+      }
+    }
+  }
 
   /** Every row, lowest seq first. The UI renders this list verbatim. */
   list(): QueuedPrompt[] {
@@ -146,6 +177,7 @@ export class QueueStore {
          )`,
       )
       .run(row);
+    this.emitChange();
     return toQueuedPrompt(row);
   }
 
@@ -183,6 +215,7 @@ export class QueueStore {
          WHERE id = @id`,
       )
       .run(merged);
+    this.emitChange();
     return this.findById(id);
   }
 
@@ -219,6 +252,7 @@ export class QueueStore {
          WHERE id = @id`,
       )
       .run(next);
+    this.emitChange();
   }
 
   /**
@@ -258,10 +292,71 @@ export class QueueStore {
       update.run(neighbour.seq, row.id);
       update.run(row.seq, neighbour.id);
     })();
+    this.emitChange();
+    return true;
+  }
+
+  /**
+   * Reorder a queued row to `targetSeq` within the queued set. Unlike
+   * `swapNeighbor`, this handles the HTML5 drag-and-drop case where the user
+   * drops the row anywhere in the list — possibly past several other queued
+   * rows at once.
+   *
+   * Semantics:
+   *   - Only queued rows participate; running / done / failed / cancelled
+   *     rows keep their existing seq untouched so "record of what happened"
+   *     stays intact.
+   *   - `targetSeq` is clamped to [0, queuedCount-1] — this matches the
+   *     drag contract (drop indicator clamps to the visible queued window)
+   *     and makes the route a no-op-tolerant surface instead of a 400 fest.
+   *   - Renumbering uses the simplest-correct approach: fetch all queued
+   *     rows in current order, splice to the new index, write back the
+   *     seqs as 1..N under the current max. We keep the floor at 1 (not 0)
+   *     to match create()'s maxSeq+1 convention.
+   *
+   * Returns false when the row isn't queued, or when there's nothing to move
+   * (queued count is 1 or the target is already the current index).
+   */
+  reorderTo(id: string, targetSeq: number): boolean {
+    const row = this.findById(id);
+    if (!row || row.status !== "queued") return false;
+    const queued = this.db
+      .prepare(
+        `SELECT * FROM queued_prompts
+         WHERE status = 'queued'
+         ORDER BY seq ASC, created_at ASC`,
+      )
+      .all() as QueueRow[];
+    if (queued.length <= 1) return false;
+    const currentIdx = queued.findIndex((r) => r.id === id);
+    if (currentIdx === -1) return false;
+    // Clamp target to a valid post-splice index. The caller may pass any
+    // integer (including something derived from "drop below the last row");
+    // clamping is friendlier than erroring.
+    const clamped = Math.max(0, Math.min(queued.length - 1, targetSeq));
+    if (clamped === currentIdx) return false;
+    // Splice: remove at currentIdx, insert at clamped.
+    const [moved] = queued.splice(currentIdx, 1);
+    queued.splice(clamped, 0, moved);
+    // Renumber. Preserve seqs of non-queued rows; among queued rows, use
+    // 1..N so they come before any future newly created rows (which get
+    // maxSeq+1). If the existing max is already higher than N we leave
+    // non-queued rows alone — they sort after queued anyway by status in
+    // the UI, and their seq only matters for the ORDER BY tiebreak.
+    const update = this.db.prepare(
+      `UPDATE queued_prompts SET seq = ? WHERE id = ?`,
+    );
+    this.db.transaction(() => {
+      for (let i = 0; i < queued.length; i++) {
+        update.run(i + 1, queued[i].id);
+      }
+    })();
+    this.emitChange();
     return true;
   }
 
   delete(id: string): void {
     this.db.prepare("DELETE FROM queued_prompts WHERE id = ?").run(id);
+    this.emitChange();
   }
 }

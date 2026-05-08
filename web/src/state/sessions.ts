@@ -18,6 +18,10 @@ export type UIPiece =
       id: string;
       text: string;
       at: string;
+      // Persisted event seq when this piece came off the server. Undefined
+      // for optimistic echoes that haven't been acked yet. Used by
+      // MessageActions to build permalinks (`#seq-<n>`).
+      seq?: number;
       // True once we've matched this piece against a server-broadcast
       // `user_message` frame (or it came straight from the server in the
       // first place). Used by the multi-tab de-dupe rule — a tab's locally
@@ -36,26 +40,29 @@ export type UIPiece =
         size: number;
       }>;
     }
-  | { kind: "assistant_text"; id: string; text: string }
+  | { kind: "assistant_text"; id: string; text: string; seq?: number }
   | {
       kind: "tool_use";
       id: string;
       name: string;
       input: Record<string, unknown>;
+      seq?: number;
     }
   | {
       kind: "tool_result";
       toolUseId: string;
       content: string;
       isError: boolean;
+      seq?: number;
     }
-  | { kind: "thinking"; text: string }
+  | { kind: "thinking"; text: string; seq?: number }
   | {
       kind: "permission_request";
       approvalId: string;
       toolName: string;
       input: Record<string, unknown>;
       summary: string;
+      seq?: number;
     }
   // `pending` is a UI-only piece (never persisted, never comes off the wire).
   // Inserted right after a user_message echo to give the user immediate
@@ -146,6 +153,7 @@ function eventToPiece(ev: SessionEvent): UIPiece | null {
         id: ev.id,
         text: String(p.text ?? ""),
         at: ev.createdAt,
+        seq: ev.seq,
         serverAcked: true,
         // Pass attachments straight through from the persisted payload.
         // Undefined when the message was plain text (the common case).
@@ -163,15 +171,17 @@ function eventToPiece(ev: SessionEvent): UIPiece | null {
         kind: "assistant_text",
         id: String(p.messageId ?? ev.id),
         text: String(p.text ?? ""),
+        seq: ev.seq,
       };
     case "assistant_thinking":
-      return { kind: "thinking", text: String(p.text ?? "") };
+      return { kind: "thinking", text: String(p.text ?? ""), seq: ev.seq };
     case "tool_use":
       return {
         kind: "tool_use",
         id: String(p.toolUseId ?? ev.id),
         name: String(p.name ?? "unknown"),
         input: (p.input as Record<string, unknown>) ?? {},
+        seq: ev.seq,
       };
     case "tool_result":
       return {
@@ -179,6 +189,7 @@ function eventToPiece(ev: SessionEvent): UIPiece | null {
         toolUseId: String(p.toolUseId ?? ""),
         content: String(p.content ?? ""),
         isError: Boolean(p.isError),
+        seq: ev.seq,
       };
     case "permission_request":
       return {
@@ -187,6 +198,7 @@ function eventToPiece(ev: SessionEvent): UIPiece | null {
         toolName: String(p.toolName ?? ""),
         input: (p.input as Record<string, unknown>) ?? {},
         summary: String(p.title ?? ""),
+        seq: ev.seq,
       };
     default:
       return null;
@@ -398,6 +410,19 @@ export const useSessions = create<SessionState>((set, get) => {
         const sid = frame.sessionId;
         if (get().transcripts[sid]) {
           void get().refetchTail(sid);
+        }
+        return;
+      }
+      // Queue table changed somewhere on the server — forward to any
+      // screen that cares via a plain window event. We don't keep queue
+      // state in this store (it's screen-local to QueueScreen), so a
+      // custom event is the lightest-weight bridge. Replaces the 5s
+      // poll in Queue.tsx.
+      if (frame.type === "queue_update") {
+        try {
+          window.dispatchEvent(new CustomEvent("claudex:queue_update"));
+        } catch {
+          // SSR / no-window: ignore.
         }
         return;
       }

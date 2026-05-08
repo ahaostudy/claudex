@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import {
   ChevronDown,
   ChevronUp,
+  GripVertical,
   ListOrdered,
   Pencil,
   Plus,
@@ -26,12 +27,23 @@ import { AppShell } from "@/components/AppShell";
  * cron").
  *
  * Live updates:
- *   - Sessions WS frames bubble up to AppShell via the Sessions store for
- *     badge counts; the queue itself gets refreshed on a plain 5-second poll
- *     because we didn't wire a per-queue WS channel (a batch flow is the
- *     opposite of latency-sensitive — "it'll get there" is fine).
- *   - On any edit (create / delete / reorder / patch) we refetch immediately
- *     so the UI reflects the mutation without waiting for the 5s tick.
+ *   - The server broadcasts a `queue_update` WS frame on every mutation of
+ *     the queued_prompts table (create, patch, delete, move, runner status
+ *     transitions). The Sessions WS client forwards those to a
+ *     `claudex:queue_update` window event (see web/src/state/sessions.ts)
+ *     and we refetch on receipt. No polling — a stale browser tab left on
+ *     this screen stays honest for days.
+ *   - On any local mutation (create / delete / reorder / patch) we still
+ *     refetch immediately so the UI reflects the change before the server
+ *     broadcast round-trips back.
+ *
+ * Drag-and-drop reorder (desktop md+): each queued row is draggable. The
+ * onDragOver handler computes whether the cursor is in the top or bottom
+ * half of the target row and paints a thin klein indicator line. onDrop
+ * computes an absolute target index from the drop position and calls
+ * `POST /api/queue/:id/move {seq}` — the server clamps the seq so
+ * dropping past the end is a no-op rather than a 400. Mobile keeps the
+ * up/down chevron buttons untouched.
  */
 export function QueueScreen() {
   const [queue, setQueue] = useState<QueuedPrompt[]>([]);
@@ -40,6 +52,14 @@ export function QueueScreen() {
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<QueuedPrompt | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  // Drag state. draggingId is the row being carried; dropTarget captures the
+  // row we're hovering over + "above" / "below" so we can paint the indicator
+  // in the right place. Nullable so the SSR / initial-render path renders
+  // without flicker.
+  const [draggingId, setDraggingId] = useState<string | null>(null);
+  const [dropTarget, setDropTarget] = useState<
+    { id: string; position: "above" | "below" } | null
+  >(null);
 
   async function refresh() {
     try {
@@ -55,8 +75,16 @@ export function QueueScreen() {
 
   useEffect(() => {
     refresh();
-    const id = window.setInterval(refresh, 5000);
-    return () => window.clearInterval(id);
+    // Subscribe to the global queue-update bus. Replaces the 5s setInterval
+    // poll — the server guarantees a broadcast on every state change that
+    // matters here (see QueueStore.onChange in server/src/queue/store.ts).
+    const handler = () => {
+      void refresh();
+    };
+    window.addEventListener("claudex:queue_update", handler);
+    return () => {
+      window.removeEventListener("claudex:queue_update", handler);
+    };
   }, []);
 
   const projectsById = useMemo(() => {
@@ -90,6 +118,65 @@ export function QueueScreen() {
       await refresh();
     } catch (e) {
       setErr(e instanceof ApiError ? e.code : "reorder failed");
+    }
+  }
+
+  /**
+   * Move `sourceId` to the position of `targetId` in the queued sub-list.
+   * `position` says whether to land above or below the target. We compute
+   * the absolute index within the current queued-only slice and POST it to
+   * `/api/queue/:id/move`. Optimistically applies the same splice locally
+   * so the UI doesn't flicker while the server round-trips.
+   */
+  async function moveByDrop(
+    sourceId: string,
+    targetId: string,
+    position: "above" | "below",
+  ) {
+    if (sourceId === targetId) return;
+    const queuedOnly = queue.filter((r) => r.status === "queued");
+    const srcIdx = queuedOnly.findIndex((r) => r.id === sourceId);
+    const tgtIdx = queuedOnly.findIndex((r) => r.id === targetId);
+    if (srcIdx === -1 || tgtIdx === -1) return;
+    // "Above target" lands the row at the target's index; "below target"
+    // lands it at target.index + 1. When moving downward, splicing out the
+    // source first shifts everything after it up by one, so the target's
+    // effective index is one lower than its pre-splice index. Account for
+    // that here so the final index matches the user's visual drop.
+    let finalIdx = position === "above" ? tgtIdx : tgtIdx + 1;
+    if (srcIdx < finalIdx) finalIdx -= 1;
+    if (finalIdx === srcIdx) return;
+
+    // Optimistic local reorder: rebuild the queued sub-list with the moved
+    // item in its new position, then re-weave it with the non-queued rows
+    // (running / done / failed / cancelled) at their original indices. The
+    // drag only affects queued rows — finished rows' visual position is
+    // whatever it was before the drop.
+    const queuedIds = queuedOnly.map((r) => r.id);
+    const [movedId] = queuedIds.splice(srcIdx, 1);
+    queuedIds.splice(finalIdx, 0, movedId);
+    const queuedById = new Map(queuedOnly.map((r) => [r.id, r]));
+    const reorderedQueued = queuedIds.map((id) => queuedById.get(id)!);
+    const nextFull: QueuedPrompt[] = [];
+    let qCursor = 0;
+    for (const row of queue) {
+      if (row.status === "queued") {
+        nextFull.push(reorderedQueued[qCursor++]);
+      } else {
+        nextFull.push(row);
+      }
+    }
+    setQueue(nextFull);
+
+    setErr(null);
+    try {
+      await api.moveQueued(sourceId, finalIdx);
+      // No refresh() here — the server broadcasts a queue_update which will
+      // refetch us. Keeps the success path single-fetch. If the server
+      // rejects we refetch to resync.
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.code : "reorder failed");
+      await refresh();
     }
   }
 
@@ -149,6 +236,56 @@ export function QueueScreen() {
                       .slice(idx + 1)
                       .some((r) => r.status === "queued")
                   }
+                  draggingId={draggingId}
+                  dropTarget={dropTarget}
+                  onDragStart={(e) => {
+                    if (row.status !== "queued") return;
+                    setDraggingId(row.id);
+                    e.dataTransfer.effectAllowed = "move";
+                    try {
+                      e.dataTransfer.setData("text/plain", row.id);
+                    } catch {
+                      // Firefox requires a setData call; some browsers throw
+                      // if the dataTransfer is in a protected state. Ignore.
+                    }
+                  }}
+                  onDragOver={(e) => {
+                    if (!draggingId || row.status !== "queued") return;
+                    if (draggingId === row.id) return;
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = "move";
+                    const rect = (
+                      e.currentTarget as HTMLLIElement
+                    ).getBoundingClientRect();
+                    const above =
+                      e.clientY - rect.top < rect.height / 2;
+                    setDropTarget({
+                      id: row.id,
+                      position: above ? "above" : "below",
+                    });
+                  }}
+                  onDragLeave={() => {
+                    // Only clear if the current target matches — otherwise a
+                    // sibling's onDragOver has already set the new target.
+                    setDropTarget((prev) =>
+                      prev && prev.id === row.id ? null : prev,
+                    );
+                  }}
+                  onDrop={(e) => {
+                    if (!draggingId) return;
+                    e.preventDefault();
+                    const position =
+                      dropTarget && dropTarget.id === row.id
+                        ? dropTarget.position
+                        : "above";
+                    void moveByDrop(draggingId, row.id, position);
+                    setDraggingId(null);
+                    setDropTarget(null);
+                  }}
+                  onDragEnd={() => {
+                    setDraggingId(null);
+                    setDropTarget(null);
+                  }}
                   onEdit={() => setEditing(row)}
                   onCancel={() => cancel(row)}
                   onReorder={(dir) => reorder(row, dir)}
@@ -188,6 +325,13 @@ function QueueRow({
   project,
   canMoveUp,
   canMoveDown,
+  draggingId,
+  dropTarget,
+  onDragStart,
+  onDragOver,
+  onDragLeave,
+  onDrop,
+  onDragEnd,
   onEdit,
   onCancel,
   onReorder,
@@ -196,6 +340,13 @@ function QueueRow({
   project: Project | undefined;
   canMoveUp: boolean;
   canMoveDown: boolean;
+  draggingId: string | null;
+  dropTarget: { id: string; position: "above" | "below" } | null;
+  onDragStart: (e: React.DragEvent<HTMLLIElement>) => void;
+  onDragOver: (e: React.DragEvent<HTMLLIElement>) => void;
+  onDragLeave: (e: React.DragEvent<HTMLLIElement>) => void;
+  onDrop: (e: React.DragEvent<HTMLLIElement>) => void;
+  onDragEnd: (e: React.DragEvent<HTMLLIElement>) => void;
   onEdit: () => void;
   onCancel: () => void;
   onReorder: (direction: "up" | "down") => void;
@@ -206,9 +357,49 @@ function QueueRow({
       ? row.title
       : row.prompt.split(/\r?\n/, 1)[0]?.slice(0, 60) ?? "(empty prompt)";
 
+  const isDraggable = row.status === "queued";
+  const isBeingDragged = draggingId === row.id;
+  const indicatorAbove =
+    dropTarget?.id === row.id && dropTarget.position === "above";
+  const indicatorBelow =
+    dropTarget?.id === row.id && dropTarget.position === "below";
+
+  // Desktop uses native HTML5 drag; mobile keeps the up/down chevrons. We
+  // wire the draggable attribute + handlers only when the row is queued so
+  // finished rows can't be grabbed. The `hidden md:flex` grip handle makes
+  // the affordance visible on desktop without cluttering mobile.
+
   return (
-    <li className="px-4 md:px-6 py-3 border-b border-line hover:bg-paper/40">
+    <li
+      draggable={isDraggable}
+      onDragStart={onDragStart}
+      onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
+      onDrop={onDrop}
+      onDragEnd={onDragEnd}
+      className={`relative px-4 md:px-6 py-3 border-b border-line hover:bg-paper/40 ${
+        isBeingDragged ? "opacity-40" : ""
+      }`}
+    >
+      {indicatorAbove && (
+        <span
+          aria-hidden
+          className="pointer-events-none absolute left-0 right-0 -top-[1px] h-[2px] bg-klein"
+        />
+      )}
+      {indicatorBelow && (
+        <span
+          aria-hidden
+          className="pointer-events-none absolute left-0 right-0 -bottom-[1px] h-[2px] bg-klein"
+        />
+      )}
       <div className="flex items-center gap-3">
+        {isDraggable && (
+          <GripVertical
+            className="hidden md:block w-4 h-4 text-ink-faint shrink-0 cursor-grab active:cursor-grabbing"
+            aria-hidden
+          />
+        )}
         <StatusDot status={row.status} />
         <div className="min-w-0 flex-1">
           <div className="text-[14px] font-medium truncate">{title}</div>
@@ -238,7 +429,7 @@ function QueueRow({
               <button
                 onClick={() => onReorder("up")}
                 disabled={!canMoveUp}
-                className="h-8 w-8 rounded-[6px] border border-line flex items-center justify-center text-ink-soft hover:bg-canvas disabled:opacity-40"
+                className="md:hidden h-8 w-8 rounded-[6px] border border-line flex items-center justify-center text-ink-soft hover:bg-canvas disabled:opacity-40"
                 title="Move up"
               >
                 <ChevronUp className="w-3.5 h-3.5" />
@@ -246,7 +437,7 @@ function QueueRow({
               <button
                 onClick={() => onReorder("down")}
                 disabled={!canMoveDown}
-                className="h-8 w-8 rounded-[6px] border border-line flex items-center justify-center text-ink-soft hover:bg-canvas disabled:opacity-40"
+                className="md:hidden h-8 w-8 rounded-[6px] border border-line flex items-center justify-center text-ink-soft hover:bg-canvas disabled:opacity-40"
                 title="Move down"
               >
                 <ChevronDown className="w-3.5 h-3.5" />

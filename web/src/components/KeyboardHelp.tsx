@@ -71,6 +71,20 @@ function buildGroups(mac: boolean): Group[] {
           description: "Insert the highlighted picker row",
         },
         { keys: [["Esc"]], description: "Close the / or @ picker" },
+        {
+          keys: [["↑"]],
+          description:
+            "Recall previous prompt (caret at start / empty; per-session, last 30)",
+        },
+        {
+          keys: [["↓"]],
+          description:
+            "Recall next prompt / restore draft (while recalling, caret at end)",
+        },
+        {
+          keys: [["Esc"]],
+          description: "Cancel prompt recall and restore draft",
+        },
       ],
     },
   ];

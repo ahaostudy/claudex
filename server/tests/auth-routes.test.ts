@@ -503,6 +503,210 @@ describe("auth routes", () => {
       expect(freshB.json().error).toBe("invalid_totp");
     });
   });
+
+  describe("recovery codes", () => {
+    async function loggedInCookie(): Promise<string> {
+      const login = await ctx.app.inject({
+        method: "POST",
+        url: "/api/auth/login",
+        payload: { username: ctx.username, password: ctx.password },
+      });
+      const challengeId = login.json().challengeId as string;
+      const verify = await ctx.app.inject({
+        method: "POST",
+        url: "/api/auth/verify-totp",
+        payload: { challengeId, code: currentTotp(ctx.totpSecret) },
+      });
+      return cookieFor(verify);
+    }
+
+    async function regenerate(): Promise<{
+      codes: string[];
+      cookie: string;
+    }> {
+      const cookie = await loggedInCookie();
+      const res = await ctx.app.inject({
+        method: "POST",
+        url: "/api/auth/recovery-codes/regenerate",
+        headers: { cookie },
+      });
+      expect(res.statusCode).toBe(200);
+      const body = res.json();
+      return { codes: body.codes, cookie };
+    }
+
+    it("regenerate returns 10 plaintext codes and /state reports 10 remaining", async () => {
+      const { codes, cookie } = await regenerate();
+      expect(codes).toHaveLength(10);
+      // Each code must match the xxxx-xxxx-xxxx-xxxx layout.
+      for (const c of codes) {
+        expect(c).toMatch(/^[a-z2-9]{4}-[a-z2-9]{4}-[a-z2-9]{4}-[a-z2-9]{4}$/);
+      }
+      // Codes are unique within the batch.
+      expect(new Set(codes).size).toBe(10);
+      const state = await ctx.app.inject({
+        method: "GET",
+        url: "/api/auth/recovery-codes/state",
+        headers: { cookie },
+      });
+      expect(state.statusCode).toBe(200);
+      const body = state.json();
+      expect(body.remaining).toBe(10);
+      expect(typeof body.generatedAt).toBe("string");
+    });
+
+    it("redeeming a code flips used_at and drops remaining to 9", async () => {
+      const { codes } = await regenerate();
+      const login = await ctx.app.inject({
+        method: "POST",
+        url: "/api/auth/login",
+        payload: { username: ctx.username, password: ctx.password },
+      });
+      const challengeId = login.json().challengeId as string;
+
+      const verify = await ctx.app.inject({
+        method: "POST",
+        url: "/api/auth/verify-recovery-code",
+        payload: { challengeId, code: codes[0] },
+      });
+      expect(verify.statusCode).toBe(200);
+      const body = verify.json();
+      expect(body.ok).toBe(true);
+      expect(body.remaining).toBe(9);
+
+      // Session cookie was issued.
+      const cookie = cookieFor(verify);
+      expect(cookie.length).toBeGreaterThan("claudex_session=".length);
+
+      const state = await ctx.app.inject({
+        method: "GET",
+        url: "/api/auth/recovery-codes/state",
+        headers: { cookie },
+      });
+      expect(state.json().remaining).toBe(9);
+    });
+
+    it("rejects replay of an already-used code with 401", async () => {
+      const { codes } = await regenerate();
+      const login1 = await ctx.app.inject({
+        method: "POST",
+        url: "/api/auth/login",
+        payload: { username: ctx.username, password: ctx.password },
+      });
+      const challengeId1 = login1.json().challengeId as string;
+      const first = await ctx.app.inject({
+        method: "POST",
+        url: "/api/auth/verify-recovery-code",
+        payload: { challengeId: challengeId1, code: codes[3] },
+      });
+      expect(first.statusCode).toBe(200);
+
+      const login2 = await ctx.app.inject({
+        method: "POST",
+        url: "/api/auth/login",
+        payload: { username: ctx.username, password: ctx.password },
+      });
+      const challengeId2 = login2.json().challengeId as string;
+      const replay = await ctx.app.inject({
+        method: "POST",
+        url: "/api/auth/verify-recovery-code",
+        payload: { challengeId: challengeId2, code: codes[3] },
+      });
+      expect(replay.statusCode).toBe(401);
+      expect(replay.json().error).toBe("invalid_recovery_code");
+    });
+
+    it("rejects a wrong code with 401", async () => {
+      await regenerate();
+      const login = await ctx.app.inject({
+        method: "POST",
+        url: "/api/auth/login",
+        payload: { username: ctx.username, password: ctx.password },
+      });
+      const challengeId = login.json().challengeId as string;
+      const res = await ctx.app.inject({
+        method: "POST",
+        url: "/api/auth/verify-recovery-code",
+        payload: { challengeId, code: "zzzz-zzzz-zzzz-zzzz" },
+      });
+      expect(res.statusCode).toBe(401);
+      expect(res.json().error).toBe("invalid_recovery_code");
+    });
+
+    it("regenerate invalidates the prior batch", async () => {
+      const first = await regenerate();
+      await regenerate();
+      const login = await ctx.app.inject({
+        method: "POST",
+        url: "/api/auth/login",
+        payload: { username: ctx.username, password: ctx.password },
+      });
+      const challengeId = login.json().challengeId as string;
+      const res = await ctx.app.inject({
+        method: "POST",
+        url: "/api/auth/verify-recovery-code",
+        payload: { challengeId, code: first.codes[0] },
+      });
+      expect(res.statusCode).toBe(401);
+      expect(res.json().error).toBe("invalid_recovery_code");
+    });
+
+    it("tolerates whitespace and uppercase on the wire", async () => {
+      const { codes } = await regenerate();
+      const messy = codes[5].toUpperCase().replace(/-/g, " ");
+      const login = await ctx.app.inject({
+        method: "POST",
+        url: "/api/auth/login",
+        payload: { username: ctx.username, password: ctx.password },
+      });
+      const challengeId = login.json().challengeId as string;
+      const res = await ctx.app.inject({
+        method: "POST",
+        url: "/api/auth/verify-recovery-code",
+        payload: { challengeId, code: messy },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.json().remaining).toBe(9);
+    });
+
+    it("the TOTP rate limiter also guards the recovery endpoint", async () => {
+      await regenerate();
+      const login = await ctx.app.inject({
+        method: "POST",
+        url: "/api/auth/login",
+        payload: { username: ctx.username, password: ctx.password },
+      });
+      const challengeId = login.json().challengeId as string;
+      for (let i = 0; i < 10; i++) {
+        const res = await ctx.app.inject({
+          method: "POST",
+          url: "/api/auth/verify-recovery-code",
+          payload: { challengeId, code: "zzzz-zzzz-zzzz-zzzz" },
+        });
+        expect(res.statusCode).toBe(401);
+      }
+      const blocked = await ctx.app.inject({
+        method: "POST",
+        url: "/api/auth/verify-recovery-code",
+        payload: { challengeId, code: "zzzz-zzzz-zzzz-zzzz" },
+      });
+      expect(blocked.statusCode).toBe(429);
+      expect(blocked.json().error).toBe("rate_limited");
+    });
+
+    it("state/regenerate require a session cookie", async () => {
+      const state = await ctx.app.inject({
+        method: "GET",
+        url: "/api/auth/recovery-codes/state",
+      });
+      expect(state.statusCode).toBe(401);
+      const regen = await ctx.app.inject({
+        method: "POST",
+        url: "/api/auth/recovery-codes/regenerate",
+      });
+      expect(regen.statusCode).toBe(401);
+    });
+  });
 });
 
 describe("SlidingWindowLimiter", () => {
