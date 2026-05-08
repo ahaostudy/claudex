@@ -9,7 +9,9 @@
   },
   "scripts": {
     "dev": "pnpm -r --parallel run dev",
-    "build": "pnpm -r run build",
+    "build": "pnpm --filter @claudex/web run build",
+    "start": "NODE_ENV=production pnpm --filter @claudex/server exec tsx src/index.ts",
+    "serve": "pnpm build && pnpm start",
     "typecheck": "pnpm -r run typecheck",
     "lint": "pnpm -r run lint",
     "test": "pnpm --filter @claudex/server run test",
