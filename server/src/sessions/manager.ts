@@ -205,6 +205,26 @@ export class SessionManager {
     await entry.runner.interrupt();
   }
 
+  /**
+   * Propagate a permission-mode change to the live runner, if any.
+   * The caller is expected to have already persisted the new mode to the DB.
+   * Returns true when a running runner got the call, false otherwise.
+   */
+  async applyPermissionMode(
+    sessionId: string,
+    mode: "default" | "acceptEdits" | "plan" | "auto" | "bypassPermissions",
+  ): Promise<boolean> {
+    const entry = this.runners.get(sessionId);
+    if (!entry) return false;
+    await entry.runner.setPermissionMode(mode);
+    return true;
+  }
+
+  /** Is a live runner attached for this session? */
+  hasRunner(sessionId: string): boolean {
+    return this.runners.has(sessionId);
+  }
+
   resolvePermission(
     sessionId: string,
     toolUseId: string,

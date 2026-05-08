@@ -42,6 +42,8 @@ interface GrantRow {
   created_at: string;
 }
 
+export type ToolGrantRow = GrantRow;
+
 export class ToolGrantStore {
   constructor(private readonly db: Database.Database) {}
 
@@ -57,6 +59,13 @@ export class ToolGrantStore {
       )
       .get(toolName, signature, sessionId) as unknown;
     return row != null;
+  }
+
+  findById(id: string): GrantRow | null {
+    const row = this.db
+      .prepare("SELECT * FROM tool_grants WHERE id = ?")
+      .get(id) as GrantRow | undefined;
+    return row ?? null;
   }
 
   addSessionGrant(

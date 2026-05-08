@@ -21,6 +21,7 @@ class MockRunner implements Runner {
   sent: string[] = [];
   interrupted = 0;
   permissions: Array<{ id: string; behavior: string }> = [];
+  permissionModes: string[] = [];
   disposed = false;
 
   constructor(sessionId: string) {
@@ -39,8 +40,8 @@ class MockRunner implements Runner {
   async interrupt() {
     this.interrupted += 1;
   }
-  async setPermissionMode() {
-    /* noop */
+  async setPermissionMode(mode: import("@claudex/shared").PermissionMode) {
+    this.permissionModes.push(mode);
   }
   async dispose() {
     this.disposed = true;
@@ -293,5 +294,27 @@ describe("SessionManager", () => {
     expect(() =>
       s.manager.resolvePermission(s.session.id, "tu-1", "allow_once"),
     ).not.toThrow();
+  });
+
+  it("applyPermissionMode forwards to the live runner and is a no-op when none attached", async () => {
+    const s = setupManager();
+    cleanups.push(s.cleanup);
+    // Nothing attached yet → returns false and doesn't throw.
+    const beforeAttach = await s.manager.applyPermissionMode(
+      s.session.id,
+      "plan",
+    );
+    expect(beforeAttach).toBe(false);
+
+    // Attach a runner and flip the mode.
+    s.manager.getOrCreate(s.session.id);
+    const mock = s.last()!;
+    const afterAttach = await s.manager.applyPermissionMode(
+      s.session.id,
+      "acceptEdits",
+    );
+    expect(afterAttach).toBe(true);
+    expect(mock.permissionModes).toEqual(["acceptEdits"]);
+    expect(s.manager.hasRunner(s.session.id)).toBe(true);
   });
 });

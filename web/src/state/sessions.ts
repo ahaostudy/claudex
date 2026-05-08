@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { api } from "@/api/client";
-import { createWsClient, type WsClient } from "@/api/ws";
+import { createWsClient, type WsClient, type WsDiagnostics } from "@/api/ws";
 import type {
   ClientFrame,
   Session,
@@ -39,6 +39,7 @@ export type UIPiece =
 interface SessionState {
   ws: WsClient | null;
   connected: boolean;
+  wsDiag: WsDiagnostics;
   sessions: Session[];
   // sessionId → pieces in order
   transcripts: Record<string, UIPiece[]>;
@@ -140,6 +141,7 @@ function frameToPiece(frame: ServerFrame): UIPiece | null {
 export const useSessions = create<SessionState>((set, get) => ({
   ws: null,
   connected: false,
+  wsDiag: { phase: "connecting", attempts: 0 },
   sessions: [],
   transcripts: {},
   loadingSessions: false,
@@ -149,6 +151,9 @@ export const useSessions = create<SessionState>((set, get) => ({
     const proto = location.protocol === "https:" ? "wss:" : "ws:";
     const url = `${proto}//${location.host}/ws`;
     const client = createWsClient(url);
+    client.onState((diag) => {
+      set({ wsDiag: diag, connected: diag.phase === "acked" });
+    });
     client.subscribe((frame) => {
       // Connection liveness tracked via hello_ack
       if (frame.type === "hello_ack") set({ connected: true });

@@ -147,6 +147,18 @@ export class SessionStore {
       .run(title, new Date().toISOString(), id);
   }
 
+  setModel(id: string, model: ModelId): void {
+    this.db
+      .prepare("UPDATE sessions SET model = ?, updated_at = ? WHERE id = ?")
+      .run(model, new Date().toISOString(), id);
+  }
+
+  setMode(id: string, mode: PermissionMode): void {
+    this.db
+      .prepare("UPDATE sessions SET mode = ?, updated_at = ? WHERE id = ?")
+      .run(mode, new Date().toISOString(), id);
+  }
+
   touchLastMessage(id: string): void {
     const now = new Date().toISOString();
     this.db

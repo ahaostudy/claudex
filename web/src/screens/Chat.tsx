@@ -1,15 +1,17 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { ChevronLeft, Send } from "lucide-react";
+import { ChevronLeft, Send, Settings2 } from "lucide-react";
 import { useSessions } from "@/state/sessions";
 import { api } from "@/api/client";
 import type { Session } from "@claudex/shared";
 import { cn } from "@/lib/cn";
 import { DiffView, toolCallToDiff } from "@/components/DiffView";
+import { SessionSettingsSheet } from "@/components/SessionSettingsSheet";
 
 export function ChatScreen() {
   const { id } = useParams<{ id: string }>();
   const [session, setSession] = useState<Session | null>(null);
+  const [showSettings, setShowSettings] = useState(false);
   const {
     transcripts,
     init,
@@ -72,6 +74,14 @@ export function ChatScreen() {
             <span>{session?.mode}</span>
           </div>
         </div>
+        <button
+          onClick={() => setShowSettings(true)}
+          disabled={!session}
+          title="Session settings"
+          className="h-8 w-8 rounded-[8px] border border-line bg-canvas flex items-center justify-center hover:bg-paper disabled:opacity-40"
+        >
+          <Settings2 className="w-4 h-4 text-ink-soft" />
+        </button>
       </header>
 
       <div ref={scroller} className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
@@ -91,6 +101,14 @@ export function ChatScreen() {
           sendUserMessage(id, text);
         }}
       />
+
+      {showSettings && session && (
+        <SessionSettingsSheet
+          session={session}
+          onClose={() => setShowSettings(false)}
+          onUpdated={(next) => setSession(next)}
+        />
+      )}
     </main>
   );
 }

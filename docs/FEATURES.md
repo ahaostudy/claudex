@@ -11,8 +11,8 @@ Three status tiers:
   use from the API; users won't see it yet.
 - ⬜ **Planned** — listed so nobody re-plans it from scratch, but not started.
 
-Last updated: see the git log of this file. Current revision lists **66 shipped
-behaviors** and **136 backend tests**.
+Last updated: see the git log of this file. Current revision lists **69 shipped
+behaviors** and **149 backend tests**.
 
 ---
 
@@ -86,6 +86,7 @@ behaviors** and **136 backend tests**.
 | ✅ | `GET /api/sessions/:id` — fetch one | same |
 | ✅ | `GET /api/sessions/:id/events?sinceSeq=N` — replay persisted events | same |
 | ✅ | `POST /api/sessions/:id/archive` — mark read-only | same |
+| ✅ | `PATCH /api/sessions/:id` — partial update (`title`, `model`, `mode`). `mode` changes are pushed into the live runner via `setPermissionMode`; `model` changes are DB-only and the response carries `warnings: ["model_change_applies_to_next_turn"]` when a runner is already attached. Refuses `409 archived` on archived sessions and `400 bad_request` on empty bodies (at least one field required) | same |
 | ✅ | Every event gets a monotonic per-session `seq` and is written to `session_events` (payload as JSON) | `server/src/sessions/store.ts` |
 | ✅ | Aggregate stats on the session row (messages, files changed, +/− lines, contextPct) bumpable via `bumpStats` | same |
 | 🟡 | Worktree flag accepted by the API but the server never creates a worktree yet — planned in P4 | same |
@@ -104,7 +105,7 @@ behaviors** and **136 backend tests**.
 | ✅ | `SessionManager` persists every event into `session_events`, bumps stats & status on `turn_end`, and broadcasts to WS subscribers | `server/src/sessions/manager.ts` |
 | ✅ | Permission mode selectable per session: `default` (ask), `acceptEdits`, `plan`, `bypassPermissions`. `auto` is accepted but falls through to `default` for now | `server/src/sessions/agent-runner.ts` |
 | ✅ | `interrupt()` supported at the Runner and manager layer | same |
-| 🟡 | `setPermissionMode` works on the runner (`Query.setPermissionMode`) but the UI has no control to call it mid-session | same |
+| ✅ | `setPermissionMode` wired end-to-end: the session settings sheet PATCHes `/api/sessions/:id` with a new `mode`, the server updates the DB and calls `Query.setPermissionMode` on the live runner | same |
 | 🟡 | Session resume via `resumeSdkSessionId` is plumbed through `RunnerInitOptions` but nothing stores/restores the SDK session id yet — after a server restart, continuing the thread will start a fresh Agent SDK conversation | `server/src/sessions/runner.ts` |
 
 ## Permissions
@@ -116,7 +117,7 @@ behaviors** and **136 backend tests**.
 | ✅ | Three-decision UX: **Allow once / Always / Deny** | `web/src/screens/Chat.tsx` |
 | ✅ | "Always" records a `ToolGrant` scoped to the session; matching future requests auto-approve without prompting the user. Signature conventions: Bash→command, Edit-family→file_path, Glob/Grep→pattern | `server/src/sessions/grants.ts` |
 | ✅ | Session status flips `awaiting` → `running` as permission requests come in and are resolved | `server/src/sessions/manager.ts` |
-| 🟡 | `ToolGrantStore.revoke` + `.listForSession` exist; no UI to review/revoke saved grants | same |
+| ✅ | `GET /api/sessions/:id/grants` lists session + global grants (scope annotated); `DELETE /api/grants/:id` revokes one. The session settings sheet renders these under "Approved in this session" with a per-row Revoke button | same + `web/src/components/SessionSettingsSheet.tsx` |
 | 🟡 | No "Always, globally" (cross-session) decision yet — `addGlobalGrant` exists but isn't wired to the UI | same |
 
 ## Diff rendering
@@ -154,7 +155,7 @@ behaviors** and **136 backend tests**.
 | ✅ | Transcript is reconstructed from both persisted events (initial load via `/api/sessions/:id/events`) and live WS frames, unified into a single UI piece list | same |
 | ✅ | Sign out clears the session cookie and returns to the login screen | `web/src/screens/Home.tsx` |
 | 🟡 | `/` slash commands and `@` file picker (from the mockup) not wired — the input is a plain textarea today |  |
-| 🟡 | Session settings side sheet (model swap, mode swap, effort slider, worktree) — mockup'd but not implemented |  |
+| ✅ | Session settings side sheet (gear button in the Chat header) — edit title, swap model (Opus 4.7 / Sonnet 4.6 / Haiku 4.5), switch permission mode (Ask / Accept / Plan / Bypass), read-only workspace panel (branch + worktree path placeholder for P4), and "Approved in this session" list with per-grant Revoke. Model change mid-run shows a yellow "applies to next turn" notice | `web/src/components/SessionSettingsSheet.tsx` + `web/src/screens/Chat.tsx` |
 | 🟡 | `/btw` side chat — not implemented |  |
 | 🟡 | View modes (Normal / Verbose / Summary) — transcript currently shows everything |  |
 | 🟡 | Usage panel (context ring, plan usage, per-model today) — no UI |  |
@@ -164,14 +165,14 @@ behaviors** and **136 backend tests**.
 
 | Status | Feature | Where |
 |---|---|---|
-| ✅ | 136 backend tests, vitest, all green | `server/tests/` |
+| ✅ | 149 backend tests, vitest, all green | `server/tests/` |
 | ✅ | Bind-safety, DB migration + FK cascade | `tests/config.test.ts`, `tests/db.test.ts` |
 | ✅ | Password/TOTP/JWT edge cases (tampering, cross-secret, wrong audience, expiry, file-mode 0600) | `tests/auth.test.ts` |
 | ✅ | Auth HTTP routes including peek-retry TOTP, replay rejection, cookie attributes, user enumeration parity | `tests/auth-routes.test.ts` |
 | ✅ | Session + project stores: stats, archive filtering, per-session event seq isolation, payload JSON roundtrip, FK cascade | `tests/sessions-store.test.ts` |
 | ✅ | Deterministic Agent SDK → RunnerEvent translation (15 cases covering every block kind + malformed input) | `tests/agent-runner.test.ts` |
 | ✅ | SessionManager lifecycle, status transitions, grant-based auto-approval | `tests/session-manager.test.ts` |
-| ✅ | Session REST routes (path validation, duplicate path 409, archive, events, project rename + delete with sessions-FK guard) | `tests/session-routes.test.ts` |
+| ✅ | Session REST routes (path validation, duplicate path 409, archive, events, project rename + delete with sessions-FK guard, PATCH session title/model/mode with live-runner mode propagation, archived 409, empty-body 400, running-model warning, grants list + revoke with scope + 404) | `tests/session-routes.test.ts` |
 | ✅ | Filesystem browse routes: auth gate, abs-path validation, 404 / 403 error paths, sort + flags, parent-null at root, symlinks are not followed | `tests/browse.test.ts` |
 | ✅ | WebSocket end-to-end over a real port (auth gate, hello_ack, broadcast isolation, permission decision round-trip, bad-frame recovery) | `tests/ws.test.ts` |
 | ✅ | Tool grants: signature conventions, session-vs-global scope, idempotent insert, revoke, FK cascade | `tests/grants.test.ts` |

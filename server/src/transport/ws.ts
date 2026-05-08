@@ -54,8 +54,18 @@ export async function registerWsRoute(
     "/ws",
     { websocket: true },
     async (socket: WebSocket, req: FastifyRequest) => {
+      const ua = String(req.headers["user-agent"] ?? "").slice(0, 80);
+      const xfp = String(req.headers["x-forwarded-proto"] ?? "");
+      const host = String(req.headers.host ?? "");
+      const hasCookie = !!req.cookies?.[ACCESS_COOKIE_NAME];
+      req.log?.info(
+        { ua, xfp, host, hasCookie },
+        "ws handshake begin",
+      );
+
       const userId = await authenticateSocket(req, deps);
       if (!userId) {
+        req.log?.warn({ host, hasCookie }, "ws handshake rejected: unauthenticated");
         socket.send(
           JSON.stringify({
             type: "error",
@@ -82,6 +92,7 @@ export async function registerWsRoute(
       };
 
       state.send({ type: "hello_ack", serverVersion: "0.0.1" });
+      req.log?.info({ userId }, "ws handshake ok, hello_ack sent");
 
       socket.on("message", (raw: Buffer | string) => {
         let parsed;

@@ -24,10 +24,12 @@ export function HomeScreen() {
     refreshSessions,
     loadingSessions,
     connected,
+    wsDiag,
   } = useSessions();
   const navigate = useNavigate();
   const [showNew, setShowNew] = useState(false);
   const [showProjects, setShowProjects] = useState(false);
+  const [showWsDiag, setShowWsDiag] = useState(false);
 
   useEffect(() => {
     init();
@@ -42,18 +44,25 @@ export function HomeScreen() {
           <circle cx="16" cy="18" r="2.2" fill="#faf9f5" />
         </svg>
         <span className="mono text-[13px]">claudex</span>
-        <span
+        <button
+          type="button"
+          onClick={() => setShowWsDiag((v) => !v)}
+          title="WebSocket diagnostics"
           className={`inline-flex items-center gap-1.5 ml-1 px-1.5 py-0.5 rounded-[4px] border border-line bg-paper text-[10px] uppercase tracking-[0.1em] ${
             connected ? "text-success" : "text-ink-muted"
           }`}
         >
           <span
             className={`h-1.5 w-1.5 rounded-full ${
-              connected ? "bg-success animate-pulse" : "bg-line-strong"
+              connected
+                ? "bg-success animate-pulse"
+                : wsDiag.phase === "connecting" || wsDiag.phase === "open"
+                  ? "bg-warn"
+                  : "bg-danger"
             }`}
           />
-          {connected ? "live" : "offline"}
-        </span>
+          {connected ? "live" : wsDiag.phase}
+        </button>
         <div className="ml-auto flex items-center gap-2">
           <span className="text-[12px] text-ink-muted hidden sm:inline">
             signed in as <span className="mono">{user?.username}</span>
@@ -139,6 +148,9 @@ export function HomeScreen() {
       )}
       {showProjects && (
         <ProjectsSheet onClose={() => setShowProjects(false)} />
+      )}
+      {showWsDiag && (
+        <WsDiagPanel diag={wsDiag} onClose={() => setShowWsDiag(false)} />
       )}
     </main>
   );
@@ -448,6 +460,73 @@ function formatRel(iso: string): string {
   if (diff < 3600) return `${Math.round(diff / 60)}m ago`;
   if (diff < 86400) return `${Math.round(diff / 3600)}h ago`;
   return `${Math.round(diff / 86400)}d ago`;
+}
+
+/**
+ * Surfaces the WS client's internal state so we can debug "offline" on
+ * phones without dev tools. Tap the status pill in the header to toggle.
+ */
+function WsDiagPanel({
+  diag,
+  onClose,
+}: {
+  diag: import("@/api/ws").WsDiagnostics;
+  onClose: () => void;
+}) {
+  const rows: Array<[string, string]> = [
+    ["phase", diag.phase],
+    ["attempts", String(diag.attempts)],
+    ["reconnectIn", diag.reconnectIn ? `${diag.reconnectIn}ms` : "—"],
+    [
+      "lastFrameAt",
+      diag.lastFrameAt
+        ? `${Math.round((Date.now() - diag.lastFrameAt) / 1000)}s ago`
+        : "—",
+    ],
+    ["lastCloseCode", diag.lastCloseCode ? String(diag.lastCloseCode) : "—"],
+    ["lastCloseReason", diag.lastCloseReason || "—"],
+    ["lastError", diag.lastError || "—"],
+    [
+      "url",
+      typeof location !== "undefined"
+        ? `${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}/ws`
+        : "?",
+    ],
+    [
+      "userAgent",
+      typeof navigator !== "undefined" ? navigator.userAgent.slice(0, 90) : "?",
+    ],
+  ];
+  return (
+    <div className="fixed inset-0 z-20 bg-ink/30 flex items-end sm:items-center justify-center">
+      <div className="w-full sm:max-w-md bg-canvas border-t sm:border border-line rounded-t-[20px] sm:rounded-[14px] shadow-lift p-4">
+        <div className="flex items-center mb-3">
+          <div>
+            <div className="text-[11px] uppercase tracking-[0.14em] text-ink-muted">
+              WebSocket
+            </div>
+            <div className="display text-[1.1rem] leading-tight">
+              Connection diagnostics
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            className="ml-auto h-8 w-8 rounded-[8px] border border-line flex items-center justify-center"
+          >
+            ✕
+          </button>
+        </div>
+        <dl className="mono text-[12px] divide-y divide-line">
+          {rows.map(([k, v]) => (
+            <div key={k} className="flex items-center gap-3 py-1.5">
+              <dt className="text-ink-muted w-32 shrink-0">{k}</dt>
+              <dd className="min-w-0 flex-1 break-all text-ink">{v}</dd>
+            </div>
+          ))}
+        </dl>
+      </div>
+    </div>
+  );
 }
 
 function ProjectsSheet({ onClose }: { onClose: () => void }) {

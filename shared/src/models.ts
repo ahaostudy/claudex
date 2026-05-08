@@ -164,6 +164,34 @@ export const UpdateProjectRequest = z.object({
 });
 export type UpdateProjectRequest = z.infer<typeof UpdateProjectRequest>;
 
+// Partial update for a session. At least one field must be present — the
+// server uses `.refine()` to reject empty bodies (otherwise a no-op PATCH
+// would still bump updated_at).
+export const UpdateSessionRequest = z
+  .object({
+    title: z.string().min(1).optional(),
+    model: ModelId.optional(),
+    mode: PermissionMode.optional(),
+  })
+  .refine(
+    (v) => v.title !== undefined || v.model !== undefined || v.mode !== undefined,
+    { message: "at least one of title, model, or mode is required" },
+  );
+export type UpdateSessionRequest = z.infer<typeof UpdateSessionRequest>;
+
+// Scope of a tool grant: session-only or global across all sessions.
+export const ToolGrantScope = z.enum(["session", "global"]);
+export type ToolGrantScope = z.infer<typeof ToolGrantScope>;
+
+export const ToolGrant = z.object({
+  id: z.string(),
+  toolName: z.string(),
+  signature: z.string(),
+  scope: ToolGrantScope,
+  createdAt: z.string(),
+});
+export type ToolGrant = z.infer<typeof ToolGrant>;
+
 // ============================================================================
 // Filesystem browse (for the FolderPicker UI)
 // ============================================================================

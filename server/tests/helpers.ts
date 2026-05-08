@@ -16,6 +16,7 @@ import {
   UserStore,
 } from "../src/auth/index.js";
 import type { RunnerFactory } from "../src/sessions/runner.js";
+import type { SessionManager } from "../src/sessions/manager.js";
 
 /**
  * Create a fully isolated Config pointing at a fresh tmp dir and a silent logger.
@@ -61,6 +62,7 @@ export async function bootstrapAuthedApp(
   dbh: ClaudexDb;
   cookie: string;
   tmpDir: string;
+  manager: SessionManager;
   cleanup: () => Promise<void>;
 }> {
   const { config, log, cleanup } = tempConfig();
@@ -101,6 +103,7 @@ export async function bootstrapAuthedApp(
     dbh,
     cookie,
     tmpDir,
+    manager,
     cleanup: async () => {
       fs.rmSync(tmpDir, { recursive: true, force: true });
       await manager.disposeAll();

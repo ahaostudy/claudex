@@ -4,7 +4,9 @@ import type {
   Project,
   Session,
   SessionEvent,
+  ToolGrant,
   UpdateProjectRequest,
+  UpdateSessionRequest,
 } from "@claudex/shared";
 
 export class ApiError extends Error {
@@ -112,6 +114,22 @@ export const api = {
   archiveSession(id: string) {
     return request<{ ok: true }>(`/api/sessions/${id}/archive`, {
       method: "POST",
+    });
+  },
+  updateSession(id: string, body: UpdateSessionRequest) {
+    return request<{ session: Session; warnings?: string[] }>(
+      `/api/sessions/${id}`,
+      { method: "PATCH", json: body },
+    );
+  },
+  listGrants(sessionId: string) {
+    return request<{ grants: ToolGrant[] }>(
+      `/api/sessions/${sessionId}/grants`,
+    );
+  },
+  revokeGrant(grantId: string) {
+    return request<{ ok: true }>(`/api/grants/${grantId}`, {
+      method: "DELETE",
     });
   },
 };

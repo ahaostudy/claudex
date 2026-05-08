@@ -70,7 +70,7 @@ export async function buildApp(
     logger: deps.logger === false ? undefined : deps.logger,
   });
 
-  await registerSessionRoutes(app, { db: deps.db });
+  await registerSessionRoutes(app, { db: deps.db, manager });
   await registerBrowseRoutes(app);
   await registerWsRoute(app, {
     manager,
