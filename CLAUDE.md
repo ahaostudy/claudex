@@ -37,6 +37,14 @@ claudex/
 - **Mobile-first UI.** Every screen is designed for a 390px viewport first; desktop is an adaptive expansion.
 - **Dark side of WS**: every message is a discriminated union with `type` as the tag, defined in `shared/src/protocol.ts` with zod. No ad-hoc JSON on the wire.
 
+## Feature ledger — keep `docs/FEATURES.md` honest
+
+`docs/FEATURES.md` is the source of truth for *what claudex actually does today*. Three tiers: ✅ ready, 🟡 partial (backend exists, UI missing or thin), ⬜ planned.
+
+**Hard rule: every commit that changes user-visible behavior, adds an API surface, or promotes/demotes something between tiers must update `docs/FEATURES.md` in the same commit.** If you add a server capability but choose not to expose it in the UI yet, file it as 🟡 with a one-line note on what's missing — that's how we stop future agents from either re-implementing it or leaving the last 10% forever.
+
+Before you start a task: read `docs/FEATURES.md` first. It'll tell you whether the thing you're about to build already exists as a backend-only 🟡 that just needs wiring, rather than a fresh build.
+
 ## MVP scope (P0 → P3)
 
 - **P0**: scaffolding, both packages run.

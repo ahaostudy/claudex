@@ -39,6 +39,7 @@ Advanced: override the bundle path with `CLAUDEX_WEB_DIST=/abs/path/to/dist`, or
 - `web/` — React front-end, mobile-first, designed against `mockup/index.html`
 - `shared/` — zod schemas and types shared across both
 - `mockup/` — the high-fidelity static design spec
+- `docs/FEATURES.md` — living ledger of **what's actually built today** (ready / partial / planned)
 
 See [CLAUDE.md](./CLAUDE.md) for architecture and conventions.
 
