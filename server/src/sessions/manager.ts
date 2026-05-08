@@ -9,6 +9,8 @@ import type { SessionStore } from "./store.js";
 import type { ProjectStore } from "./projects.js";
 import { ToolGrantStore, signatureFor } from "./grants.js";
 import { summarizePermission } from "./permission-summary.js";
+import type { AuditStore } from "../audit/store.js";
+import type { AttachmentStore } from "../uploads/store.js";
 
 type Broadcaster = (sessionId: string, event: RunnerEvent) => void;
 
@@ -34,6 +36,23 @@ export interface SessionManagerDeps {
   runnerFactory: RunnerFactory;
   broadcast: Broadcaster;
   logger?: FastifyBaseLogger;
+  /**
+   * Optional audit sink. The manager is reachable from non-HTTP paths (WS
+   * handlers, scheduler) so a user id can't always be threaded in — we
+   * append with userId=null in those cases and the Security card still
+   * shows "Granted: Bash <cmd>" / "Denied: …" honestly.
+   */
+  audit?: AuditStore;
+  /**
+   * Optional attachment store + uploads root. When both are provided, the
+   * manager resolves `attachmentIds` passed to `sendUserMessage`, prefixes
+   * the outgoing SDK prompt with `@<absolute-path>` tokens so the SDK's
+   * Read tool can pick up the files, and stamps each row's
+   * `message_event_seq` with the user_message seq that was just appended.
+   * Missing / empty is a no-op — matches the contract in tests that don't
+   * need uploads.
+   */
+  attachments?: AttachmentStore;
 }
 
 interface SessionEntry {
@@ -413,7 +432,11 @@ export class SessionManager {
   }
 
 
-  async sendUserMessage(sessionId: string, content: string): Promise<void> {
+  async sendUserMessage(
+    sessionId: string,
+    content: string,
+    attachmentIds: string[] = [],
+  ): Promise<void> {
     const runner = this.getOrCreate(sessionId);
     // If this is a side chat whose runner has a pending context seed,
     // flush it to the SDK first. We do NOT append the seed to
@@ -424,6 +447,16 @@ export class SessionManager {
       entry.pendingSeed = null;
       await runner.sendUserMessage(seed);
     }
+
+    // Resolve attachments against this session only — cross-session ids get
+    // silently dropped, which is the correct permission boundary. An id that
+    // was already linked to a previous message also drops here because we
+    // filter on `messageEventSeq === null`. The resulting rows are what the
+    // UI chose to send *this* turn.
+    const resolvedAttachments = this.resolveAttachments(
+      sessionId,
+      attachmentIds,
+    );
 
     // Auto-title from the first user message, mirroring Claude Code CLI
     // behavior. Snapshot the session + count prior user_messages *before*
@@ -446,12 +479,34 @@ export class SessionManager {
       ? this.countPriorUserMessages(sessionId)
       : 0;
 
-    this.deps.sessions.appendEvent({
+    // Stamp the user_message payload with attachment metadata so the web
+    // transcript can render the chips alongside the text. Keep it minimal:
+    // the raw bytes are served by the /api/attachments/:id/raw endpoint.
+    const payload: Record<string, unknown> = { text: content };
+    if (resolvedAttachments.length > 0) {
+      payload.attachments = resolvedAttachments.map((a) => ({
+        id: a.id,
+        filename: a.filename,
+        mime: a.mime,
+        size: a.sizeBytes,
+      }));
+    }
+    const appended = this.deps.sessions.appendEvent({
       sessionId,
       kind: "user_message",
-      payload: { text: content },
+      payload,
     });
     this.deps.sessions.touchLastMessage(sessionId);
+
+    // Link the attachments to the just-appended user_message seq so the UI
+    // can no longer delete them and so cleanup knows they're owned. Batched
+    // in a single transaction inside AttachmentStore.linkToMessage.
+    if (resolvedAttachments.length > 0 && this.deps.attachments) {
+      this.deps.attachments.linkToMessage(
+        resolvedAttachments.map((a) => a.id),
+        appended.seq,
+      );
+    }
 
     if (
       beforeAppend &&
@@ -478,7 +533,34 @@ export class SessionManager {
       text: content,
       at: new Date().toISOString(),
     });
-    await runner.sendUserMessage(content);
+
+    // Build the outgoing SDK prompt by prefixing `@<absolute-path>` tokens
+    // so the SDK's Read tool picks the files up in-line — this is how the
+    // `claude` CLI handles `@path` references, and the SDK inherits that
+    // behavior. Using an absolute path under `~/.claudex/uploads/<session>/`
+    // means the Read tool resolves them regardless of the session's cwd.
+    // When the user's message is empty but attachments are present, we
+    // still send the prefix so the model has something to reason about.
+    const sdkPrompt =
+      resolvedAttachments.length > 0
+        ? resolvedAttachments
+            .map((a) => `@${a.path}`)
+            .join("\n") +
+          (content.length > 0 ? `\n\n${content}` : "")
+        : content;
+    await runner.sendUserMessage(sdkPrompt);
+  }
+
+  /**
+   * Look up `ids` in the attachment store, keeping only rows whose session
+   * matches and that are still unlinked. Empty + no-op when the store wasn't
+   * wired (tests, legacy).
+   */
+  private resolveAttachments(sessionId: string, ids: string[]) {
+    if (!this.deps.attachments || ids.length === 0) return [];
+    return this.deps.attachments
+      .findManyForSession(sessionId, ids)
+      .filter((a) => a.messageEventSeq === null);
   }
 
   /**
@@ -558,6 +640,16 @@ export class SessionManager {
       payload: { toolUseId, decision, toolName: pending?.toolName ?? null },
     });
     this.deps.sessions.setStatus(sessionId, "running");
+    // Audit: every permission decision is security-relevant — the user just
+    // authorized (or refused) claude touching the host. userId is null
+    // because decisions arrive over WS with no FastifyRequest in scope; the
+    // audit column is nullable for exactly this reason.
+    this.deps.audit?.append({
+      userId: null,
+      event: decision === "deny" ? "permission_denied" : "permission_granted",
+      target: sessionId,
+      detail: `${pending?.toolName ?? "tool"} ${decision}`,
+    });
   }
 
   async disposeAll(): Promise<void> {

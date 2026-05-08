@@ -18,11 +18,13 @@ import {
   verifyPassword,
   verifyTotp,
 } from "./index.js";
+import type { AuditStore } from "../audit/store.js";
 
 export interface AuthDeps {
   db: Database.Database;
   jwtSecret: Uint8Array;
   challenges: ChallengeStore;
+  audit: AuditStore;
 }
 
 declare module "fastify" {
@@ -77,6 +79,17 @@ export async function registerAuthRoutes(
 ): Promise<void> {
   const users = new UserStore(deps.db);
 
+  // Small helper: pull best-effort ip + user-agent off a Fastify request for
+  // audit rows. Keeps the `audit.append` call sites below to one line each so
+  // the event flow stays readable when skim-reading this file.
+  const reqCtx = (req: FastifyRequest) => ({
+    ip: (req as { ip?: string }).ip ?? null,
+    userAgent:
+      typeof req.headers["user-agent"] === "string"
+        ? req.headers["user-agent"]
+        : null,
+  });
+
   app.decorate(
     "requireAuth",
     async (req: FastifyRequest, reply: FastifyReply) => {
@@ -105,6 +118,13 @@ export async function registerAuthRoutes(
     const ok =
       row != null && (await verifyPassword(password, row.password_hash));
     if (!ok || !row) {
+      // Audit: failed password / unknown user. `userId` intentionally null so
+      // we record brute-force probes against any username uniformly.
+      deps.audit.append({
+        event: "login_failed",
+        detail: "invalid_credentials",
+        ...reqCtx(req),
+      });
       return reply.code(401).send({ error: "invalid_credentials" });
     }
     const challengeId = deps.challenges.create(row.id);
@@ -132,6 +152,14 @@ export async function registerAuthRoutes(
       return reply.code(401).send({ error: "user_gone" });
     }
     if (!verifyTotp(row.totp_secret, code)) {
+      // Audit: wrong 2FA code against a valid challenge (i.e. the password
+      // already matched). userId is known here — the attacker already cleared
+      // the bcrypt gate.
+      deps.audit.append({
+        userId: row.id,
+        event: "totp_failed",
+        ...reqCtx(req),
+      });
       return reply.code(401).send({ error: "invalid_totp" });
     }
     // TOTP good → consume the challenge (prevents replay of this exact
@@ -142,12 +170,33 @@ export async function registerAuthRoutes(
       ...cookieOpts(req),
       maxAge: 60 * 60 * 24 * 30,
     });
+    // Audit: successful login lands here; the bcrypt/TOTP pair both cleared.
+    deps.audit.append({
+      userId: row.id,
+      event: "login",
+      detail: "2FA verified",
+      ...reqCtx(req),
+    });
     const body: VerifyTotpResponse = { ok: true };
     return reply.send(body);
   });
 
   app.post("/api/auth/logout", async (req, reply) => {
     reply.clearCookie(ACCESS_COOKIE_NAME, cookieOpts(req));
+    // Audit: best-effort user id — clearCookie happens regardless, but we
+    // only stamp userId when a valid session is attached (logout called with
+    // no cookie records an anonymous event, still useful for probes).
+    let uid: string | undefined;
+    try {
+      const token = req.cookies?.[ACCESS_COOKIE_NAME];
+      if (token) {
+        const claims = await verifyAccessToken(deps.jwtSecret, token);
+        uid = claims.userId;
+      }
+    } catch {
+      /* ignore — logout on a bad cookie is still a logout */
+    }
+    deps.audit.append({ userId: uid ?? null, event: "logout", ...reqCtx(req) });
     return reply.send({ ok: true });
   });
 
@@ -201,6 +250,14 @@ export async function registerAuthRoutes(
       reply.setCookie(ACCESS_COOKIE_NAME, token, {
         ...cookieOpts(req),
         maxAge: 60 * 60 * 24 * 30,
+      });
+      // Audit: password rotation succeeded. The old JWT is still technically
+      // valid until its own exp (we don't keep a revocation list), but future
+      // logins will require the new password.
+      deps.audit.append({
+        userId: row.id,
+        event: "password_changed",
+        ...reqCtx(req),
       });
       return reply.send({ ok: true });
     },

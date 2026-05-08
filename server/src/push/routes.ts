@@ -10,6 +10,7 @@ import {
 } from "@claudex/shared";
 import { PushSubscriptionStore } from "./store.js";
 import { configureWebPush, type VapidKeys } from "./vapid.js";
+import type { AuditStore } from "../audit/store.js";
 
 // -----------------------------------------------------------------------------
 // Push routes
@@ -38,6 +39,7 @@ export interface PushRoutesDeps {
   db: Database.Database;
   vapid: VapidKeys;
   logger?: WarnLogger;
+  audit?: AuditStore;
 }
 
 export interface PushPayload {
@@ -141,6 +143,18 @@ export async function registerPushRoutes(
         auth: parsed.data.keys.auth,
         userAgent: ua,
       });
+      // Audit: pairing a new push device is security-relevant — that device
+      // can now receive permission-request pings that reveal what claude is
+      // doing. user-agent goes in `detail` so the Security card can render
+      // "New push device: Safari on iPhone".
+      deps.audit?.append({
+        userId: (req as { userId?: string }).userId ?? null,
+        event: "push_subscribed",
+        target: row.id,
+        detail: ua ?? null,
+        ip: (req as { ip?: string }).ip ?? null,
+        userAgent: ua ?? null,
+      });
       const body: PushSubscribeResponse = { id: row.id, enabled: true };
       return reply.send(body);
     },
@@ -151,8 +165,22 @@ export async function registerPushRoutes(
     { preHandler: app.requireAuth as any },
     async (req, reply) => {
       const { id } = req.params as { id: string };
+      const existing = store.findById(id);
       const ok = store.deleteById(id);
       if (!ok) return reply.code(404).send({ error: "not_found" });
+      // Audit: device revocation. Capture the UA from the row we just
+      // deleted so the Security card can say which device dropped off.
+      deps.audit?.append({
+        userId: (req as { userId?: string }).userId ?? null,
+        event: "push_revoked",
+        target: id,
+        detail: existing?.userAgent ?? null,
+        ip: (req as { ip?: string }).ip ?? null,
+        userAgent:
+          typeof req.headers["user-agent"] === "string"
+            ? req.headers["user-agent"]
+            : null,
+      });
       return reply.send({ ok: true });
     },
   );

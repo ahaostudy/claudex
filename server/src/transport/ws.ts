@@ -216,7 +216,11 @@ async function handleClientFrame(
       return;
     }
     case "user_message": {
-      await deps.manager.sendUserMessage(frame.sessionId, frame.content);
+      await deps.manager.sendUserMessage(
+        frame.sessionId,
+        frame.content,
+        frame.attachmentIds ?? [],
+      );
       return;
     }
     case "interrupt": {

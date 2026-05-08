@@ -86,6 +86,7 @@ export async function bootstrapAuthedApp(
     userClaudeDir: opts?.userClaudeDir,
     cliProjectsRoot: opts?.cliProjectsRoot,
     vapid: opts?.vapid,
+    stateDir: config.stateDir,
   });
   const users = new UserStore(dbh.db);
   const totpSecret = generateTotpSecret();

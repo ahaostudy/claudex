@@ -7,6 +7,7 @@ import { ChatScreen } from "@/screens/Chat";
 import { DiffReviewScreen } from "@/screens/DiffReview";
 import { SettingsScreen } from "@/screens/Settings";
 import { RoutinesScreen } from "@/screens/Routines";
+import { QueueScreen } from "@/screens/Queue";
 import { AlertsScreen } from "@/screens/Alerts";
 import { UsagePage } from "@/screens/UsagePage";
 import { KeyboardHelp } from "@/components/KeyboardHelp";
@@ -48,6 +49,14 @@ export default function App() {
         element={
           <Guard>
             <RoutinesScreen />
+          </Guard>
+        }
+      />
+      <Route
+        path="/queue"
+        element={
+          <Guard>
+            <QueueScreen />
           </Guard>
         }
       />

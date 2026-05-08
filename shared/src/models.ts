@@ -719,3 +719,189 @@ export const PushTestResponse = z.object({
   pruned: z.number().int().nonnegative(),
 });
 export type PushTestResponse = z.infer<typeof PushTestResponse>;
+
+// ============================================================================
+// Attachments (composer "Attach" chip)
+//
+// Two-phase model: uploads land unlinked (`message_event_seq = null`) via
+// `POST /api/sessions/:id/attachments`, then get stamped onto the user's
+// `user_message` event seq when they hit Send. A user can delete an unlinked
+// attachment (they changed their mind); linked attachments are immutable.
+// The file itself lives under `~/.claudex/uploads/<session-id>/`. The raw
+// file is served by a login-gated endpoint at `/api/attachments/:id/raw`;
+// for image attachments this is also the `previewUrl` the composer uses to
+// render an inline thumbnail.
+// ============================================================================
+
+export const Attachment = z.object({
+  id: z.string(),
+  filename: z.string(),
+  mime: z.string(),
+  size: z.number().int().nonnegative(),
+  /** Absolute URL path (same origin) that serves the raw bytes. Only populated
+   * for image attachments today — the composer uses it for inline thumbnails.
+   * The server route exists for every mime type; the client just chooses not
+   * to fetch non-images. */
+  previewUrl: z.string().optional(),
+});
+export type Attachment = z.infer<typeof Attachment>;
+
+export const UploadAttachmentResponse = Attachment;
+export type UploadAttachmentResponse = z.infer<typeof UploadAttachmentResponse>;
+
+// ============================================================================
+// Full-text search across sessions + messages
+//
+// Backed by SQLite FTS5 (see server migration id=9). The server returns two
+// buckets: `titleHits` (session titles that matched) and `messageHits`
+// (user_message / assistant_text / assistant_thinking bodies that matched).
+// Each capped at the `limit` query param (default 20, max 50 server-side).
+//
+// Snippets embed `<mark>…</mark>` HTML around the matched fragment. Clients
+// must either sanitize-and-map those to styled spans (preferred) or, if they
+// really do need to render as HTML, do so with the understanding that the
+// server controls that output and will never emit anything other than
+// literal `<mark>` / `</mark>` around tokenizer matches.
+// ============================================================================
+
+export const SearchTitleHit = z.object({
+  sessionId: z.string(),
+  title: z.string(),
+  // The FTS `snippet()` for the matched title. Short (≤16 tokens). Optional
+  // because a literal one-word title match may return an empty snippet.
+  snippet: z.string().optional(),
+});
+export type SearchTitleHit = z.infer<typeof SearchTitleHit>;
+
+export const SearchMessageHit = z.object({
+  sessionId: z.string(),
+  // Parent session's current title (JOINed server-side so clients don't
+  // need a second round-trip to resolve it).
+  title: z.string(),
+  eventSeq: z.number().int().nonnegative(),
+  kind: z.string(),
+  snippet: z.string(),
+  createdAt: z.string(),
+});
+export type SearchMessageHit = z.infer<typeof SearchMessageHit>;
+
+export const SearchResponse = z.object({
+  titleHits: z.array(SearchTitleHit),
+  messageHits: z.array(SearchMessageHit),
+});
+export type SearchResponse = z.infer<typeof SearchResponse>;
+
+// ============================================================================
+// Batch queue
+//
+// A queue of prompts the user wants run sequentially, each as its own fresh
+// session. The runner picks the lowest-seq `queued` row, spawns a session,
+// sends the prompt, then waits for the session to settle (idle or error)
+// before moving on. Crash-resilient: every transition is persisted; a restart
+// mid-run picks up with whatever row is still marked `running`.
+// ============================================================================
+
+export const QueueStatus = z.enum([
+  "queued",
+  "running",
+  "done",
+  "cancelled",
+  "failed",
+]);
+export type QueueStatus = z.infer<typeof QueueStatus>;
+
+export const QueuedPrompt = z.object({
+  id: z.string(),
+  projectId: z.string(),
+  prompt: z.string(),
+  // Short user label; falls back to first 60 chars of the prompt at render
+  // time. Nullable so the API body can omit it.
+  title: z.string().nullable(),
+  // Null → runner falls back to the project/user default (claude-opus-4-7 /
+  // 'default'). Non-null entries pin the choice.
+  model: ModelId.nullable(),
+  mode: PermissionMode.nullable(),
+  worktree: z.boolean(),
+  status: QueueStatus,
+  // Set when the runner promotes the row to `running` (or later). Lets the
+  // UI render "Open session →" once a real session exists.
+  sessionId: z.string().nullable(),
+  createdAt: z.string(),
+  startedAt: z.string().nullable(),
+  finishedAt: z.string().nullable(),
+  seq: z.number().int().nonnegative(),
+});
+export type QueuedPrompt = z.infer<typeof QueuedPrompt>;
+
+export const CreateQueuedPromptRequest = z.object({
+  projectId: z.string().min(1),
+  prompt: z.string().min(1),
+  title: z.string().min(1).optional(),
+  model: ModelId.optional(),
+  mode: PermissionMode.optional(),
+  worktree: z.boolean().optional(),
+});
+export type CreateQueuedPromptRequest = z.infer<
+  typeof CreateQueuedPromptRequest
+>;
+
+export const UpdateQueuedPromptRequest = z
+  .object({
+    prompt: z.string().min(1).optional(),
+    title: z.string().min(1).optional(),
+    model: ModelId.optional(),
+    mode: PermissionMode.optional(),
+    worktree: z.boolean().optional(),
+  })
+  .refine(
+    (v) =>
+      v.prompt !== undefined ||
+      v.title !== undefined ||
+      v.model !== undefined ||
+      v.mode !== undefined ||
+      v.worktree !== undefined,
+    { message: "at least one field is required" },
+  );
+export type UpdateQueuedPromptRequest = z.infer<
+  typeof UpdateQueuedPromptRequest
+>;
+
+export const ListQueuedPromptsResponse = z.object({
+  queue: z.array(QueuedPrompt),
+});
+export type ListQueuedPromptsResponse = z.infer<
+  typeof ListQueuedPromptsResponse
+>;
+
+// ============================================================================
+// Audit log
+//
+// Security-relevant events visible to the logged-in operator. The server
+// writes rows fire-and-forget from auth, session, manager, and push call
+// sites (see server/src/audit/); the web Security tab renders a rolling list
+// plus a full-log sheet. `event` is an open string rather than a closed enum
+// so new call sites can land without a shared-schema bump — the UI falls back
+// to a generic "<event>" sentence when it doesn't have a mapping.
+// ============================================================================
+
+export const AuditEvent = z.object({
+  id: z.string(),
+  event: z.string(),
+  target: z.string().nullable(),
+  detail: z.string().nullable(),
+  ip: z.string().nullable(),
+  userAgent: z.string().nullable(),
+  createdAt: z.string(),
+  // Populated by the route via userStore lookup when `user_id` is non-null.
+  // Null for pre-login events (failed login / invalid challenge).
+  user: z
+    .object({ id: z.string(), username: z.string() })
+    .nullable(),
+});
+export type AuditEvent = z.infer<typeof AuditEvent>;
+
+export const AuditListResponse = z.object({
+  events: z.array(AuditEvent),
+  totalCount: z.number().int().nonnegative(),
+});
+export type AuditListResponse = z.infer<typeof AuditListResponse>;

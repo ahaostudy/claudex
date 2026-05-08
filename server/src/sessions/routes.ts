@@ -17,6 +17,7 @@ import { aggregatePendingDiffs } from "./diffs.js";
 import type { SessionManager } from "./manager.js";
 import { computeUsageSummary } from "./usage-summary.js";
 import { triggerCliResync } from "./cli-resync.js";
+import type { AuditStore } from "../audit/store.js";
 import {
   createWorktree,
   isGitRepo,
@@ -34,6 +35,14 @@ export interface SessionsRoutesDeps {
    * path.
    */
   cliProjectsRoot?: string;
+  audit: AuditStore;
+  /**
+   * Absolute path to the uploads root (normally `~/.claudex/uploads`). When
+   * provided, `DELETE /api/sessions/:id` best-effort removes the session's
+   * upload directory in addition to the FK-cascaded attachment rows. Absent
+   * is safe — cleanup is a no-op.
+   */
+  uploadsRoot?: string;
 }
 
 const AddProject = z.object({
@@ -390,6 +399,37 @@ export async function registerSessionRoutes(
       }
 
       sessions.deleteById(id);
+      // Best-effort remove the session's upload directory so orphaned files
+      // don't sit under `~/.claudex/uploads/<session-id>/` forever. The FK
+      // cascade already dropped the DB rows. Swallow errors — the session
+      // is already gone in the user's mental model.
+      if (deps.uploadsRoot) {
+        try {
+          const { removeSessionUploadsDir } = await import(
+            "../uploads/routes.js"
+          );
+          await removeSessionUploadsDir(deps.uploadsRoot, id);
+        } catch (err) {
+          req.log.warn(
+            { err, sessionId: id },
+            "uploads dir cleanup failed during session delete",
+          );
+        }
+      }
+      // Audit: hard-delete is the only session action that can't be undone,
+      // so it earns an audit row. Title goes in `detail` so the Security UI
+      // can show "Deleted session 'Fix login bug'" without another lookup.
+      deps.audit.append({
+        userId: req.userId ?? null,
+        event: "session_deleted",
+        target: id,
+        detail: existing.title,
+        ip: (req as { ip?: string }).ip ?? null,
+        userAgent:
+          typeof req.headers["user-agent"] === "string"
+            ? req.headers["user-agent"]
+            : null,
+      });
       return reply.code(204).send();
     },
   );

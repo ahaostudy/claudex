@@ -8,6 +8,7 @@ import type {
   SessionEvent,
   SessionStatus,
 } from "@claudex/shared";
+import { SearchStore } from "../search/store.js";
 
 interface SessionRow {
   id: string;
@@ -71,7 +72,14 @@ export interface SessionCreateInput {
 }
 
 export class SessionStore {
-  constructor(private readonly db: Database.Database) {}
+  // Search index sync. Wrapped in try/catch at each call site via the
+  // SearchStore's internal best-effort semantics — an FTS5 failure must
+  // never block the primary write that caused it.
+  private readonly search: SearchStore;
+
+  constructor(private readonly db: Database.Database) {
+    this.search = new SearchStore(db);
+  }
 
   // ---- sessions ----------------------------------------------------------
 
@@ -179,6 +187,7 @@ export class SessionStore {
          )`,
       )
       .run(row);
+    this.search.upsertTitle(row.id, row.title);
     return toSession(row);
   }
 
@@ -192,6 +201,7 @@ export class SessionStore {
     this.db
       .prepare("UPDATE sessions SET title = ?, updated_at = ? WHERE id = ?")
       .run(title, new Date().toISOString(), id);
+    this.search.upsertTitle(id, title);
   }
 
   setModel(id: string, model: ModelId): void {
@@ -248,6 +258,11 @@ export class SessionStore {
    * scoped to this session also cascade. Returns true if a row was deleted.
    */
   deleteById(id: string): boolean {
+    // Clear FTS rows first. If the session DELETE below fails (it won't
+    // under normal conditions, but FK RESTRICT elsewhere could surprise
+    // us), we'd rather re-index on the next backfill than leave stale
+    // rows that point to a live session.
+    this.search.deleteSession(id);
     const res = this.db.prepare("DELETE FROM sessions WHERE id = ?").run(id);
     return res.changes > 0;
   }
@@ -316,6 +331,14 @@ export class SessionStore {
         event.createdAt,
         JSON.stringify(event.payload),
       );
+    // Keep the full-text search index in sync for text-bearing events.
+    // SearchStore.indexMessage is a no-op for other kinds / empty text.
+    this.search.indexMessage({
+      sessionId: event.sessionId,
+      seq: event.seq,
+      kind: event.kind,
+      payload: event.payload,
+    });
     return event;
   }
 

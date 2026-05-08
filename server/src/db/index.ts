@@ -180,6 +180,158 @@ const MIGRATIONS: { id: number; name: string; up: string }[] = [
       );
     `,
   },
+  {
+    id: 7,
+    name: "attachments",
+    // Files attached to user messages via the composer "Attach" chip.
+    // Two-phase lifecycle:
+    //   1. Upload: POST /api/sessions/:id/attachments writes the file under
+    //      ~/.claudex/uploads/<session-id>/ and inserts a row with
+    //      `message_event_seq = NULL` (unlinked).
+    //   2. Link: when the user sends the message, SessionManager stamps
+    //      each row's `message_event_seq` with the user_message seq it just
+    //      appended.
+    // Unlinked rows can be deleted by the user (they changed their mind
+    // before sending); linked rows refuse DELETE with 404 — once the
+    // message is out, the attachment is history.
+    up: `
+      CREATE TABLE attachments (
+        id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+        message_event_seq INTEGER,
+        filename TEXT NOT NULL,
+        mime TEXT NOT NULL,
+        size_bytes INTEGER NOT NULL,
+        path TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
+      CREATE INDEX idx_attachments_session ON attachments(session_id);
+    `,
+  },
+  {
+    id: 8,
+    name: "audit_events",
+    // Security-relevant audit log. Drives Settings → Security → "Audit log"
+    // card and the full-log sheet. We keep it intentionally thin:
+    //   - `event` is a short lowercase identifier (see AuditStore.append
+    //     caller enum in audit/store.ts — not an enum column so new events
+    //     can land without a migration).
+    //   - `user_id` is nullable so pre-login events (failed login attempts,
+    //     TOTP failures without a valid challenge) can still be recorded.
+    //   - `target` / `detail` are free-form short strings — UI composes the
+    //     human sentence per event kind, we don't try to pre-render here.
+    //   - `ip` / `user_agent` are best-effort and may be NULL when the call
+    //     site can't thread a request in (e.g. manager permission decisions).
+    //
+    // No FK on `user_id` — audit rows must survive user deletion so the log
+    // stays intact across credential rotations. The index on `created_at DESC`
+    // is what the Security card's "past 30 days" query uses.
+    up: `
+      CREATE TABLE audit_events (
+        id TEXT PRIMARY KEY,
+        user_id TEXT,
+        event TEXT NOT NULL,
+        target TEXT,
+        detail TEXT,
+        ip TEXT,
+        user_agent TEXT,
+        created_at TEXT NOT NULL
+      );
+      CREATE INDEX idx_audit_created ON audit_events(created_at DESC);
+      CREATE INDEX idx_audit_event ON audit_events(event);
+    `,
+  },
+  {
+    id: 9,
+    name: "session_search_fts",
+    // Server-side full-text search across session titles and text-bearing
+    // message bodies. Uses SQLite FTS5 virtual tables (tokenize=unicode61,
+    // which covers CJK and accented scripts adequately for a search-hint use
+    // case — we're not building a linguist's tool).
+    //
+    // Two tables so a title match doesn't drown in message hits (and vice
+    // versa): the route returns them in distinct "Sessions" and "Messages"
+    // sections. Migration IDs 7 and 8 are reserved for sibling agents
+    // landing in parallel; we jump to 9 to avoid conflicts.
+    //
+    // All lookup keys (session_id, event_seq, kind) are marked UNINDEXED so
+    // FTS5 doesn't tokenize nanoid blobs / integers — we only search `body`
+    // and `title`. Backfill walks existing rows at migration time so users
+    // who upgrade an existing DB get their history indexed without a
+    // separate step. Ongoing inserts happen in SessionStore.appendEvent and
+    // SessionStore.setTitle/create — FTS5 has no natural upsert, so we do a
+    // delete-then-insert pair for title updates.
+    up: `
+      CREATE VIRTUAL TABLE session_search USING fts5(
+        session_id UNINDEXED,
+        event_seq UNINDEXED,
+        kind UNINDEXED,
+        body,
+        tokenize = 'unicode61'
+      );
+
+      CREATE VIRTUAL TABLE session_title_search USING fts5(
+        session_id UNINDEXED,
+        title,
+        tokenize = 'unicode61'
+      );
+
+      -- Backfill titles from existing sessions.
+      INSERT INTO session_title_search (session_id, title)
+        SELECT id, title FROM sessions;
+
+      -- Backfill text-bearing message bodies from existing events.
+      -- We can extract JSON payload.text cheaply via SQLite's json1
+      -- extension (bundled with better-sqlite3). Skip NULL/empty extracts.
+      INSERT INTO session_search (session_id, event_seq, kind, body)
+        SELECT
+          session_id,
+          seq,
+          kind,
+          json_extract(payload, '$.text')
+        FROM session_events
+        WHERE kind IN ('user_message', 'assistant_text', 'assistant_thinking')
+          AND json_extract(payload, '$.text') IS NOT NULL
+          AND length(json_extract(payload, '$.text')) > 0;
+    `,
+  },
+  {
+    id: 10,
+    name: "queued_prompts",
+    // Batch queue: the user composes several prompts ahead of time and the
+    // queue runner dispatches them one at a time, spawning a real session per
+    // run. Designed for "go fix these 4 issues while I'm away" — you don't
+    // want them racing in parallel claude instances. IDs 7..9 are owned by
+    // sibling lanes (attachments / FTS search etc.), hence this one lands on
+    // id=10.
+    //
+    // `seq` is a hand-assigned monotonic integer within the queued set — the
+    // runner picks the smallest. Reorder is a pair-swap on `seq`. We keep
+    // done/failed/cancelled rows in the table as a simple audit trail: they
+    // carry a `session_id` pointer the UI turns into an "Open session" link.
+    //
+    // `model`/`mode` are nullable — the runner falls back to opus-4-7 +
+    // 'default' when the user didn't pin specific values. Matches how the
+    // New Session sheet behaves today if fields are left unset.
+    up: `
+      CREATE TABLE queued_prompts (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        prompt TEXT NOT NULL,
+        title TEXT,
+        model TEXT,
+        mode TEXT,
+        worktree INTEGER NOT NULL DEFAULT 0,
+        status TEXT NOT NULL,
+        session_id TEXT,
+        created_at TEXT NOT NULL,
+        started_at TEXT,
+        finished_at TEXT,
+        seq INTEGER NOT NULL
+      );
+      CREATE INDEX idx_queue_status_seq ON queued_prompts(status, seq);
+    `,
+  },
 ];
 
 export function openDb(config: Config, log: Logger): ClaudexDb {

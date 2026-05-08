@@ -16,7 +16,7 @@ import {
 } from "lucide-react";
 import { useAuth } from "@/state/auth";
 import { api, ApiError } from "@/api/client";
-import type { PushDevice, UserEnvResponse } from "@claudex/shared";
+import type { PushDevice, UserEnvResponse, AuditEvent } from "@claudex/shared";
 import { cn } from "@/lib/cn";
 import { AppShell } from "@/components/AppShell";
 import {
@@ -496,9 +496,9 @@ function LabeledInput({
 }
 
 // ----------------------------------------------------------------------------
-// Security — mockup lines 2119–2135, stripped honest version.
+// Security — mockup lines 2119–2135 + 2163–2173 (audit log card).
 //
-// Shipped: enabled pill + Issuer.
+// Shipped: enabled pill + Issuer + Audit log list (server-backed).
 // Omitted (and why):
 //   - Recovery codes tile  — we don't track "8 of 10 unused"
 //   - Last used tile       — we don't record TOTP usage timestamps
@@ -506,41 +506,210 @@ function LabeledInput({
 //   - Move to hardware key — no flow
 //   - Disable 2FA          — TOTP is mandatory
 //   - Paired browsers card — no per-JWT tracking
-//   - Exposure / audit log — no data source
 // ----------------------------------------------------------------------------
 
 function SecurityPanel() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const fullLog = searchParams.get("audit") === "1";
   return (
-    <div className="rounded-[12px] border border-line bg-canvas overflow-hidden">
-      <div className="flex items-center gap-4 px-5 py-4 border-b border-line">
-        <div className="h-9 w-9 rounded-[8px] bg-klein-wash border border-klein/20 flex items-center justify-center shrink-0">
-          <Shield className="w-4 h-4 text-klein" />
-        </div>
-        <div className="min-w-0">
-          <div className="display text-[18px] leading-tight">
-            Two-factor authentication
+    <div className="space-y-5">
+      <div className="rounded-[12px] border border-line bg-canvas overflow-hidden">
+        <div className="flex items-center gap-4 px-5 py-4 border-b border-line">
+          <div className="h-9 w-9 rounded-[8px] bg-klein-wash border border-klein/20 flex items-center justify-center shrink-0">
+            <Shield className="w-4 h-4 text-klein" />
           </div>
-          <div className="text-[13px] text-ink-muted mt-0.5">
-            Required. Rotates every 30 seconds via an authenticator app.
+          <div className="min-w-0">
+            <div className="display text-[18px] leading-tight">
+              Two-factor authentication
+            </div>
+            <div className="text-[13px] text-ink-muted mt-0.5">
+              Required. Rotates every 30 seconds via an authenticator app.
+            </div>
+          </div>
+          <span className="ml-auto inline-flex items-center gap-1.5 px-2 py-0.5 rounded-[6px] border border-success/30 bg-success-wash text-[#1f5f21] text-[10px] font-medium uppercase tracking-[0.1em] shrink-0">
+            <span className="h-1.5 w-1.5 rounded-full bg-success" />
+            enabled
+          </span>
+        </div>
+
+        <div className="grid grid-cols-1 text-[13px]">
+          <div className="px-5 py-4">
+            <div className="caps text-ink-muted">Issuer</div>
+            <div className="mt-1 mono">claudex</div>
           </div>
         </div>
-        <span className="ml-auto inline-flex items-center gap-1.5 px-2 py-0.5 rounded-[6px] border border-success/30 bg-success-wash text-[#1f5f21] text-[10px] font-medium uppercase tracking-[0.1em] shrink-0">
-          <span className="h-1.5 w-1.5 rounded-full bg-success" />
-          enabled
-        </span>
+
+        <div className="px-5 py-3 border-t border-line bg-paper/40 text-[12.5px] text-ink-muted">
+          Recovery codes, "last used", paired browsers, regenerate/disable flows
+          are planned. Rotate via <span className="mono">pnpm reset-credentials</span> for now.
+        </div>
       </div>
 
-      <div className="grid grid-cols-1 text-[13px]">
-        <div className="px-5 py-4">
-          <div className="caps text-ink-muted">Issuer</div>
-          <div className="mt-1 mono">claudex</div>
-        </div>
-      </div>
+      <AuditLogCard
+        expanded={fullLog}
+        onExpand={() => {
+          const next = new URLSearchParams(searchParams);
+          next.set("audit", "1");
+          setSearchParams(next, { replace: true });
+        }}
+        onCollapse={() => {
+          const next = new URLSearchParams(searchParams);
+          next.delete("audit");
+          setSearchParams(next, { replace: true });
+        }}
+      />
+    </div>
+  );
+}
 
-      <div className="px-5 py-3 border-t border-line bg-paper/40 text-[12.5px] text-ink-muted">
-        Recovery codes, "last used", paired browsers, regenerate/disable flows
-        are planned. Rotate via <span className="mono">pnpm reset-credentials</span> for now.
+// Short relative-time formatter for audit rows ("5m", "2h", "3d", "1w"). Kept
+// terse so the 12-char fixed column stays tight on mobile. The longer
+// "5m ago" formatter further down is used by Notifications, which has room.
+function relativeTimeShort(iso: string): string {
+  const t = Date.parse(iso);
+  if (Number.isNaN(t)) return "—";
+  const delta = Math.max(0, Date.now() - t);
+  const sec = Math.floor(delta / 1000);
+  if (sec < 60) return `${sec}s`;
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min}m`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}h`;
+  const day = Math.floor(hr / 24);
+  if (day < 7) return `${day}d`;
+  const wk = Math.floor(day / 7);
+  return `${wk}w`;
+}
+
+// Compose a short human-readable sentence per audit event. Open-ended on
+// purpose: unknown events fall back to `<event>` so new server-side kinds
+// don't require a UI deploy to show up.
+function renderAuditDetail(row: AuditEvent): string {
+  // `deviceLabel` takes a PushDevice; we only have a UA string — wrap the UA
+  // in a stub device so the classifier works without a second branch.
+  const uaLabel = (ua: string | null | undefined) =>
+    ua
+      ? deviceLabel({
+          id: "",
+          userAgent: ua,
+          createdAt: "",
+          lastUsedAt: null,
+        })
+      : "unknown device";
+  switch (row.event) {
+    case "login":
+      return `2FA verified from ${uaLabel(row.userAgent)}`;
+    case "login_failed":
+      return `Failed login attempt from ${row.ip ?? "unknown IP"}`;
+    case "logout":
+      return "Signed out";
+    case "password_changed":
+      return "Password changed";
+    case "totp_failed":
+      return `Wrong 2FA code from ${row.ip ?? "unknown IP"}`;
+    case "session_deleted":
+      return `Deleted session "${row.detail ?? "untitled"}"`;
+    case "permission_granted":
+      return `Granted: ${row.detail ?? "tool allow"}`;
+    case "permission_denied":
+      return `Denied: ${row.detail ?? "tool deny"}`;
+    case "push_subscribed":
+      return `New push device: ${uaLabel(row.detail)}`;
+    case "push_revoked":
+      return `Removed push device: ${uaLabel(row.detail)}`;
+    default:
+      return row.detail ? `${row.event}: ${row.detail}` : row.event;
+  }
+}
+
+function AuditLogCard({
+  expanded,
+  onExpand,
+  onCollapse,
+}: {
+  expanded: boolean;
+  onExpand: () => void;
+  onCollapse: () => void;
+}) {
+  const [rows, setRows] = useState<AuditEvent[] | null>(null);
+  const [totalCount, setTotalCount] = useState(0);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    // Last 30 days — matches the card's header phrasing so totalCount is
+    // honest about what we're showing.
+    const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+    const limit = expanded ? 200 : 50;
+    void (async () => {
+      try {
+        const res = await api.listAudit({ limit, since });
+        setRows(res.events);
+        setTotalCount(res.totalCount);
+      } catch (e) {
+        setErr(e instanceof ApiError ? e.code : "load failed");
+      }
+    })();
+  }, [expanded]);
+
+  if (err) {
+    return (
+      <div className="rounded-[12px] border border-line bg-canvas p-5 text-[13px] text-ink-muted">
+        Couldn't load audit log: <span className="mono">{err}</span>
       </div>
+    );
+  }
+  if (rows === null) {
+    return (
+      <div className="rounded-[12px] border border-line bg-canvas p-5 text-[13px] text-ink-muted">
+        Loading audit log…
+      </div>
+    );
+  }
+
+  const visible = expanded ? rows : rows.slice(0, 6);
+
+  return (
+    <div className="rounded-[12px] border border-line bg-canvas p-5">
+      <div className="caps text-ink-muted">Audit log</div>
+      <div className="display text-[18px] mt-1">
+        {totalCount} event{totalCount === 1 ? "" : "s"} · past 30 days
+      </div>
+      {visible.length === 0 ? (
+        <div className="mt-3 text-[12.5px] text-ink-muted">
+          No security-relevant events yet. Logins, password changes, and
+          permission decisions will show up here.
+        </div>
+      ) : (
+        <div className="mt-3 space-y-2 text-[12.5px]">
+          {visible.map((row) => (
+            <div key={row.id} className="flex items-start gap-2">
+              <span className="mono text-ink-muted w-12 mt-0.5 shrink-0">
+                {relativeTimeShort(row.createdAt)}
+              </span>
+              <span className="min-w-0 break-words">
+                {renderAuditDetail(row)}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+      {expanded ? (
+        <button
+          onClick={onCollapse}
+          className="mt-3 h-8 px-3 rounded-[8px] border border-line bg-paper text-[12.5px] w-full"
+        >
+          Collapse
+        </button>
+      ) : (
+        rows.length > 6 && (
+          <button
+            onClick={onExpand}
+            className="mt-3 h-8 px-3 rounded-[8px] border border-line bg-paper text-[12.5px] w-full"
+          >
+            Open full log
+          </button>
+        )
+      )}
     </div>
   );
 }

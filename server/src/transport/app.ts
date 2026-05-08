@@ -1,9 +1,11 @@
 import Fastify, { type FastifyInstance, type FastifyBaseLogger } from "fastify";
 import fastifyCookie from "@fastify/cookie";
 import fastifyStatic from "@fastify/static";
+import fastifyMultipart from "@fastify/multipart";
 import type Database from "better-sqlite3";
 import fs from "node:fs";
 import path from "node:path";
+import os from "node:os";
 import { fileURLToPath } from "node:url";
 import { ChallengeStore } from "../auth/index.js";
 import { registerAuthRoutes } from "../auth/routes.js";
@@ -18,6 +20,9 @@ import { registerUserEnvRoutes } from "../sessions/user-env.js";
 import { registerCliRoutes } from "../sessions/cli-routes.js";
 import { registerUsageRoutes } from "../sessions/usage-routes.js";
 import { registerSessionExportRoutes } from "../sessions/export-routes.js";
+import { registerSearchRoutes } from "../search/routes.js";
+import { AuditStore } from "../audit/store.js";
+import { registerAuditRoutes } from "../audit/routes.js";
 import { registerWsRoute } from "./ws.js";
 import { registerPtyRoutes } from "./pty.js";
 import { agentRunnerFactory } from "../sessions/agent-runner.js";
@@ -25,6 +30,9 @@ import type { RunnerFactory } from "../sessions/runner.js";
 import { RoutineStore } from "../routines/store.js";
 import { RoutineScheduler } from "../routines/scheduler.js";
 import { registerRoutineRoutes } from "../routines/routes.js";
+import { QueueRunner } from "../queue/runner.js";
+import { QueueStore } from "../queue/store.js";
+import { registerQueueRoutes } from "../queue/routes.js";
 import {
   createPushSender,
   registerPushRoutes,
@@ -69,6 +77,13 @@ export interface AppDeps {
    * a no-op sender — see the nullish `vapid` branch below).
    */
   vapid?: VapidKeys;
+  /**
+   * Absolute path to the claudex state directory (normally `~/.claudex`).
+   * Used to anchor `uploads/<session-id>/` for the composer's Attach chip.
+   * Optional for back-compat; defaults to `<os.homedir>/.claudex` to match
+   * `loadConfig()` behavior. Tests inject a tmp state dir via `bootstrapAuthedApp`.
+   */
+  stateDir?: string;
 }
 
 export async function buildApp(
@@ -77,6 +92,7 @@ export async function buildApp(
   app: FastifyInstance;
   manager: SessionManager;
   scheduler: RoutineScheduler;
+  queueRunner: QueueRunner;
 }> {
   const app =
     deps.logger === false
@@ -84,6 +100,15 @@ export async function buildApp(
       : Fastify({ loggerInstance: deps.logger });
 
   await app.register(fastifyCookie);
+
+  // Audit store is wired up front so auth routes (the first register below)
+  // can record login / totp / password events from day one. Every call site
+  // passes it through its own `deps` bag rather than a global — keeps the
+  // cross-module coupling explicit and makes test fakes trivial.
+  const audit = new AuditStore(
+    deps.db,
+    deps.logger === false ? undefined : deps.logger,
+  );
 
   app.get("/api/health", async () => ({
     status: "ok",
@@ -96,6 +121,7 @@ export async function buildApp(
     db: deps.db,
     jwtSecret: deps.jwtSecret,
     challenges,
+    audit,
   });
 
   const manager = new SessionManager({
@@ -107,6 +133,10 @@ export async function buildApp(
       /* replaced by WS layer */
     },
     logger: deps.logger === false ? undefined : deps.logger,
+    audit,
+    attachments: new (await import("../uploads/store.js")).AttachmentStore(
+      deps.db,
+    ),
   });
 
   // Push notifications. We only wire the real web-push sender when VAPID
@@ -128,6 +158,7 @@ export async function buildApp(
         db: deps.db,
         vapid: deps.vapid,
         logger: deps.logger === false ? undefined : deps.logger,
+        audit,
       },
       pushSender,
     );
@@ -137,12 +168,33 @@ export async function buildApp(
     manager.setPushSender(pushSender);
   }
 
+  // Multipart parsing — registered once here so the uploads routes can use
+  // `req.file()` for streaming parse. 10 MB per-request cap matches the
+  // uploads module's documented per-request limit; individual files are
+  // further capped to 5 MB inside the route handler (`MAX_FILE_BYTES`).
+  await app.register(fastifyMultipart, {
+    limits: {
+      fileSize: 5 * 1024 * 1024, // per file
+      files: 1, // one file per request — client serializes
+      fields: 10,
+      fieldSize: 1024 * 1024,
+    },
+  });
+
+  const stateDir =
+    deps.stateDir ?? path.join(os.homedir(), ".claudex");
+  const uploadsRoot = path.join(stateDir, "uploads");
+
   await registerSessionRoutes(app, {
     db: deps.db,
     manager,
     cliProjectsRoot: deps.cliProjectsRoot,
+    audit,
+    uploadsRoot,
   });
   await registerBrowseRoutes(app);
+  const { registerUploadsRoutes } = await import("../uploads/routes.js");
+  await registerUploadsRoutes(app, { db: deps.db, uploadsRoot });
   await registerSlashCommandRoutes(app, {
     db: deps.db,
     userClaudeDir: deps.userClaudeDir,
@@ -157,6 +209,8 @@ export async function buildApp(
   });
   await registerUsageRoutes(app, { db: deps.db });
   await registerSessionExportRoutes(app, { db: deps.db });
+  await registerSearchRoutes(app, { db: deps.db });
+  await registerAuditRoutes(app, { db: deps.db, audit });
 
   // Routines: periodic cron-driven session spawns. The scheduler owns a single
   // timer chained across all active routines and reloads itself on any CRUD.
@@ -169,6 +223,21 @@ export async function buildApp(
   });
   scheduler.start();
   await registerRoutineRoutes(app, { db: deps.db, scheduler });
+
+  // Queue: batch of prompts dispatched one at a time. The runner polls every
+  // QUEUE_TICK_INTERVAL_MS (2s) for queued rows; tests set NODE_ENV=test so
+  // we skip auto-start and drive `tick()` directly.
+  const queueRunner = new QueueRunner({
+    queue: new QueueStore(deps.db),
+    sessions: new SessionStore(deps.db),
+    projects: new ProjectStore(deps.db),
+    manager,
+    logger: deps.logger === false ? undefined : deps.logger,
+  });
+  if (process.env.NODE_ENV !== "test") {
+    queueRunner.start();
+  }
+  await registerQueueRoutes(app, { db: deps.db, manager });
 
   await registerWsRoute(app, {
     manager,
@@ -184,7 +253,7 @@ export async function buildApp(
     await registerWebStatic(app, deps.webDist);
   }
 
-  return { app, manager, scheduler };
+  return { app, manager, scheduler, queueRunner };
 }
 
 async function registerWebStatic(

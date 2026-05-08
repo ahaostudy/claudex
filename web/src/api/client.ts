@@ -1,24 +1,30 @@
 import type {
+  Attachment,
+  AuditListResponse,
   BrowseResponse,
   ChangePasswordRequest,
   CliSessionSummary,
+  CreateQueuedPromptRequest,
   CreateRoutineRequest,
   CreateSessionRequest,
   CreateSideSessionRequest,
   PendingDiffsResponse,
   Project,
+  QueuedPrompt,
   Routine,
   Session,
   SessionEvent,
   SlashCommand,
   ToolGrant,
   UpdateProjectRequest,
+  UpdateQueuedPromptRequest,
   UpdateRoutineRequest,
   UpdateSessionRequest,
   UsageRangeResponse,
   UsageSummaryResponse,
   UsageTodayResponse,
   UserEnvResponse,
+  SearchResponse,
 } from "@claudex/shared";
 
 export class ApiError extends Error {
@@ -214,6 +220,30 @@ export const api = {
       method: "POST",
     });
   },
+  listQueue() {
+    return request<{ queue: QueuedPrompt[] }>("/api/queue");
+  },
+  createQueued(body: CreateQueuedPromptRequest) {
+    return request<{ queued: QueuedPrompt }>("/api/queue", {
+      method: "POST",
+      json: body,
+    });
+  },
+  updateQueued(id: string, body: UpdateQueuedPromptRequest) {
+    return request<{ queued: QueuedPrompt }>(`/api/queue/${id}`, {
+      method: "PATCH",
+      json: body,
+    });
+  },
+  deleteQueued(id: string) {
+    return request<{ ok: true }>(`/api/queue/${id}`, { method: "DELETE" });
+  },
+  reorderQueued(id: string, direction: "up" | "down") {
+    return request<{ ok: true; moved: boolean }>(
+      `/api/queue/${id}/${direction}`,
+      { method: "POST" },
+    );
+  },
   changePassword(body: ChangePasswordRequest) {
     return request<{ ok: true }>("/api/auth/change-password", {
       method: "POST",
@@ -239,6 +269,19 @@ export const api = {
     return request<UsageRangeResponse>(`/api/usage/range?days=${days}`);
   },
   /**
+   * Full-text search across session titles + message bodies.
+   *
+   * The server 400s on empty / whitespace-only `q`; callers should
+   * short-circuit and skip the request rather than relying on that. See
+   * the web GlobalSearchSheet for the concrete debounced-typing flow.
+   */
+  search(q: string, limit?: number) {
+    const qs = new URLSearchParams();
+    qs.set("q", q);
+    if (limit !== undefined) qs.set("limit", String(limit));
+    return request<SearchResponse>(`/api/search?${qs.toString()}`);
+  },
+  /**
    * Build a `GET /api/sessions/:id/export` URL for a plain anchor download.
    * Returned as a URL rather than a fetch wrapper because the browser's
    * native download flow (anchor click) is what we actually want — wrapping
@@ -260,5 +303,50 @@ export const api = {
     document.body.appendChild(a);
     a.click();
     a.remove();
+  },
+  /**
+   * Upload a single file to a session's attachment store. Returns the created
+   * attachment metadata (id, filename, mime, size, previewUrl for images).
+   * The raw bytes are served back via `previewUrl`, which for non-image mime
+   * types is undefined (composer uses the filename chip instead of a thumb).
+   *
+   * Does NOT go through `request()` because we need to post a FormData body
+   * without stringifying — `fetch` handles the multipart encoding natively
+   * when you omit Content-Type.
+   */
+  async uploadAttachment(sessionId: string, file: File): Promise<Attachment> {
+    const form = new FormData();
+    form.append("file", file, file.name);
+    const res = await fetch(
+      `/api/sessions/${encodeURIComponent(sessionId)}/attachments`,
+      { method: "POST", credentials: "same-origin", body: form },
+    );
+    if (!res.ok) {
+      let code = `http_${res.status}`;
+      try {
+        const body = (await res.json()) as { error?: string };
+        if (body?.error) code = body.error;
+      } catch {
+        /* ignore */
+      }
+      throw new ApiError(res.status, code);
+    }
+    return (await res.json()) as Attachment;
+  },
+  /** Delete an as-yet-unlinked attachment. 404 after the attachment has been
+   * sent with a message. */
+  deleteAttachment(id: string) {
+    return request<void>(`/api/attachments/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    });
+  },
+  listAudit(opts?: { limit?: number; since?: string; events?: string[] }) {
+    const qs = new URLSearchParams();
+    if (opts?.limit !== undefined) qs.set("limit", String(opts.limit));
+    if (opts?.since) qs.set("since", opts.since);
+    if (opts?.events && opts.events.length > 0)
+      qs.set("events", opts.events.join(","));
+    const q = qs.toString();
+    return request<AuditListResponse>(`/api/audit${q ? `?${q}` : ""}`);
   },
 };

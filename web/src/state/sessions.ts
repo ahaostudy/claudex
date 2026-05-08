@@ -111,7 +111,11 @@ interface SessionState {
   loadOlderTranscript: (sessionId: string) => Promise<void>;
   refetchTail: (sessionId: string) => Promise<void>;
   subscribeSession: (sessionId: string) => void;
-  sendUserMessage: (sessionId: string, text: string) => void;
+  sendUserMessage: (
+    sessionId: string,
+    text: string,
+    attachmentIds?: string[],
+  ) => void;
   interruptSession: (sessionId: string) => void;
   ensurePendingFor: (sessionId: string) => void;
   resolvePermission: (
@@ -565,7 +569,7 @@ export const useSessions = create<SessionState>((set, get) => {
     get().ws?.send({ type: "subscribe", sessionId } satisfies ClientFrame);
   },
 
-  sendUserMessage(sessionId, text) {
+  sendUserMessage(sessionId, text, attachmentIds) {
     const pendingId = `pending-${Date.now()}`;
     // Optimistic local echo + a pending placeholder so the user sees that
     // claude received the message and is thinking. We intentionally do NOT
@@ -597,6 +601,9 @@ export const useSessions = create<SessionState>((set, get) => {
       type: "user_message",
       sessionId,
       content: text,
+      ...(attachmentIds && attachmentIds.length > 0
+        ? { attachmentIds }
+        : {}),
     } satisfies ClientFrame);
   },
 

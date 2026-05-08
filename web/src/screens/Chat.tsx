@@ -21,6 +21,7 @@ import { ChatTasksRail } from "@/components/ChatTasksRail";
 import { useSessions } from "@/state/sessions";
 import { api } from "@/api/client";
 import type {
+  Attachment,
   ModelId,
   PermissionMode,
   Project,
@@ -38,10 +39,12 @@ import { TerminalDrawer } from "@/components/TerminalDrawer";
 import { ViewModePicker } from "@/components/ViewModePicker";
 import { ContextRingButton, UsagePanel } from "@/components/UsagePanel";
 import { Markdown } from "@/components/Markdown";
+import { ImageLightbox } from "@/components/ImageLightbox";
 import type { SlashCommand } from "@/lib/slash-commands";
 import { BUILTIN_FALLBACK_SLASH_COMMANDS } from "@/lib/slash-commands";
 import type { UIPiece, ViewMode } from "@/state/sessions";
 import { contextWindowTokens } from "@/lib/usage";
+import { extractImagesFromText, type ImageRef } from "@/lib/images";
 
 // ---------------------------------------------------------------------------
 // Model / mode label tables shared by the desktop header pills and the chat
@@ -86,6 +89,13 @@ export function ChatScreen() {
   const [showUsage, setShowUsage] = useState(false);
   const [showSideChat, setShowSideChat] = useState(false);
   const [showTerminal, setShowTerminal] = useState(false);
+  // Click-to-expand image overlay. Populated by the thumbnail click handlers
+  // in Piece below — we hold the state here so the lightbox renders at the
+  // Chat root, above every other drawer / sheet.
+  const [lightbox, setLightbox] = useState<{
+    images: ImageRef[];
+    index: number;
+  } | null>(null);
   // Mobile three-dot menu. Desktop uses header pills instead.
   const [showMore, setShowMore] = useState(false);
   // Desktop tasks rail visibility. Persisted across navigations so users
@@ -510,6 +520,7 @@ export function ChatScreen() {
             onDecide={(approvalId, decision) =>
               id && resolvePermission(id, approvalId, decision)
             }
+            onOpenLightbox={(images, index) => setLightbox({ images, index })}
           />
         ))}
         {viewMode === "summary" && (
@@ -521,9 +532,13 @@ export function ChatScreen() {
         project={project}
         session={session}
         busy={busy}
-        onSend={(text) => {
-          if (!text.trim() || !id) return;
-          sendUserMessage(id, text);
+        onSend={(text, attachmentIds) => {
+          // Allow empty text when attachments are present (model can read
+          // file contents via the @path prefix the server injects).
+          if (!id) return;
+          if (!text.trim() && (!attachmentIds || attachmentIds.length === 0))
+            return;
+          sendUserMessage(id, text, attachmentIds);
         }}
         onStop={() => id && interruptSession(id)}
         onOpenSideChat={() => setShowSideChat(true)}
@@ -632,6 +647,13 @@ export function ChatScreen() {
             }
           }}
           onClose={() => setShowTasks(false)}
+        />
+      )}
+      {lightbox && (
+        <ImageLightbox
+          images={lightbox.images}
+          initialIndex={lightbox.index}
+          onClose={() => setLightbox(null)}
         />
       )}
     </div>
@@ -823,6 +845,7 @@ function Piece({
   session,
   project,
   onDecide,
+  onOpenLightbox,
 }: {
   p: UIPiece;
   viewMode: ViewMode;
@@ -832,6 +855,7 @@ function Piece({
     approvalId: string,
     decision: "allow_once" | "allow_always" | "deny",
   ) => void;
+  onOpenLightbox: (images: ImageRef[], index: number) => void;
 }) {
   // Verbose = everything expanded, no truncation. Normal = compact by default,
   // user can click to expand individual tool_use chips and tool_result blocks.
@@ -839,16 +863,16 @@ function Piece({
   // only have to distinguish normal vs verbose here.
   const verbose = viewMode === "verbose";
   switch (p.kind) {
-    case "user":
+    case "user": {
       // User messages are rendered verbatim — never markdown-processed. If the
-      // user typed literal `**` or backticks, they probably meant them.
+      // user typed literal `**` or backticks, they probably meant them. But a
+      // user turn can still carry images (e.g. CLI synthetic turns that pasted
+      // a screenshot), so extract those and render them as thumbs above the
+      // (image-stripped) text.
       return (
-        <div className="flex justify-end">
-          <div className="max-w-[88%] bg-ink text-canvas rounded-[14px] rounded-br-[4px] px-3.5 py-2.5 shadow-card text-[14px] leading-[1.55] whitespace-pre-wrap">
-            {p.text}
-          </div>
-        </div>
+        <UserBubble text={p.text} onOpenLightbox={onOpenLightbox} />
       );
+    }
     case "assistant_text":
       return (
         <div className="max-w-[72ch]">
@@ -893,6 +917,7 @@ function Piece({
           content={p.content}
           isError={p.isError}
           verbose={verbose}
+          onOpenLightbox={onOpenLightbox}
         />
       );
     case "permission_request":
@@ -1040,44 +1065,150 @@ function ToolResultBlock({
   content,
   isError,
   verbose,
+  onOpenLightbox,
 }: {
   content: string;
   isError: boolean;
   verbose: boolean;
+  onOpenLightbox: (images: ImageRef[], index: number) => void;
 }) {
+  // Extract any inline images (base64 data URLs or attachment refs) before
+  // we measure for truncation — otherwise a single screenshot dominates the
+  // "1200 chars" budget and hides the actual text output. Memoized per
+  // piece since tool_result bodies can be large.
+  const { images, remainingText } = useMemo(
+    () => extractImagesFromText(content),
+    [content],
+  );
   const LIMIT = 1200;
-  const overflows = content.length > LIMIT;
+  const overflows = remainingText.length > LIMIT;
   const [expanded, setExpanded] = useState(verbose || !overflows);
   useEffect(() => {
     if (verbose) setExpanded(true);
   }, [verbose]);
 
   const canToggle = !verbose && overflows;
-  const shownText = expanded ? content : content.slice(0, LIMIT);
-  const hiddenCount = overflows && !expanded ? content.length - LIMIT : 0;
+  const shownText = expanded ? remainingText : remainingText.slice(0, LIMIT);
+  const hiddenCount =
+    overflows && !expanded ? remainingText.length - LIMIT : 0;
+  const hasText = remainingText.trim().length > 0;
+
+  if (images.length === 0 && !hasText) {
+    // Defensive: an empty tool_result (image-only source but stripped, or
+    // just plain empty). Drop the whole block — nothing useful to render.
+    return null;
+  }
 
   return (
-    <div
-      className={cn(
-        "mono text-[12px] whitespace-pre-wrap px-3 py-2 rounded-[8px] border w-fit max-w-full",
-        isError
-          ? "bg-danger-wash border-danger/30 text-[#7a1d21]"
-          : "bg-paper border-line text-ink-soft",
+    <div className="max-w-full">
+      {images.length > 0 && (
+        <ImageThumbs
+          images={images}
+          onOpen={(i) => onOpenLightbox(images, i)}
+          tone="light"
+        />
       )}
-    >
-      {shownText}
-      {canToggle && (
-        <button
-          type="button"
-          onClick={() => setExpanded((v) => !v)}
-          className="mt-1 block text-[11px] mono text-klein-ink hover:underline"
-          aria-expanded={expanded}
+      {hasText && (
+        <div
+          className={cn(
+            "mono text-[12px] whitespace-pre-wrap px-3 py-2 rounded-[8px] border w-fit max-w-full",
+            isError
+              ? "bg-danger-wash border-danger/30 text-[#7a1d21]"
+              : "bg-paper border-line text-ink-soft",
+          )}
         >
-          {expanded
-            ? "collapse"
-            : `show ${hiddenCount.toLocaleString()} more chars`}
-        </button>
+          {shownText}
+          {canToggle && (
+            <button
+              type="button"
+              onClick={() => setExpanded((v) => !v)}
+              className="mt-1 block text-[11px] mono text-klein-ink hover:underline"
+              aria-expanded={expanded}
+            >
+              {expanded
+                ? "collapse"
+                : `show ${hiddenCount.toLocaleString()} more chars`}
+            </button>
+          )}
+        </div>
       )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// User message bubble. Split into its own component so the `useMemo` call
+// for image extraction sits on a stable hook path (calling hooks inside the
+// Piece switch would violate rules-of-hooks because the kind of piece at a
+// given list index can change as events arrive).
+// ---------------------------------------------------------------------------
+function UserBubble({
+  text,
+  onOpenLightbox,
+}: {
+  text: string;
+  onOpenLightbox: (images: ImageRef[], index: number) => void;
+}) {
+  const { images, remainingText } = useMemo(
+    () => extractImagesFromText(text),
+    [text],
+  );
+  return (
+    <div className="flex justify-end">
+      <div className="max-w-[88%] bg-ink text-canvas rounded-[14px] rounded-br-[4px] px-3.5 py-2.5 shadow-card text-[14px] leading-[1.55]">
+        {images.length > 0 && (
+          <ImageThumbs
+            images={images}
+            onOpen={(i) => onOpenLightbox(images, i)}
+            tone="dark"
+          />
+        )}
+        {remainingText.trim() && (
+          <div className="whitespace-pre-wrap">{remainingText}</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Image thumbnail strip. Used by both `user` bubbles and `tool_result` blocks
+// to surface inline images as clickable 120×120 tiles that open the lightbox.
+// `tone` only tweaks the border so thumbs sit nicely on dark (user bubble)
+// vs light (tool_result) backgrounds.
+// ---------------------------------------------------------------------------
+function ImageThumbs({
+  images,
+  onOpen,
+  tone,
+}: {
+  images: ImageRef[];
+  onOpen: (index: number) => void;
+  tone: "dark" | "light";
+}) {
+  return (
+    <div className="flex gap-2 mb-2 overflow-x-auto no-scrollbar">
+      {images.map((img, i) => (
+        <button
+          key={i}
+          type="button"
+          onClick={() => onOpen(i)}
+          className={cn(
+            "shrink-0 h-[120px] w-[120px] rounded-[8px] overflow-hidden cursor-zoom-in bg-canvas",
+            tone === "dark"
+              ? "border border-canvas/20"
+              : "border border-line",
+          )}
+          aria-label={`Open image ${i + 1} of ${images.length}`}
+        >
+          <img
+            src={img.src}
+            alt={img.alt}
+            className="h-full w-full object-cover"
+            loading="lazy"
+          />
+        </button>
+      ))}
     </div>
   );
 }
@@ -1635,7 +1766,7 @@ function Composer({
   project: Project | null;
   session: Session | null;
   busy: boolean;
-  onSend: (text: string) => void;
+  onSend: (text: string, attachmentIds?: string[]) => void;
   onStop: () => void;
   onOpenSideChat: () => void;
   /**
@@ -1647,6 +1778,13 @@ function Composer({
 }) {
   const [text, setText] = useState("");
   const [trigger, setTrigger] = useState<Trigger | null>(null);
+  // Attachments currently staged on the composer — uploaded but not yet sent.
+  // Cleared on send (server links them to the appended user_message seq) or
+  // on × tap (DELETE /api/attachments/:id removes unlinked rows + the file).
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [attachError, setAttachError] = useState<string | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   // Slash commands are fetched from the server so the picker reflects the
   // user's `~/.claude/commands/*.md` and project-level commands, not just a
   // hardcoded fixture. We fall back to a tiny built-in list if the request
@@ -1876,17 +2014,76 @@ function Composer({
   }
 
   const send = () => {
-    if (!text.trim()) return;
+    if (!text.trim() && attachments.length === 0) return;
     const blocked = leadingUnsupported(text);
     if (blocked) {
       setBlockedSlash(blocked);
       return;
     }
     setBlockedSlash(null);
-    onSend(text);
+    onSend(
+      text,
+      attachments.length > 0 ? attachments.map((a) => a.id) : undefined,
+    );
     setText("");
     setTrigger(null);
+    setAttachments([]);
+    setAttachError(null);
   };
+
+  // Attachment helpers.
+  //
+  // The composer maintains a local list of uploaded-but-unsent attachments.
+  // Each file → one POST /api/sessions/:id/attachments (server returns
+  // metadata). Clearing happens on send (server links them to the new
+  // user_message seq) or explicit × (which fires DELETE — only works until
+  // the message is sent).
+  async function uploadOneFile(file: File) {
+    if (!session) return;
+    // Hard 5MB client-side check so we fail faster than the server.
+    if (file.size > 5 * 1024 * 1024) {
+      setAttachError(`File too large — max 5MB per file`);
+      return;
+    }
+    try {
+      const att = await api.uploadAttachment(session.id, file);
+      setAttachments((prev) => [...prev, att]);
+      setAttachError(null);
+    } catch (err) {
+      const code =
+        err && typeof err === "object" && "code" in err
+          ? String((err as { code: string }).code)
+          : "";
+      if (code === "unsupported_mime") {
+        setAttachError(`${file.type || "file"} isn't allowed`);
+      } else if (code === "file_too_large") {
+        setAttachError(`File too large — max 5MB per file`);
+      } else {
+        setAttachError("Upload failed — try again");
+      }
+    }
+  }
+
+  async function onFilesPicked(files: FileList | File[] | null) {
+    if (!files) return;
+    // Serialize uploads (server caps one file per request for predictable
+    // limits). User waits ~fast enough for handful-of-files scenarios.
+    for (const f of Array.from(files)) {
+      await uploadOneFile(f);
+    }
+  }
+
+  async function removeAttachment(id: string) {
+    // Optimistic remove — if the DELETE fails (e.g. 404 because the message
+    // was already sent in parallel) we'd just leave the chip gone; the
+    // server-side row is already linked and won't be cleaned client-side.
+    setAttachments((prev) => prev.filter((a) => a.id !== id));
+    try {
+      await api.deleteAttachment(id);
+    } catch {
+      /* ignore — the row is either gone or already linked */
+    }
+  }
 
   return (
     <>
@@ -1914,13 +2111,30 @@ function Composer({
         </button>
         <button
           type="button"
-          disabled
-          title="Attachments not implemented yet"
-          className="h-7 px-2.5 rounded-full border border-line bg-canvas text-[12px] flex items-center gap-1.5 whitespace-nowrap text-ink-soft opacity-50"
+          onClick={() => fileInputRef.current?.click()}
+          disabled={!session}
+          title={
+            session
+              ? "Attach images or text files to this message"
+              : "Create or open a session first"
+          }
+          className="h-7 px-2.5 rounded-full border border-line bg-canvas text-[12px] flex items-center gap-1.5 whitespace-nowrap text-ink-soft disabled:opacity-40"
         >
           <Paperclip className="w-3 h-3" />
           Attach
         </button>
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          accept="image/png,image/jpeg,image/gif,image/webp,text/plain,text/markdown,.md,application/json,.json,application/xml,.xml,text/*"
+          className="hidden"
+          onChange={(e) => {
+            void onFilesPicked(e.target.files);
+            // Reset the native input so re-selecting the same file works.
+            e.target.value = "";
+          }}
+        />
         <button
           type="button"
           onClick={onOpenSideChat}
@@ -1942,8 +2156,81 @@ function Composer({
         </button>
       </div>
 
-      <div className="shrink-0 border-t border-line bg-canvas px-3 pt-2 pb-3 mt-2">
-        <div className="rounded-[12px] border border-line bg-paper/60 p-2 focus-within:border-klein focus-within:ring-2 focus-within:ring-klein/15 transition-colors">
+      {/* Attachment chips — one row per uploaded-but-unsent file. Image
+          attachments render a 40x40 thumbnail; non-images render a filename
+          chip with size in KB. × removes (DELETE /api/attachments/:id) as
+          long as the message hasn't been sent. */}
+      {attachments.length > 0 && (
+        <div className="shrink-0 flex items-center gap-1.5 overflow-x-auto no-scrollbar px-3 pt-2">
+          {attachments.map((a) => (
+            <div
+              key={a.id}
+              className="h-10 pl-1 pr-2 rounded-[10px] border border-line bg-paper/70 text-[12px] flex items-center gap-2 whitespace-nowrap"
+            >
+              {a.previewUrl ? (
+                <img
+                  src={a.previewUrl}
+                  alt={a.filename}
+                  className="w-8 h-8 rounded-md object-cover"
+                />
+              ) : (
+                <span className="w-8 h-8 rounded-md bg-ink/5 flex items-center justify-center">
+                  <Paperclip className="w-3.5 h-3.5 text-ink-soft" />
+                </span>
+              )}
+              <span className="max-w-[160px] truncate">{a.filename}</span>
+              <span className="text-ink-muted mono text-[10px]">
+                {Math.max(1, Math.round(a.size / 1024))}kb
+              </span>
+              <button
+                type="button"
+                onClick={() => removeAttachment(a.id)}
+                className="ml-1 text-ink-muted hover:text-danger"
+                aria-label={`Remove ${a.filename}`}
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {attachError && (
+        <div
+          className="shrink-0 px-4 pt-1 text-[11px] text-danger/80"
+          role="status"
+        >
+          {attachError}
+        </div>
+      )}
+
+      <div
+        className="shrink-0 border-t border-line bg-canvas px-3 pt-2 pb-3 mt-2"
+        onDragOver={(e) => {
+          if (!session) return;
+          e.preventDefault();
+          if (!isDragging) setIsDragging(true);
+        }}
+        onDragLeave={(e) => {
+          // Only clear when the drag fully leaves the wrapper, not when
+          // passing between children (relatedTarget null = outside).
+          if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
+            setIsDragging(false);
+          }
+        }}
+        onDrop={(e) => {
+          if (!session) return;
+          e.preventDefault();
+          setIsDragging(false);
+          void onFilesPicked(e.dataTransfer.files);
+        }}
+      >
+        <div
+          className={cn(
+            "rounded-[12px] border bg-paper/60 p-2 focus-within:border-klein focus-within:ring-2 focus-within:ring-klein/15 transition-colors",
+            isDragging ? "border-klein border-dashed" : "border-line",
+          )}
+        >
           <HighlightedComposer
             textareaRef={textareaRef}
             value={text}
@@ -2011,7 +2298,7 @@ function Composer({
               <button
                 type="button"
                 onClick={send}
-                disabled={!text.trim()}
+                disabled={!text.trim() && attachments.length === 0}
                 className="h-8 w-8 rounded-full bg-klein text-canvas flex items-center justify-center shadow-card disabled:opacity-40"
                 aria-label="Send message"
               >

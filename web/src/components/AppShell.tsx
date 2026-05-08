@@ -4,6 +4,7 @@ import {
   Bell,
   BarChart3,
   Calendar,
+  ListOrdered,
   MessageSquare,
   Settings as SettingsIcon,
 } from "lucide-react";
@@ -29,6 +30,7 @@ import { cn } from "@/lib/cn";
 export type ShellTab =
   | "sessions"
   | "routines"
+  | "queue"
   | "alerts"
   | "usage"
   | "settings";
@@ -46,14 +48,16 @@ interface NavItem {
 const NAV: NavItem[] = [
   { id: "sessions", label: "Sessions", icon: MessageSquare, href: "/sessions" },
   { id: "routines", label: "Routines", icon: Calendar, href: "/routines" },
+  { id: "queue", label: "Queue", icon: ListOrdered, href: "/queue" },
   { id: "alerts", label: "Alerts", icon: Bell, href: "/alerts" },
   { id: "usage", label: "Usage", icon: BarChart3, href: "/usage" },
   { id: "settings", label: "Settings", icon: SettingsIcon, href: "/settings" },
 ];
 
 // Mobile tab bar keeps the original four tabs — Usage is omitted because the
-// full-screen analytics page is desktop-only. Phone users still get the
-// in-chat UsagePanel bottom sheet.
+// full-screen analytics page is desktop-only. Queue is also desktop-focused
+// (long-form batch composition on a phone is awkward) — but we keep it on the
+// mobile bar because the whole point is "start a batch from your couch".
 const MOBILE_NAV = NAV.filter((n) => n.id !== "usage");
 
 export function AppShell({

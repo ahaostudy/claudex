@@ -31,6 +31,12 @@ export const ClientUserMessage = z.object({
   type: z.literal("user_message"),
   sessionId: z.string(),
   content: z.string(),
+  // Optional list of attachment ids (from `POST /api/sessions/:id/attachments`)
+  // that should be linked to this user_message. On receipt, SessionManager
+  // stamps each row's `message_event_seq` with the seq of the user_message
+  // event it just appended, and prefixes the outgoing SDK prompt with
+  // `@<absolute-path>` tokens so the SDK's Read tool can pick the files up.
+  attachmentIds: z.array(z.string()).optional(),
 });
 
 export const ClientInterrupt = z.object({

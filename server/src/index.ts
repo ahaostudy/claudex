@@ -38,6 +38,7 @@ async function main() {
     isProduction: config.nodeEnv === "production",
     webDist,
     vapid,
+    stateDir: config.stateDir,
   });
 
   const shutdown = async (signal: string) => {

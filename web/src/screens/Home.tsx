@@ -8,6 +8,7 @@ import type { Project, Session, ModelId, PermissionMode } from "@claudex/shared"
 import { FolderPicker } from "@/components/FolderPicker";
 import { AppShell } from "@/components/AppShell";
 import { ImportSessionsSheet } from "@/components/ImportSessionsSheet";
+import { GlobalSearchSheet } from "@/components/GlobalSearchSheet";
 import { cn } from "@/lib/cn";
 
 // Status dot colors for the flat row layout. `running` and `awaiting` get a
@@ -108,21 +109,25 @@ export function HomeScreen() {
   const [showProjects, setShowProjects] = useState(false);
   const [showWsDiag, setShowWsDiag] = useState(false);
   const [showImport, setShowImport] = useState(false);
+  const [showSearchSheet, setShowSearchSheet] = useState(false);
   const [projects, setProjects] = useState<Project[]>([]);
   const [archivedSessions, setArchivedSessions] = useState<Session[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const searchInputRef = useRef<HTMLInputElement | null>(null);
 
-  // Cmd+K / Ctrl+K focuses the desktop search input from anywhere on the
-  // page. preventDefault so the browser's own "search bookmarks" binding
-  // doesn't fight us. Works even when another input is focused — users
-  // expect to jump into search without first clicking out of the composer.
+  // Cmd+K / Ctrl+K opens the global search sheet (full-text across session
+  // titles AND message bodies) from anywhere on the page. preventDefault so
+  // the browser's own "search bookmarks" binding doesn't fight us. Works
+  // even when another input is focused — users expect to jump into search
+  // without first clicking out of the composer. The inline desktop search
+  // input stays available for narrow-as-you-browse substring filtering; it
+  // operates purely on the already-loaded session list and doesn't hit the
+  // server search endpoint.
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === "k") {
         e.preventDefault();
-        searchInputRef.current?.focus();
-        searchInputRef.current?.select();
+        setShowSearchSheet(true);
       }
     };
     document.addEventListener("keydown", onKeyDown);
@@ -299,7 +304,9 @@ export function HomeScreen() {
         </span>
         {/* Desktop-only search (mockup s-02 lines 480-490). Mobile header is
             too narrow to fit a usable input so it stays as-is. Cmd/Ctrl+K
-            jumps focus here from anywhere. */}
+            opens the GlobalSearchSheet (full-text across titles + messages);
+            this inline input remains a cheap substring filter over the
+            already-visible session list. */}
         <div className="hidden md:flex flex-1 max-w-md mx-auto items-center gap-2 h-9 px-3 bg-paper border border-line rounded-[8px]">
           <Search className="w-3.5 h-3.5 text-ink-muted shrink-0" />
           <input
@@ -307,7 +314,7 @@ export function HomeScreen() {
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search sessions, projects, files…"
+            placeholder="Filter visible sessions — ⌘K to search everything"
             className="flex-1 min-w-0 bg-transparent outline-none text-[13px] text-ink placeholder:text-ink-muted"
           />
           {searchQuery ? (
@@ -317,13 +324,20 @@ export function HomeScreen() {
                 setSearchQuery("");
                 searchInputRef.current?.focus();
               }}
-              title="Clear search"
+              title="Clear filter"
               className="shrink-0 h-4 w-4 rounded-full flex items-center justify-center text-ink-muted hover:text-ink hover:bg-line/60"
             >
               <X className="w-3 h-3" />
             </button>
           ) : (
-            <span className="ml-auto text-[11px] text-ink-faint mono shrink-0">⌘K</span>
+            <button
+              type="button"
+              onClick={() => setShowSearchSheet(true)}
+              title="Full-text search (⌘K)"
+              className="ml-auto text-[11px] text-ink-faint mono shrink-0 hover:text-ink-soft"
+            >
+              ⌘K
+            </button>
           )}
         </div>
         <div className="ml-auto flex items-center gap-2">
@@ -436,6 +450,16 @@ export function HomeScreen() {
       )}
       {showWsDiag && (
         <WsDiagPanel diag={wsDiag} onClose={() => setShowWsDiag(false)} />
+      )}
+      {showSearchSheet && (
+        <GlobalSearchSheet
+          onClose={() => {
+            setShowSearchSheet(false);
+            // Return focus to the inline input so keyboard users keep a
+            // natural landing spot after the sheet closes.
+            searchInputRef.current?.focus();
+          }}
+        />
       )}
     </AppShell>
   );
