@@ -11,8 +11,8 @@ Three status tiers:
   use from the API; users won't see it yet.
 - ⬜ **Planned** — listed so nobody re-plans it from scratch, but not started.
 
-Last updated: see the git log of this file. Current revision lists **72 shipped
-behaviors** and **169 backend tests**.
+Last updated: see the git log of this file. Current revision lists **78 shipped
+behaviors** and **192 backend tests**.
 
 ---
 
@@ -94,10 +94,12 @@ behaviors** and **169 backend tests**.
 | ✅ | `GET /api/sessions/:id` — fetch one | same |
 | ✅ | `GET /api/sessions/:id/events?sinceSeq=N` — replay persisted events | same |
 | ✅ | `POST /api/sessions/:id/archive` — mark read-only | same |
+| ✅ | `POST /api/sessions/:id/side` — spawn a `/btw` child session that branches off an existing session. Copies the parent's `projectId` + `model`, defaults `mode` to `plan` (so side chats can't mutate the working tree unless the user explicitly flips it), and sets `parent_session_id` on the new row. Idempotent: if the parent already has an active (non-archived) side chat the existing child is returned instead of creating a duplicate. `409 archived` if the parent is archived, `404` if it doesn't exist. Paired `GET /api/sessions/:id/side` returns the active child or `null`. Side chats are hidden from the default session list (`parent_session_id IS NOT NULL`) so they don't clutter Home | `server/src/sessions/routes.ts`, `server/src/sessions/store.ts` |
+| ✅ | `sessions.parent_session_id` — SQLite migration id=3, `TEXT REFERENCES sessions(id) ON DELETE CASCADE`. Deleting the parent cascades through every `/btw` child. Non-null rows are excluded from `list()` / `listByProject()` by default; `listChildren(parentId)` fetches a single parent's side chats | `server/src/db/index.ts`, `server/src/sessions/store.ts` |
 | ✅ | `PATCH /api/sessions/:id` — partial update (`title`, `model`, `mode`). `mode` changes are pushed into the live runner via `setPermissionMode`; `model` changes are DB-only and the response carries `warnings: ["model_change_applies_to_next_turn"]` when a runner is already attached. Refuses `409 archived` on archived sessions and `400 bad_request` on empty bodies (at least one field required) | same |
 | ✅ | Every event gets a monotonic per-session `seq` and is written to `session_events` (payload as JSON) | `server/src/sessions/store.ts` |
 | ✅ | Aggregate stats on the session row (messages, files changed, +/− lines, contextPct) bumpable via `bumpStats` | same |
-| 🟡 | Worktree flag accepted by the API but the server never creates a worktree yet — planned in P4 | same |
+| ✅ | `worktree: true` creates a `<project>/.claude/worktrees/<session>` worktree on a new `claude/<slug>-<suffix>` branch; `false` keeps cwd at project root. Non-git project rejects with 400 `not_a_git_repo`. Archive cleans up the worktree but leaves the branch for manual disposition | `server/src/sessions/worktree.ts`, `server/src/sessions/routes.ts` |
 | 🟡 | `filesChanged` / `linesAdded` / `linesRemoved` plumbing exists but isn't populated — counters will always read 0 until wired into tool_result parsing | same |
 
 ## Chat loop (Claude Agent SDK)
@@ -115,6 +117,8 @@ behaviors** and **169 backend tests**.
 | ✅ | `interrupt()` supported at the Runner and manager layer | same |
 | ✅ | `setPermissionMode` wired end-to-end: the session settings sheet PATCHes `/api/sessions/:id` with a new `mode`, the server updates the DB and calls `Query.setPermissionMode` on the live runner | same |
 | ✅ | Session resume via `resumeSdkSessionId` — the SDK `session_id` from the first `system/init` is persisted to `sessions.sdk_session_id` (first-write-wins, SQLite migration id=2) and passed as `resume` on subsequent `getOrCreate`, so re-opening an old session after a server restart continues the same Agent SDK conversation | `server/src/sessions/manager.ts`, `server/src/sessions/store.ts`, `server/src/db/index.ts` |
+| ✅ | Agent SDK spawned with `thinking: { type: "adaptive", display: "summarized" }` so Opus 4.7 forwards summarized thinking text to the runner (default display is `"omitted"`, which keeps the model thinking silently). This is what makes Verbose view-mode show anything beyond Normal — without it both modes render identically for the vast majority of turns | `server/src/sessions/agent-runner.ts` |
+| ✅ | **Side-chat context injection** — when a session has `parent_session_id` set (a `/btw` child) and has never spawned an SDK conversation before, the manager synthesizes a context seed from the parent's `user_message` + `assistant_text` events (tool calls / thinking stripped so the child isn't drowned in noise) and pushes it to the SDK as a synthetic first user message. Seed never hits the child's `session_events` log — the transcript only shows what the user actually typed. Resumes skip the seed because the SDK already has the full history | `server/src/sessions/manager.ts` |
 
 ## Permissions
 
@@ -165,15 +169,16 @@ behaviors** and **169 backend tests**.
 | ✅ | **Composer pickers** — typing `@` after whitespace pops a file-mention sheet (reuses `/api/browse`, defaults to the session's project root, inserts `@<relative>` or `@<abs>` fallback outside the root); typing `/` at the start of a line pops a slash-command sheet populated at mount from `GET /api/slash-commands?projectId=<id>` — merges the CLI built-ins, the user's `~/.claude/commands/*.md`, and the active project's `.claude/commands/*.md`, each entry tagged with its `kind` shown as a badge. Network/auth failure falls back to a tiny built-in list (`help / clear / compact / review`) so the picker is never empty. Both sheets share the s-09 bottom-sheet language. Side-rail icons also open the pickers explicitly | `web/src/screens/Chat.tsx`, `web/src/components/SlashCommandSheet.tsx`, `web/src/components/FileMentionSheet.tsx`, `web/src/lib/slash-commands.ts`, `web/src/api/client.ts` |
 | ✅ | Session settings side sheet (gear button in the Chat header) — edit title, swap model (Opus 4.7 / Sonnet 4.6 / Haiku 4.5), switch permission mode (Ask / Accept / Plan / Bypass), read-only workspace panel (branch + worktree path placeholder for P4), and "Approved in this session" list with per-grant Revoke. Model change mid-run shows a yellow "applies to next turn" notice | `web/src/components/SessionSettingsSheet.tsx` + `web/src/screens/Chat.tsx` |
 | 🟡 | `/btw` side chat — not implemented |  |
-| ✅ | **View modes (Normal / Verbose / Summary)** — dropdown picker in the Chat header (next to the gear). `normal` hides `thinking` blocks entirely (no inline expander yet — deferred); `verbose` shows every piece including thinking; `summary` keeps only user messages + the final `assistant_text` of each assistant turn and appends an **Outcome** card (driven by `session.status`) and a **Changes** card that aggregates `Edit`/`Write`/`MultiEdit` tool calls into per-file `+`/`−` line totals (PR card from mockup s-07 is still planned — no git integration yet). Session-scoped, no persistence across reloads | `web/src/screens/Chat.tsx`, `web/src/components/ViewModePicker.tsx`, `web/src/state/sessions.ts` |
-| 🟡 | Usage panel (context ring, plan usage, per-model today) — no UI |  |
+| ✅ | **View modes (Normal / Verbose / Summary)** — dropdown picker in the Chat header (next to the gear). **Normal** collapses non-diff tool_use calls to single-line chips (click to expand to full pretty-printed input), truncates tool_result to 1200 chars with a "show N more chars" toggle, hides thinking blocks entirely. **Verbose** expands every piece, never truncates tool_result, and surfaces thinking blocks (requires the Agent SDK to be started with `thinking.display: "summarized"` — see the Chat-loop row). **Summary** keeps only user messages + the final `assistant_text` of each assistant turn and appends an **Outcome** card (driven by `session.status`) and a **Changes** card that aggregates `Edit`/`Write`/`MultiEdit` tool calls into per-file `+`/`−` line totals (PR card from mockup s-07 is still planned — no git integration yet). Session-scoped, no persistence across reloads | `web/src/screens/Chat.tsx`, `web/src/components/ViewModePicker.tsx`, `web/src/state/sessions.ts` |
+| ✅ | Markdown rendering for assistant text via `react-markdown` + `remark-gfm` — headings, bold/italic, strikethrough, inline & fenced code (Tailwind-styled, language tag, no syntax highlighter), lists, task lists (GFM `- [ ]` / `- [x]` → disabled checkboxes), blockquotes, tables, links (external `href` opens in a new tab with `rel="noopener noreferrer"`). User messages are kept verbatim — no markdown processing — so literal `**` or backticks the user typed render as entered. `tool_result` blocks are also verbatim (mono/pre-wrap), because tool output is usually command stdout, not prose | `web/src/components/Markdown.tsx`, `web/src/screens/Chat.tsx` |
+| ✅ | Context ring in the chat header opens a Usage panel with current-session token counts (input/output/total) and a cost estimate using a front-end pricing table. Aggregated by model when a session spanned multiple models. Plan-period usage and cross-session charts are not yet shown (single-session data only); `session.stats.contextPct` is still 0 server-side, so the ring renders as `—` pending SDK support | `web/src/components/UsagePanel.tsx`, `web/src/lib/usage.ts`, `web/src/lib/pricing.ts`, `web/src/screens/Chat.tsx` |
 | 🟡 | Global settings page (2FA management, paired browsers, exposure audit log) — no UI |  |
 
 ## Tests
 
 | Status | Feature | Where |
 |---|---|---|
-| ✅ | 169 backend tests, vitest, all green | `server/tests/` |
+| ✅ | 182 backend tests, vitest, all green | `server/tests/` |
 | ✅ | Bind-safety, DB migration + FK cascade | `tests/config.test.ts`, `tests/db.test.ts` |
 | ✅ | Password/TOTP/JWT edge cases (tampering, cross-secret, wrong audience, expiry, file-mode 0600) | `tests/auth.test.ts` |
 | ✅ | Auth HTTP routes including peek-retry TOTP, replay rejection, cookie attributes, user enumeration parity | `tests/auth-routes.test.ts` |
@@ -187,6 +192,7 @@ behaviors** and **169 backend tests**.
 | ✅ | Tool grants: signature conventions, session-vs-global scope, idempotent insert, revoke, FK cascade | `tests/grants.test.ts` |
 | ✅ | Permission summary content for every supported tool + missing-field edge cases | `tests/permission-summary.test.ts` |
 | ✅ | Static web serving: index at /, immutable asset cache, SPA fallback for GET, /api 404s stay JSON, non-GET doesn't fall back, /api/health works alongside static | `tests/static.test.ts` |
+| ✅ | Worktree lifecycle: `isGitRepo` classification (dir / file / missing), `createWorktree` branch collision fallback, `removeWorktree` cleanup, POST /api/sessions `worktree: true` round-trip on a tmp git repo, 400 `not_a_git_repo` on non-git project, archive path removes the worktree dir, archive tolerates a pre-deleted worktree dir | `tests/worktree.test.ts` |
 | ⬜ | Frontend unit/component tests — none yet (mockup + visual review cover this for MVP) |  |
 
 ## Operational details
@@ -202,7 +208,7 @@ behaviors** and **169 backend tests**.
 
 ## Not started (candidates for P4+)
 
-- **P4** — git worktree creation on session start, parallel sessions per project, branch pickers, PR link-out
+- **P4** — parallel sessions per project surfaced in the UI, branch pickers, PR link-out
 - **P5** — `/compact`, `/btw` side chat, usage/context panel, sticky virtual-keyboard row for the composer pickers
 - **P6** — routines (scheduled tasks) with catch-up on wake
 - **P7** — PR monitoring, auto-fix / auto-merge, preview (embedded browser), integrated terminal

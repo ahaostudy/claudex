@@ -59,6 +59,12 @@ export const Session = z.object({
   // `resume` the same SDK conversation after a server restart. Null means the
   // SDK has not yet initialized for this session.
   sdkSessionId: z.string().nullable(),
+  // If this session is a `/btw` side chat, the id of the main session it
+  // branches off. Side chats read the parent's transcript for context on
+  // first spawn but never write back into the parent's event log. Null for
+  // top-level sessions. Enforced ON DELETE CASCADE so removing the parent
+  // cleans up every child.
+  parentSessionId: z.string().nullable(),
   // aggregate counters, cheap to read
   stats: z.object({
     messages: z.number().int().nonnegative(),
@@ -160,6 +166,16 @@ export const CreateSessionRequest = z.object({
   initialPrompt: z.string().optional(),
 });
 export type CreateSessionRequest = z.infer<typeof CreateSessionRequest>;
+
+// Body of `POST /api/sessions/:id/side` — spawns a /btw side chat that reads
+// the parent's transcript for context but never writes back. Everything on
+// the child (model / mode / project) is copied from the parent by default.
+// Only the optional initial prompt is carried in the body.
+export const CreateSideSessionRequest = z.object({
+  initialPrompt: z.string().optional(),
+  title: z.string().min(1).optional(),
+});
+export type CreateSideSessionRequest = z.infer<typeof CreateSideSessionRequest>;
 
 export const UpdateProjectRequest = z.object({
   // Only `name` is mutable. Changing `path` would effectively be a different

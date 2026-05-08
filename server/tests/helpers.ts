@@ -1,5 +1,6 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import fs from "node:fs";
+import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type { FastifyInstance } from "fastify";
@@ -112,6 +113,41 @@ export async function bootstrapAuthedApp(
       await app.close();
       dbh.close();
       cleanup();
+    },
+  };
+}
+
+/**
+ * Create a throwaway git repo with a single initial commit so we can create
+ * worktrees against it. Returns the absolute path + a cleanup function that
+ * rms the dir.
+ *
+ * `git worktree add` refuses to run on a repo with no commits ("fatal: not a
+ * valid object name: 'HEAD'"), hence the seed file + commit. We also pass
+ * `--initial-branch=main` so tests don't depend on the host's init defaults.
+ */
+export function createTmpGitRepo(): { path: string; cleanup: () => void } {
+  const repoPath = mkdtempSync(path.join(tmpdir(), "claudex-gitrepo-"));
+  const run = (...args: string[]) =>
+    execFileSync("git", args, {
+      cwd: repoPath,
+      stdio: "pipe",
+      env: {
+        ...process.env,
+        GIT_AUTHOR_NAME: "test",
+        GIT_AUTHOR_EMAIL: "test@example.com",
+        GIT_COMMITTER_NAME: "test",
+        GIT_COMMITTER_EMAIL: "test@example.com",
+      },
+    });
+  run("init", "--initial-branch=main");
+  fs.writeFileSync(path.join(repoPath, "seed.txt"), "seed\n");
+  run("add", "seed.txt");
+  run("commit", "-m", "init");
+  return {
+    path: repoPath,
+    cleanup: () => {
+      fs.rmSync(repoPath, { recursive: true, force: true });
     },
   };
 }

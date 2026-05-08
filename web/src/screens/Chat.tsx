@@ -1,6 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { AtSign, ChevronLeft, Send, Settings2, Slash } from "lucide-react";
+import {
+  AtSign,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  MessageCircle,
+  Send,
+  Settings2,
+  Slash,
+} from "lucide-react";
 import { useSessions } from "@/state/sessions";
 import { api } from "@/api/client";
 import type { Project, Session } from "@claudex/shared";
@@ -8,9 +17,12 @@ import { cn } from "@/lib/cn";
 import { DiffView, toolCallToDiff } from "@/components/DiffView";
 import { diffForToolCall } from "@/lib/diff";
 import { SessionSettingsSheet } from "@/components/SessionSettingsSheet";
+import { SideChatDrawer } from "@/components/SideChatDrawer";
 import { SlashCommandSheet } from "@/components/SlashCommandSheet";
 import { FileMentionSheet } from "@/components/FileMentionSheet";
 import { ViewModePicker } from "@/components/ViewModePicker";
+import { ContextRingButton, UsagePanel } from "@/components/UsagePanel";
+import { Markdown } from "@/components/Markdown";
 import type { SlashCommand } from "@/lib/slash-commands";
 import { BUILTIN_FALLBACK_SLASH_COMMANDS } from "@/lib/slash-commands";
 import type { UIPiece, ViewMode } from "@/state/sessions";
@@ -20,6 +32,11 @@ export function ChatScreen() {
   const [session, setSession] = useState<Session | null>(null);
   const [project, setProject] = useState<Project | null>(null);
   const [showSettings, setShowSettings] = useState(false);
+  const [showUsage, setShowUsage] = useState(false);
+  // `/btw` side chat drawer. One drawer per main session; the server keeps
+  // the actual child session alive across close/re-open so the conversation
+  // is preserved.
+  const [showSideChat, setShowSideChat] = useState(false);
   const {
     transcripts,
     init,
@@ -114,6 +131,24 @@ export function ChatScreen() {
           </div>
         </div>
         <ViewModePicker mode={viewMode} onChange={setViewMode} />
+        <ContextRingButton
+          // TODO(contextPct): server never populates contextPct yet, so the
+          // ring is always empty. UI renders it anyway as the entry point to
+          // the Usage panel, which has real token/cost data.
+          pct={session?.stats.contextPct ?? 0}
+          known={false}
+          disabled={!session}
+          onClick={() => setShowUsage(true)}
+        />
+        <button
+          onClick={() => setShowSideChat(true)}
+          disabled={!session}
+          title="Ask on the side (/btw)"
+          aria-label="Open side chat"
+          className="h-8 w-8 rounded-[8px] border border-line bg-canvas flex items-center justify-center hover:bg-paper disabled:opacity-40"
+        >
+          <MessageCircle className="w-4 h-4 text-klein" />
+        </button>
         <button
           onClick={() => setShowSettings(true)}
           disabled={!session}
@@ -131,7 +166,14 @@ export function ChatScreen() {
           </div>
         )}
         {visiblePieces.map((p, i) => (
-          <Piece key={i} p={p} onDecide={(approvalId, decision) => id && resolvePermission(id, approvalId, decision)} />
+          <Piece
+            key={i}
+            p={p}
+            viewMode={viewMode}
+            onDecide={(approvalId, decision) =>
+              id && resolvePermission(id, approvalId, decision)
+            }
+          />
         ))}
         {viewMode === "summary" && (
           <SummaryCards session={session} changes={changes} />
@@ -153,32 +195,51 @@ export function ChatScreen() {
           onUpdated={(next) => setSession(next)}
         />
       )}
+      {showSideChat && session && (
+        <SideChatDrawer
+          parentSession={session}
+          onClose={() => setShowSideChat(false)}
+        />
+      )}
+
+      {showUsage && session && (
+        <UsagePanel session={session} onClose={() => setShowUsage(false)} />
+      )}
     </main>
   );
 }
 
 function Piece({
   p,
+  viewMode,
   onDecide,
 }: {
-  p: import("@/state/sessions").UIPiece;
+  p: UIPiece;
+  viewMode: ViewMode;
   onDecide: (
     approvalId: string,
     decision: "allow_once" | "allow_always" | "deny",
   ) => void;
 }) {
+  // Verbose = everything expanded, no truncation. Normal = compact by default,
+  // user can click to expand individual tool_use chips and tool_result blocks.
+  // Summary mode never reaches this component for tool_use/tool_result, so we
+  // only have to distinguish normal vs verbose here.
+  const verbose = viewMode === "verbose";
   switch (p.kind) {
     case "user":
+      // User messages are rendered verbatim — never markdown-processed. If the
+      // user typed literal `**` or backticks, they probably meant them.
       return (
         <div className="flex justify-end">
-          <div className="max-w-[88%] bg-ink text-canvas rounded-[14px] rounded-br-[4px] px-3.5 py-2.5 shadow-card text-[14px] leading-[1.55]">
+          <div className="max-w-[88%] bg-ink text-canvas rounded-[14px] rounded-br-[4px] px-3.5 py-2.5 shadow-card text-[14px] leading-[1.55] whitespace-pre-wrap">
             {p.text}
           </div>
         </div>
       );
     case "assistant_text":
       return (
-        <div className="text-[14.5px] text-ink leading-[1.6] max-w-[72ch]">
+        <div className="max-w-[72ch]">
           <div className="flex items-center gap-2 mb-1.5">
             <svg viewBox="0 0 32 32" className="w-3.5 h-3.5">
               <path d="M9 22 L16 8 L23 22 Z" fill="#cc785c" />
@@ -186,41 +247,33 @@ function Piece({
             </svg>
             <span className="mono text-[11px] text-ink-muted">claude</span>
           </div>
-          <div className="whitespace-pre-wrap">{p.text}</div>
+          <Markdown source={p.text} />
         </div>
       );
     case "thinking":
+      // Thinking is only reached in verbose mode (normal/summary filter it
+      // out in applyViewMode). Render full.
       return (
-        <div className="text-[12.5px] text-ink-muted italic pl-4 border-l-2 border-line">
+        <div className="text-[12.5px] text-ink-muted italic pl-4 border-l-2 border-line whitespace-pre-wrap max-w-[72ch]">
           {p.text}
         </div>
       );
     case "tool_use": {
       const diff = toolCallToDiff(p.name, p.input);
       if (diff) {
+        // DiffView is already compact and information-dense — same in both
+        // modes. No collapse affordance.
         return <DiffView diff={diff} />;
       }
-      return (
-        <div className="flex items-center gap-2 py-1.5 pl-2 pr-3 rounded-[8px] bg-paper border border-line w-fit max-w-full">
-          <span className="mono text-[12px] text-ink-soft">{p.name}</span>
-          <span className="mono text-[11px] text-ink-muted truncate max-w-[60vw]">
-            {summarizeInput(p.input)}
-          </span>
-        </div>
-      );
+      return <ToolUseBlock name={p.name} input={p.input} verbose={verbose} />;
     }
     case "tool_result":
       return (
-        <div
-          className={cn(
-            "mono text-[12px] whitespace-pre-wrap px-3 py-2 rounded-[8px] border w-fit max-w-full",
-            p.isError
-              ? "bg-danger-wash border-danger/30 text-[#7a1d21]"
-              : "bg-paper border-line text-ink-soft",
-          )}
-        >
-          {truncate(p.content, 1200)}
-        </div>
+        <ToolResultBlock
+          content={p.content}
+          isError={p.isError}
+          verbose={verbose}
+        />
       );
     case "permission_request":
       return (
@@ -233,6 +286,120 @@ function Piece({
         />
       );
   }
+}
+
+// ---------------------------------------------------------------------------
+// Tool-use chip with an optional expansion into full pretty-printed input.
+//
+// Normal mode: single-line chip; chevron reveals the full JSON on click.
+// Verbose mode: always expanded, no toggle — the chevron would be noise.
+// ---------------------------------------------------------------------------
+function ToolUseBlock({
+  name,
+  input,
+  verbose,
+}: {
+  name: string;
+  input: Record<string, unknown>;
+  verbose: boolean;
+}) {
+  const [expanded, setExpanded] = useState(verbose);
+  // Keep expand state in sync when the user flips modes mid-session so
+  // switching to verbose really does open everything.
+  useEffect(() => {
+    if (verbose) setExpanded(true);
+  }, [verbose]);
+
+  const showBody = expanded || verbose;
+  const canToggle = !verbose;
+  const pretty = useMemo(() => safeStringify(input), [input]);
+
+  return (
+    <div className="w-fit max-w-full">
+      <button
+        type="button"
+        onClick={() => canToggle && setExpanded((v) => !v)}
+        disabled={!canToggle}
+        className={cn(
+          "flex items-center gap-2 py-1.5 pl-1.5 pr-3 rounded-[8px] bg-paper border border-line max-w-full text-left",
+          canToggle && "hover:bg-paper/80 cursor-pointer",
+        )}
+        aria-expanded={showBody}
+      >
+        {canToggle ? (
+          showBody ? (
+            <ChevronDown className="w-3 h-3 text-ink-muted shrink-0" />
+          ) : (
+            <ChevronRight className="w-3 h-3 text-ink-muted shrink-0" />
+          )
+        ) : (
+          <ChevronDown className="w-3 h-3 text-ink-muted shrink-0" />
+        )}
+        <span className="mono text-[12px] text-ink-soft">{name}</span>
+        <span className="mono text-[11px] text-ink-muted truncate max-w-[60vw]">
+          {summarizeInput(input)}
+        </span>
+      </button>
+      {showBody && (
+        <pre className="mono text-[11.5px] text-canvas bg-ink rounded-[8px] mt-1 px-3 py-2 whitespace-pre-wrap break-all overflow-x-auto max-w-full">
+          {pretty}
+        </pre>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Tool result block. Normal mode truncates to 1200 chars and lets the user
+// expand to full. Verbose mode never truncates and never shows the toggle.
+// We keep mono + whitespace-pre-wrap because tool results are most often
+// command output (Bash stdout, Read file contents) — markdown rendering
+// would destroy alignment for those.
+// ---------------------------------------------------------------------------
+function ToolResultBlock({
+  content,
+  isError,
+  verbose,
+}: {
+  content: string;
+  isError: boolean;
+  verbose: boolean;
+}) {
+  const LIMIT = 1200;
+  const overflows = content.length > LIMIT;
+  const [expanded, setExpanded] = useState(verbose || !overflows);
+  useEffect(() => {
+    if (verbose) setExpanded(true);
+  }, [verbose]);
+
+  const canToggle = !verbose && overflows;
+  const shownText = expanded ? content : content.slice(0, LIMIT);
+  const hiddenCount = overflows && !expanded ? content.length - LIMIT : 0;
+
+  return (
+    <div
+      className={cn(
+        "mono text-[12px] whitespace-pre-wrap px-3 py-2 rounded-[8px] border w-fit max-w-full",
+        isError
+          ? "bg-danger-wash border-danger/30 text-[#7a1d21]"
+          : "bg-paper border-line text-ink-soft",
+      )}
+    >
+      {shownText}
+      {canToggle && (
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          className="mt-1 block text-[11px] mono text-klein-ink hover:underline"
+          aria-expanded={expanded}
+        >
+          {expanded
+            ? "collapse"
+            : `show ${hiddenCount.toLocaleString()} more chars`}
+        </button>
+      )}
+    </div>
+  );
 }
 
 function PermissionCard({
@@ -605,9 +772,18 @@ function summarizeInput(input: Record<string, unknown>): string {
   return s.length > 120 ? s.slice(0, 118) + "…" : s;
 }
 
-function truncate(s: string, max: number): string {
-  if (s.length <= max) return s;
-  return s.slice(0, max) + `\n\n[truncated ${s.length - max} chars]`;
+/**
+ * Pretty-print tool input for the expanded chip body. Defensive against
+ * circular references (shouldn't happen over the wire, but the JSON we get
+ * is ultimately user-controlled so we don't want a single weird call to
+ * crash the component).
+ */
+function safeStringify(input: Record<string, unknown>): string {
+  try {
+    return JSON.stringify(input, null, 2);
+  } catch {
+    return String(input);
+  }
 }
 
 // ---------------------------------------------------------------------------

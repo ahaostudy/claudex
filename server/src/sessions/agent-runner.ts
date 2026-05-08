@@ -81,6 +81,11 @@ export class AgentRunner implements Runner {
       // MUST merge — SDK replaces process.env otherwise.
       env: { ...process.env } as Record<string, string>,
       resume: this.opts.resumeSdkSessionId,
+      // Opus 4.7's default adaptive-thinking display is "omitted" — the model
+      // thinks but the SDK never forwards the text. Explicitly ask for
+      // summarized thinking so the UI's Verbose view-mode has something to
+      // render. Keeps the model in adaptive mode (no fixed budget).
+      thinking: { type: "adaptive", display: "summarized" },
       canUseTool: (toolName, input, { toolUseID, title }) =>
         new Promise<
           | { behavior: "allow"; updatedInput?: Record<string, unknown> }

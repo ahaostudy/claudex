@@ -1,6 +1,7 @@
 import type {
   BrowseResponse,
   CreateSessionRequest,
+  CreateSideSessionRequest,
   Project,
   Session,
   SessionEvent,
@@ -116,6 +117,17 @@ export const api = {
     return request<{ ok: true }>(`/api/sessions/${id}/archive`, {
       method: "POST",
     });
+  },
+  getSideSession(parentId: string) {
+    return request<{ session: Session | null }>(
+      `/api/sessions/${parentId}/side`,
+    );
+  },
+  createSideSession(parentId: string, body?: CreateSideSessionRequest) {
+    return request<{ session: Session }>(
+      `/api/sessions/${parentId}/side`,
+      { method: "POST", json: body ?? {} },
+    );
   },
   updateSession(id: string, body: UpdateSessionRequest) {
     return request<{ session: Session; warnings?: string[] }>(

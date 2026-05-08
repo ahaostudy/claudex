@@ -24,6 +24,12 @@ export interface SessionManagerDeps {
 interface SessionEntry {
   runner: Runner;
   off: () => void;
+  // Side-chat context seed: a synthetic user message to send to the SDK
+  // before the user's *first* real message. Captures the main thread so
+  // claude has grounding, but we explicitly don't persist it into
+  // `session_events` — the transcript should only show what the user
+  // actually typed into the side chat.
+  pendingSeed: string | null;
 }
 
 export type PermissionDecision = "allow_once" | "allow_always" | "deny";
@@ -62,8 +68,55 @@ export class SessionManager {
     };
     const runner = this.deps.runnerFactory.create(opts);
     const off = runner.on((event) => this.handleEvent(sessionId, event));
-    this.runners.set(sessionId, { runner, off });
+
+    // Side chat: on *first* spawn (no SDK session id yet, so we haven't talked
+    // to the CLI about this conversation), prepend a synthetic context message
+    // summarizing the parent thread. Resumes skip this — the SDK already has
+    // the history persisted on its side.
+    let pendingSeed: string | null = null;
+    if (session.parentSessionId && !session.sdkSessionId) {
+      pendingSeed = this.buildSideChatSeed(session.parentSessionId);
+    }
+
+    this.runners.set(sessionId, { runner, off, pendingSeed });
     return runner;
+  }
+
+  /**
+   * Build the synthetic seed prompt that gives a side-chat claude the main
+   * thread's context without handing it tool-call noise.
+   *
+   * Rules (intentional, documented):
+   *   - only `user_message` and `assistant_text` events — tool_use /
+   *     tool_result / thinking / permission_* are stripped; the point of
+   *     /btw is to ask a quick lateral question, not re-audit the run
+   *   - multi-line text is preserved verbatim — we never truncate or
+   *     summarize, mirroring claudex's general "don't silently truncate"
+   *     rule. The user can archive+start-new if the context grows unwieldy.
+   *   - the seed ends with an explicit instruction reminding the model it
+   *     must not imply action on the main thread from this side lane.
+   */
+  private buildSideChatSeed(parentId: string): string {
+    const events = this.deps.sessions.listEvents(parentId);
+    const lines: string[] = [];
+    for (const ev of events) {
+      const p = ev.payload as Record<string, unknown>;
+      if (ev.kind === "user_message") {
+        const text = typeof p.text === "string" ? p.text : "";
+        if (text.length > 0) lines.push(`user: ${text}`);
+      } else if (ev.kind === "assistant_text") {
+        const text = typeof p.text === "string" ? p.text : "";
+        if (text.length > 0) lines.push(`assistant: ${text}`);
+      }
+    }
+    const transcript = lines.length > 0 ? lines.join("\n") : "(no messages yet)";
+    return (
+      "The user is asking a side question. Answer without implying any " +
+      "action on the main thread — no tool calls unless the user explicitly " +
+      "asks for one, no file edits, no commits.\n\n" +
+      "Here's the conversation so far:\n" +
+      transcript
+    );
   }
 
   private handleEvent(sessionId: string, event: RunnerEvent) {
@@ -198,6 +251,15 @@ export class SessionManager {
 
   async sendUserMessage(sessionId: string, content: string): Promise<void> {
     const runner = this.getOrCreate(sessionId);
+    // If this is a side chat whose runner has a pending context seed,
+    // flush it to the SDK first. We do NOT append the seed to
+    // session_events — the transcript only shows what the user typed.
+    const entry = this.runners.get(sessionId);
+    if (entry?.pendingSeed) {
+      const seed = entry.pendingSeed;
+      entry.pendingSeed = null;
+      await runner.sendUserMessage(seed);
+    }
     this.deps.sessions.appendEvent({
       sessionId,
       kind: "user_message",

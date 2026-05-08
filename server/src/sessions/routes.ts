@@ -5,6 +5,7 @@ import path from "node:path";
 import { z } from "zod";
 import {
   CreateSessionRequest,
+  CreateSideSessionRequest,
   UpdateProjectRequest,
   UpdateSessionRequest,
   type ToolGrant,
@@ -13,6 +14,12 @@ import { ProjectStore } from "./projects.js";
 import { SessionStore } from "./store.js";
 import { ToolGrantStore } from "./grants.js";
 import type { SessionManager } from "./manager.js";
+import {
+  createWorktree,
+  isGitRepo,
+  removeWorktree,
+  WorktreeError,
+} from "./worktree.js";
 
 export interface SessionsRoutesDeps {
   db: Database.Database;
@@ -147,11 +154,52 @@ export async function registerSessionRoutes(
       if (!parsed.success) return reply.code(400).send({ error: "bad_request" });
       const project = projects.findById(parsed.data.projectId);
       if (!project) return reply.code(400).send({ error: "project_not_found" });
+
+      const title = parsed.data.title ?? "Untitled";
+      let worktreePath: string | null = null;
+      let branch: string | null = null;
+      let sessionId: string | undefined;
+
+      // If the caller asked for a worktree, verify the project is a git repo
+      // up front, then create the worktree BEFORE inserting the session row
+      // so a failure here leaves no dangling session in the DB. The session
+      // id is pre-generated so the directory name matches the DB primary key.
+      if (parsed.data.worktree) {
+        if (!(await isGitRepo(project.path))) {
+          return reply.code(400).send({ error: "not_a_git_repo" });
+        }
+        const { nanoid } = await import("nanoid");
+        sessionId = nanoid(12);
+        try {
+          const wt = await createWorktree({
+            projectPath: project.path,
+            sessionId,
+            title,
+          });
+          worktreePath = wt.path;
+          branch = wt.branch;
+        } catch (err) {
+          if (err instanceof WorktreeError) {
+            req.log.warn(
+              { err, projectPath: project.path },
+              "worktree creation failed",
+            );
+            return reply
+              .code(400)
+              .send({ error: "worktree_failed", detail: err.message });
+          }
+          throw err;
+        }
+      }
+
       const session = sessions.create({
-        title: parsed.data.title ?? "Untitled",
+        id: sessionId,
+        title,
         projectId: parsed.data.projectId,
         model: parsed.data.model,
         mode: parsed.data.mode,
+        worktreePath,
+        branch,
       });
       return reply.send({ session });
     },
@@ -162,10 +210,88 @@ export async function registerSessionRoutes(
     { preHandler: app.requireAuth as any },
     async (req, reply) => {
       const { id } = req.params as { id: string };
-      if (!sessions.findById(id))
-        return reply.code(404).send({ error: "not_found" });
+      const existing = sessions.findById(id);
+      if (!existing) return reply.code(404).send({ error: "not_found" });
+      // Clean up the worktree if we made one. This is best-effort: a missing
+      // directory (user rm'd it) or a git failure shouldn't block the user
+      // from archiving — the session row flip is what matters.
+      if (existing.worktreePath) {
+        try {
+          await removeWorktree(existing.worktreePath);
+        } catch (err) {
+          req.log.warn(
+            { err, sessionId: id, worktreePath: existing.worktreePath },
+            "worktree cleanup failed during archive",
+          );
+        }
+      }
       sessions.archive(id);
       return reply.send({ ok: true });
+    },
+  );
+
+  // POST /api/sessions/:id/side
+  //
+  // Spawns a `/btw` side chat that branches off an existing session. Copies
+  // project / model / mode from the parent; default mode is `plan` (read-only)
+  // so the side chat can't accidentally mutate the main thread's working tree
+  // while the user is just asking a quick lateral question. We explicitly do
+  // NOT copy the worktree path — side chats run in the parent's cwd, and we
+  // never create a new worktree for them.
+  //
+  // Archived parents can't spawn side chats (nothing to branch off of). If
+  // an active side chat for this parent already exists, returns it instead
+  // of creating a new one — matches the "one active side chat per main
+  // thread" convention the UI enforces. To start fresh, archive the existing
+  // side chat first.
+  app.post(
+    "/api/sessions/:id/side",
+    { preHandler: app.requireAuth as any },
+    async (req, reply) => {
+      const { id } = req.params as { id: string };
+      const parsed = CreateSideSessionRequest.safeParse(req.body ?? {});
+      if (!parsed.success)
+        return reply.code(400).send({ error: "bad_request" });
+      const parent = sessions.findById(id);
+      if (!parent) return reply.code(404).send({ error: "not_found" });
+      if (parent.status === "archived") {
+        return reply.code(409).send({ error: "archived" });
+      }
+      // Reuse an existing active side chat if the caller has one open.
+      const children = sessions.listChildren(id);
+      const active = children.find((c) => c.status !== "archived");
+      if (active) {
+        return reply.send({ session: active });
+      }
+      const session = sessions.create({
+        title: parsed.data.title ?? "Side chat",
+        projectId: parent.projectId,
+        model: parent.model,
+        // Read-only by default — /btw is for sanity checks, not actions.
+        mode: "plan",
+        parentSessionId: parent.id,
+      });
+      return reply.send({ session });
+    },
+  );
+
+  // GET /api/sessions/:id/side
+  //
+  // Returns the currently-active side chat for `id`, if any. Used by the
+  // web UI on mount to decide whether the /btw button should open an
+  // existing drawer (preserving the conversation) or show an empty new
+  // one. Deliberately ignores archived children so "Archive and start
+  // new" feels like a clean slate.
+  app.get(
+    "/api/sessions/:id/side",
+    { preHandler: app.requireAuth as any },
+    async (req, reply) => {
+      const { id } = req.params as { id: string };
+      const parent = sessions.findById(id);
+      if (!parent) return reply.code(404).send({ error: "not_found" });
+      const children = sessions.listChildren(id);
+      const active = children.find((c) => c.status !== "archived") ?? null;
+      return reply.send({ session: active });
     },
   );
 

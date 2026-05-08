@@ -99,6 +99,22 @@ const MIGRATIONS: { id: number; name: string; up: string }[] = [
       ALTER TABLE sessions ADD COLUMN sdk_session_id TEXT;
     `,
   },
+  {
+    id: 3,
+    name: "session_parent",
+    // `/btw` side chats: a child session that reads its parent's transcript
+    // for context on first spawn but never writes back into the parent. We
+    // store the link on the child row so cascade-delete on the parent wipes
+    // the side chat's events too. NULL = top-level session.
+    //
+    // Note: SQLite doesn't let us ADD COLUMN with a FK inline, so we attach
+    // the constraint via a table rebuild. Cheaper than a full rewrite — just
+    // the one column — but still transactional.
+    up: `
+      ALTER TABLE sessions ADD COLUMN parent_session_id TEXT REFERENCES sessions(id) ON DELETE CASCADE;
+      CREATE INDEX idx_sessions_parent ON sessions(parent_session_id);
+    `,
+  },
 ];
 
 export function openDb(config: Config, log: Logger): ClaudexDb {

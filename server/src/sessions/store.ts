@@ -23,6 +23,7 @@ interface SessionRow {
   last_message_at: string | null;
   archived_at: string | null;
   sdk_session_id: string | null;
+  parent_session_id: string | null;
   stats_messages: number;
   stats_files_changed: number;
   stats_lines_added: number;
@@ -45,6 +46,7 @@ function toSession(row: SessionRow): Session {
     lastMessageAt: row.last_message_at,
     archivedAt: row.archived_at,
     sdkSessionId: row.sdk_session_id,
+    parentSessionId: row.parent_session_id,
     stats: {
       messages: row.stats_messages,
       filesChanged: row.stats_files_changed,
@@ -56,12 +58,14 @@ function toSession(row: SessionRow): Session {
 }
 
 export interface SessionCreateInput {
+  id?: string;
   title: string;
   projectId: string;
   model: ModelId;
   mode: PermissionMode;
   worktreePath?: string | null;
   branch?: string | null;
+  parentSessionId?: string | null;
 }
 
 export class SessionStore {
@@ -69,14 +73,22 @@ export class SessionStore {
 
   // ---- sessions ----------------------------------------------------------
 
-  list(opts?: { includeArchived?: boolean }): Session[] {
+  // By default hides `/btw` side chats (parent_session_id IS NOT NULL) —
+  // they shouldn't clutter the home session list. Pass `includeSideChats`
+  // when something (the settings sheet, a debug view) explicitly wants
+  // them.
+  list(opts?: { includeArchived?: boolean; includeSideChats?: boolean }): Session[] {
     const rows = this.db
       .prepare(
         `SELECT * FROM sessions
          WHERE (? = 1 OR archived_at IS NULL)
+           AND (? = 1 OR parent_session_id IS NULL)
          ORDER BY updated_at DESC`,
       )
-      .all(opts?.includeArchived ? 1 : 0) as SessionRow[];
+      .all(
+        opts?.includeArchived ? 1 : 0,
+        opts?.includeSideChats ? 1 : 0,
+      ) as SessionRow[];
     return rows.map(toSession);
   }
 
@@ -84,10 +96,22 @@ export class SessionStore {
     const rows = this.db
       .prepare(
         `SELECT * FROM sessions
-         WHERE project_id = ?
+         WHERE project_id = ? AND parent_session_id IS NULL
          ORDER BY updated_at DESC`,
       )
       .all(projectId) as SessionRow[];
+    return rows.map(toSession);
+  }
+
+  /** List every side chat whose parent is `parentId`, newest first. */
+  listChildren(parentId: string): Session[] {
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM sessions
+         WHERE parent_session_id = ?
+         ORDER BY created_at DESC`,
+      )
+      .all(parentId) as SessionRow[];
     return rows.map(toSession);
   }
 
@@ -101,7 +125,7 @@ export class SessionStore {
   create(input: SessionCreateInput): Session {
     const now = new Date().toISOString();
     const row: SessionRow = {
-      id: nanoid(12),
+      id: input.id ?? nanoid(12),
       title: input.title,
       project_id: input.projectId,
       branch: input.branch ?? null,
@@ -114,6 +138,7 @@ export class SessionStore {
       last_message_at: null,
       archived_at: null,
       sdk_session_id: null,
+      parent_session_id: input.parentSessionId ?? null,
       stats_messages: 0,
       stats_files_changed: 0,
       stats_lines_added: 0,
@@ -125,11 +150,13 @@ export class SessionStore {
         `INSERT INTO sessions (
            id, title, project_id, branch, worktree_path, status, model, mode,
            created_at, updated_at, last_message_at, archived_at, sdk_session_id,
+           parent_session_id,
            stats_messages, stats_files_changed, stats_lines_added,
            stats_lines_removed, stats_context_pct
          ) VALUES (
            @id, @title, @project_id, @branch, @worktree_path, @status, @model, @mode,
            @created_at, @updated_at, @last_message_at, @archived_at, @sdk_session_id,
+           @parent_session_id,
            @stats_messages, @stats_files_changed, @stats_lines_added,
            @stats_lines_removed, @stats_context_pct
          )`,

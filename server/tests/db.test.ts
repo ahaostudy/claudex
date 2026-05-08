@@ -107,10 +107,10 @@ describe("db migrations", () => {
       .get() as { sdk_session_id: string | null };
     expect(row.sdk_session_id).toBeNull();
 
-    // And both migrations (id=1, id=2) recorded.
+    // And all migrations recorded.
     const migrations = db
       .prepare("SELECT id FROM _migrations ORDER BY id")
       .all() as Array<{ id: number }>;
-    expect(migrations.map((m) => m.id)).toEqual([1, 2]);
+    expect(migrations.map((m) => m.id)).toEqual([1, 2, 3]);
   });
 });
