@@ -102,6 +102,33 @@ export const SessionEvent = z.object({
 });
 export type SessionEvent = z.infer<typeof SessionEvent>;
 
+/**
+ * Usage payload attached to a persisted `turn_end` SessionEvent.
+ *
+ * The Agent SDK's `result` message reports four relevant token counts:
+ *   - `inputTokens` — *new* (uncached) input tokens for this turn. Tiny once
+ *     the prompt cache is warm
+ *   - `cacheReadInputTokens` — cached input tokens replayed into the turn
+ *   - `cacheCreationInputTokens` — input tokens entering the cache this turn
+ *   - `outputTokens` — assistant output tokens
+ *
+ * The "context body shipped to the model" for this turn is the sum
+ * `inputTokens + cacheReadInputTokens + cacheCreationInputTokens`. The Usage
+ * panel's "how full is my context window" ring uses that sum, not
+ * `inputTokens` alone — otherwise every turn after the first looks like it
+ * used almost no context.
+ *
+ * All fields are optional on the schema because older persisted rows (from
+ * before the cache fields existed) don't carry them.
+ */
+export const TurnEndUsage = z.object({
+  inputTokens: z.number().int().nonnegative().optional(),
+  outputTokens: z.number().int().nonnegative().optional(),
+  cacheReadInputTokens: z.number().int().nonnegative().optional(),
+  cacheCreationInputTokens: z.number().int().nonnegative().optional(),
+});
+export type TurnEndUsage = z.infer<typeof TurnEndUsage>;
+
 export const PendingApproval = z.object({
   id: z.string(),
   sessionId: z.string(),

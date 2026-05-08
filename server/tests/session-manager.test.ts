@@ -178,6 +178,35 @@ describe("SessionManager", () => {
     expect(fresh.status).toBe("idle");
   });
 
+  it("round-trips all four usage fields through turn_end payload", () => {
+    const s = setupManager();
+    cleanups.push(s.cleanup);
+    s.manager.getOrCreate(s.session.id);
+    const mock = s.last()!;
+    mock.emit({
+      type: "turn_end",
+      stopReason: "success",
+      usage: {
+        inputTokens: 120,
+        outputTokens: 80,
+        cacheReadInputTokens: 50_000,
+        cacheCreationInputTokens: 4_000,
+      },
+    });
+
+    const evs = s.sessions.listEvents(s.session.id);
+    const turnEnd = evs.find((e) => e.kind === "turn_end")!;
+    expect(turnEnd.payload).toEqual({
+      stopReason: "success",
+      usage: {
+        inputTokens: 120,
+        outputTokens: 80,
+        cacheReadInputTokens: 50_000,
+        cacheCreationInputTokens: 4_000,
+      },
+    });
+  });
+
   it("flips status to awaiting on permission_request and back to running on decision", () => {
     const s = setupManager();
     cleanups.push(s.cleanup);

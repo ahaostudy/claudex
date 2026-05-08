@@ -47,11 +47,11 @@ export function SettingsScreen() {
 
       <div className="flex-1 min-h-0 overflow-y-auto">
         <div className="max-w-[1100px] mx-auto flex flex-col lg:flex-row">
-          {/* Tab list: horizontal scroll on mobile, left rail on desktop. */}
-          <aside className="lg:w-[220px] lg:shrink-0 border-b lg:border-b-0 lg:border-r border-line bg-paper/30">
+          {/* Tab list: horizontal filter-chip bar on mobile, left rail on desktop. */}
+          <aside className="lg:w-[220px] lg:shrink-0 border-b lg:border-b-0 lg:border-r border-line bg-paper/30 sticky top-[61px] lg:top-0 z-[5] bg-canvas/90 lg:bg-paper/30 backdrop-blur lg:backdrop-blur-0">
             <nav
               className={cn(
-                "flex lg:flex-col gap-1 px-3 py-3 overflow-x-auto",
+                "flex lg:flex-col gap-1.5 px-3 py-2.5 lg:py-3 overflow-x-auto no-scrollbar",
                 "lg:sticky lg:top-0 lg:overflow-x-visible",
               )}
             >
@@ -60,10 +60,10 @@ export function SettingsScreen() {
                   key={id}
                   onClick={() => setTab(id)}
                   className={cn(
-                    "shrink-0 inline-flex items-center gap-2 px-3 h-9 rounded-[8px] text-[13px]",
+                    "shrink-0 inline-flex items-center gap-1.5 px-2.5 h-7 lg:h-9 lg:px-3 rounded-full lg:rounded-[8px] text-[12px] lg:text-[13px] border",
                     tab === id
-                      ? "bg-canvas shadow-card border border-line text-ink"
-                      : "text-ink-muted hover:text-ink hover:bg-canvas/40",
+                      ? "bg-ink text-canvas border-ink lg:bg-canvas lg:text-ink lg:border-line lg:shadow-card"
+                      : "bg-canvas text-ink-soft border-line lg:border-transparent lg:bg-transparent lg:text-ink-muted lg:hover:text-ink lg:hover:bg-canvas/40",
                   )}
                 >
                   <Icon className="w-3.5 h-3.5" />
@@ -73,7 +73,7 @@ export function SettingsScreen() {
             </nav>
           </aside>
 
-          <section className="flex-1 min-w-0 p-5 sm:p-8 space-y-5">
+          <section className="flex-1 min-w-0 p-5 sm:p-8 pb-20 md:pb-8 space-y-5">
             {tab === "account" && <AccountPanel />}
             {tab === "security" && <SecurityPanel />}
             {tab === "appearance" && <AppearancePanel />}

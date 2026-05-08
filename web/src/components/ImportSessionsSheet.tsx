@@ -178,7 +178,7 @@ export function ImportSessionsSheet({
         </div>
 
         {/* List */}
-        <div className="flex-1 overflow-y-auto px-2 pb-2 space-y-0.5 border-t border-line">
+        <div className="flex-1 overflow-y-auto border-t border-line">
           {loading ? (
             <div className="text-[13px] text-ink-muted text-center py-10">
               Scanning ~/.claude/projects…
@@ -191,7 +191,7 @@ export function ImportSessionsSheet({
             <div className="text-[13px] text-ink-muted text-center py-10 px-4">
               {candidates.length === 0
                 ? "No CLI sessions found (or all have been adopted)."
-                : `No sessions match “${query}”.`}
+                : `No sessions match "${query}".`}
             </div>
           ) : (
             filtered.map((s) => {
@@ -201,10 +201,8 @@ export function ImportSessionsSheet({
                   key={s.sessionId}
                   onClick={() => toggle(s.sessionId)}
                   className={cn(
-                    "w-full flex items-start gap-3 px-3 py-2.5 rounded-[8px] text-left border",
-                    isSelected
-                      ? "bg-klein-wash/40 border-klein/30"
-                      : "border-transparent hover:bg-paper/60",
+                    "w-full flex items-start gap-3 px-4 py-3 text-left border-b border-line hover:bg-paper/40",
+                    isSelected && "bg-klein-wash/40",
                   )}
                 >
                   <span

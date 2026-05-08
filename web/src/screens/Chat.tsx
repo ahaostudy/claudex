@@ -466,6 +466,14 @@ export function ChatScreen() {
           pendingApprovalCount={pieces.filter(
             (p) => p.kind === "permission_request",
           ).length}
+          onReveal={(attr, id) => {
+            const el = scroller.current?.querySelector(
+              `[data-${attr}="${CSS.escape(id)}"]`,
+            );
+            if (el) {
+              el.scrollIntoView({ behavior: "smooth", block: "center" });
+            }
+          }}
           onClose={() => setShowTasks(false)}
         />
       )}
@@ -704,11 +712,19 @@ function Piece({
     case "tool_use": {
       const diff = toolCallToDiff(p.name, p.input);
       if (diff) {
-        // DiffView is already compact and information-dense — same in both
-        // modes. No collapse affordance.
-        return <DiffView diff={diff} />;
+        // Mid-thread Edit/Write diffs render full-width so the hunk grid
+        // isn't clipped; the DiffView itself handles horizontal overflow.
+        return (
+          <div className="w-full" data-tool-use-id={p.id}>
+            <DiffView diff={diff} />
+          </div>
+        );
       }
-      return <ToolUseBlock name={p.name} input={p.input} verbose={verbose} />;
+      return (
+        <div data-tool-use-id={p.id}>
+          <ToolUseBlock name={p.name} input={p.input} verbose={verbose} />
+        </div>
+      );
     }
     case "tool_result":
       return (
@@ -720,13 +736,15 @@ function Piece({
       );
     case "permission_request":
       return (
-        <PermissionCard
-          approvalId={p.approvalId}
-          toolName={p.toolName}
-          input={p.input}
-          summary={p.summary}
-          onDecide={onDecide}
-        />
+        <div data-approval-id={p.approvalId}>
+          <PermissionCard
+            approvalId={p.approvalId}
+            toolName={p.toolName}
+            input={p.input}
+            summary={p.summary}
+            onDecide={onDecide}
+          />
+        </div>
       );
     case "pending":
       return <PendingBlock stalled={p.stalled} />;
@@ -930,7 +948,9 @@ function PermissionCard({
         <div className="display text-[16px] leading-tight">{summary}</div>
       </div>
       {diff ? (
-        <DiffView diff={diff} />
+        <div className="w-full">
+          <DiffView diff={diff} />
+        </div>
       ) : (
         <div className="mono text-[12px] text-canvas bg-ink rounded-[8px] px-3 py-2 whitespace-pre-wrap overflow-x-auto">
           {JSON.stringify(input, null, 2)}

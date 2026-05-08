@@ -10,13 +10,30 @@ import { AppShell } from "@/components/AppShell";
 import { ImportSessionsSheet } from "@/components/ImportSessionsSheet";
 import { cn } from "@/lib/cn";
 
-const statusTone: Record<string, string> = {
+// Status dot colors for the flat row layout. `running` and `awaiting` get a
+// soft glow ring (box-shadow) to match the mockup (s-02 lines 513, 533).
+const STATUS_DOT: Record<string, string> = {
   running: "bg-success",
   awaiting: "bg-warn",
   idle: "bg-ink-faint",
   archived: "bg-line-strong",
   error: "bg-danger",
 };
+const DOT_GLOW: Record<string, string> = {
+  running: "0 0 0 4px rgba(63,145,66,0.18)",
+  awaiting: "0 0 0 4px rgba(217,119,6,0.18)",
+  idle: "",
+  archived: "",
+  error: "0 0 0 4px rgba(185,28,28,0.18)",
+};
+
+// Compact label for model ids shown in the row meta line.
+function shortModel(id: string): string {
+  if (id === "claude-opus-4-7") return "opus-4.7";
+  if (id === "claude-sonnet-4-6") return "sonnet-4.6";
+  if (id === "claude-haiku-4-5") return "haiku-4.5";
+  return id;
+}
 
 export function HomeScreen() {
   const { user } = useAuth();
@@ -166,8 +183,8 @@ export function HomeScreen() {
         </div>
       </header>
 
-      <section className="flex-1 min-h-0 overflow-y-auto pb-6">
-        <div className="px-5 pt-4 flex items-center gap-3 mb-4">
+      <section className="flex-1 min-h-0 overflow-y-auto pb-20 md:pb-6">
+        <div className="px-4 md:px-6 py-3 flex items-center gap-3">
           <span className="mono text-[11px] text-ink-muted">
             {loadingSessions
               ? "loading…"
@@ -188,15 +205,15 @@ export function HomeScreen() {
         </div>
 
         {sessions.length === 0 && !loadingSessions ? (
-          <div className="px-5">
+          <div className="px-4 md:px-6 pb-6">
             <EmptyState onNew={() => setShowNew(true)} />
           </div>
         ) : filteredGroups.length === 0 ? (
-          <div className="px-5 text-[13px] text-ink-muted">
+          <div className="px-4 md:px-6 pb-6 text-[13px] text-ink-muted">
             No sessions in this project yet.
           </div>
         ) : (
-          <div>
+          <div className="pb-6">
             {filteredGroups.map((g) => (
               <ProjectGroup
                 key={g.projectId}
@@ -249,51 +266,190 @@ function ProjectGroup({
   // Each group is its own block so its header `sticky top-0` is scoped to
   // the group's vertical run — when you scroll past, the next project's
   // header takes over. The parent `<section>` is the scroll container.
+  const displayName = project?.name ?? projectId.slice(0, 8);
+  const path = project?.path ?? "";
   return (
     <div>
-      <div className="sticky top-0 z-[5] bg-paper/80 backdrop-blur border-b border-line px-5 py-2 flex items-center gap-2">
-        <span className="h-1.5 w-1.5 rounded-full bg-klein" />
-        <span className="mono text-[12px] font-medium">
-          {project?.name ?? projectId.slice(0, 8)}
-        </span>
-        <span className="ml-auto text-[11px] text-ink-muted">
+      <div className="sticky top-0 z-10 flex items-center gap-3 px-4 md:px-6 py-2 bg-paper/80 backdrop-blur border-b border-line">
+        <span className="display text-[15px] md:text-[16px]">{displayName}</span>
+        {path && (
+          <span className="mono text-[11px] text-ink-muted truncate hidden sm:inline">
+            {path}
+          </span>
+        )}
+        <span className="ml-auto mono text-[11px] text-ink-muted shrink-0">
           {sessions.length} session{sessions.length === 1 ? "" : "s"}
         </span>
       </div>
-      <ul className="space-y-2 px-5 pt-3 pb-1">
+      <ul>
         {sessions.map((s) => (
           <li key={s.id}>
-            <Link
-              to={`/session/${s.id}`}
-              className="block rounded-[10px] border border-line bg-canvas px-4 py-3 hover:bg-paper/60 transition-colors"
-            >
-              <div className="flex items-center gap-2">
-                <span
-                  className={`h-2 w-2 rounded-full ${statusTone[s.status]}`}
-                />
-                <span className="text-[11px] uppercase tracking-[0.12em] text-ink-muted">
-                  {s.status}
-                </span>
-                <span className="ml-auto text-[11px] text-ink-muted">
-                  {formatRel(s.lastMessageAt ?? s.updatedAt)}
-                </span>
-              </div>
-              <div className="text-[15px] font-medium leading-snug mt-1.5">
-                {s.title}
-              </div>
-              <div className="flex items-center gap-3 text-[11px] text-ink-muted mt-1.5">
-                <span className="mono flex items-center gap-1">
-                  <GitBranch className="w-3 h-3" />
-                  {s.branch ?? "main"}
-                </span>
-                <span className="mono">{s.model}</span>
-                <span>· {s.mode}</span>
-              </div>
-            </Link>
+            <SessionRow session={s} />
           </li>
         ))}
       </ul>
     </div>
+  );
+}
+
+// Status pill text + style mapping. Mirrors the mockup (s-02 lines 523, 537,
+// 555, 566, 584). `awaiting` keeps the quoted `#7a4700` color from the mockup.
+function statusPillClass(status: string): string {
+  switch (status) {
+    case "running":
+      return "border border-success/30 bg-success-wash text-[#1f5f21]";
+    case "awaiting":
+      return "border border-warn/30 bg-warn-wash text-[#7a4700]";
+    case "error":
+      return "border border-danger/30 bg-danger-wash text-danger";
+    case "archived":
+    case "idle":
+    default:
+      return "border border-line bg-paper text-ink-muted";
+  }
+}
+function statusPillLabel(status: string): string {
+  if (status === "awaiting") return "NEEDS YOU";
+  return status.toUpperCase();
+}
+
+function SessionRow({ session: s }: { session: Session }) {
+  const href = `/session/${s.id}`;
+  const archived = s.status === "archived";
+  const dotTone = STATUS_DOT[s.status] ?? "bg-ink-faint";
+  const dotGlow = DOT_GLOW[s.status] ?? "";
+  const rel = formatRel(s.lastMessageAt ?? s.updatedAt);
+  const branch = s.branch ?? "main";
+  const { linesAdded, linesRemoved, filesChanged, contextPct } = s.stats;
+  const hasDiffs = linesAdded > 0 || linesRemoved > 0 || filesChanged > 0;
+  // Progress ring geometry: r=9 → circumference ≈ 56.55. Dash offset
+  // encodes remaining context. `running` shows an animated dot in place
+  // of a ring (mockup s-02 line 533 uses animate-pulse on the dot; here
+  // we keep the ring + pulse on the dot for visual consistency).
+  const CIRC = 56.55;
+  const pct = Math.max(0, Math.min(1, contextPct || 0));
+  const dashoffset = CIRC * (1 - pct);
+  const showRing = !archived && pct > 0;
+
+  return (
+    <Link
+      to={href}
+      className={cn(
+        "block border-b border-line hover:bg-paper/40 cursor-pointer",
+        archived && "opacity-75",
+      )}
+    >
+      {/* Mobile stacked layout */}
+      <div className="md:hidden px-4 py-3">
+        <div className="flex items-center gap-2">
+          <span
+            className={cn("h-2 w-2 rounded-full shrink-0", dotTone, s.status === "running" && "animate-pulse")}
+            style={dotGlow ? { boxShadow: dotGlow } : undefined}
+          />
+          <div className="text-[14px] font-medium truncate flex-1">
+            {s.title || "Untitled"}
+          </div>
+          <span className="text-[11px] text-ink-muted shrink-0">{rel}</span>
+        </div>
+        {hasDiffs && (
+          <div className="mono text-[12px] text-ink-muted truncate mt-0.5">
+            <span className="text-success">+{linesAdded}</span>{" "}
+            <span className="text-danger">−{linesRemoved}</span>{" "}
+            <span>· {filesChanged}f</span>
+          </div>
+        )}
+        <div className="mt-1 flex items-center gap-2 text-[11px] text-ink-muted">
+          <span className="mono inline-flex items-center gap-1 truncate">
+            <GitBranch className="w-3 h-3 shrink-0" />
+            {branch}
+          </span>
+          <span>·</span>
+          <span className="mono shrink-0">{shortModel(s.model)}</span>
+          <span>·</span>
+          <span className="shrink-0">{s.mode}</span>
+        </div>
+      </div>
+
+      {/* Desktop grid row */}
+      <div className="hidden md:block px-6 py-3">
+        <div className="grid grid-cols-[22px_minmax(0,1fr)_220px_150px_110px_48px] gap-4 items-center">
+          <span
+            className={cn(
+              "h-2 w-2 rounded-full",
+              dotTone,
+              s.status === "running" && "animate-pulse",
+            )}
+            style={dotGlow ? { boxShadow: dotGlow } : undefined}
+          />
+          <div className="min-w-0">
+            <div className="text-[15px] font-medium truncate">
+              {s.title || "Untitled"}
+            </div>
+          </div>
+          <div className="mono text-[12px] text-ink-soft truncate flex items-center gap-1.5">
+            <GitBranch className="w-3 h-3 text-ink-faint shrink-0" />
+            <span className="truncate">{branch}</span>
+          </div>
+          <div className="mono text-[12px] text-ink-muted truncate">
+            {hasDiffs ? (
+              <>
+                <span className="text-success">+{linesAdded}</span>{" "}
+                <span className="text-danger">−{linesRemoved}</span>{" "}
+                <span>· {filesChanged}f</span>
+              </>
+            ) : (
+              <span className="text-ink-faint">no changes</span>
+            )}
+          </div>
+          <div>
+            <span
+              className={cn(
+                "inline-flex items-center gap-1.5 px-2 py-0.5 rounded-[6px] text-[10px] font-medium uppercase tracking-[0.1em]",
+                statusPillClass(s.status),
+              )}
+            >
+              {(s.status === "running" || s.status === "awaiting") && (
+                <span className={cn("h-1.5 w-1.5 rounded-full", dotTone)} />
+              )}
+              {statusPillLabel(s.status)}
+            </span>
+          </div>
+          <div className="flex items-center justify-end">
+            {showRing ? (
+              <svg width="22" height="22">
+                <circle
+                  cx="11"
+                  cy="11"
+                  r="9"
+                  fill="none"
+                  stroke="#e8e4d8"
+                  strokeWidth="2.5"
+                />
+                <circle
+                  cx="11"
+                  cy="11"
+                  r="9"
+                  fill="none"
+                  stroke="#cc785c"
+                  strokeWidth="2.5"
+                  strokeLinecap="round"
+                  strokeDasharray={CIRC.toString()}
+                  strokeDashoffset={dashoffset.toString()}
+                  transform="rotate(-90 11 11)"
+                />
+              </svg>
+            ) : null}
+          </div>
+        </div>
+        <div className="mt-1.5 flex items-center gap-3 text-[11px] text-ink-muted">
+          <span className="mono">{shortModel(s.model)}</span>
+          <span>·</span>
+          <span>{s.mode}</span>
+          <span>·</span>
+          <span>{rel}</span>
+        </div>
+      </div>
+    </Link>
   );
 }
 

@@ -53,7 +53,17 @@ export type RunnerEvent =
   | {
       type: "turn_end";
       stopReason: string;
-      usage?: { inputTokens?: number; outputTokens?: number };
+      // Token usage from the SDK's `result` message. `inputTokens` is the
+      // *new* (uncached) input for this turn — with prompt caching on, most
+      // of the real context sits under `cacheReadInputTokens` and
+      // `cacheCreationInputTokens`. The UI sums all three to reflect the
+      // true context body shipped to the model.
+      usage?: {
+        inputTokens?: number;
+        outputTokens?: number;
+        cacheReadInputTokens?: number;
+        cacheCreationInputTokens?: number;
+      };
     }
   // Manager-synthesized (not emitted by the Agent SDK). Broadcast when a
   // user message lands in the session so every subscribed tab sees it

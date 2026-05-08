@@ -220,8 +220,14 @@ export class AgentRunner implements Runner {
           stopReason: msg.subtype ?? "end_turn",
           usage: msg.usage
             ? {
-                inputTokens: (msg.usage as any).input_tokens,
-                outputTokens: (msg.usage as any).output_tokens,
+                inputTokens: Number((msg.usage as any).input_tokens ?? 0),
+                outputTokens: Number((msg.usage as any).output_tokens ?? 0),
+                cacheReadInputTokens: Number(
+                  (msg.usage as any).cache_read_input_tokens ?? 0,
+                ),
+                cacheCreationInputTokens: Number(
+                  (msg.usage as any).cache_creation_input_tokens ?? 0,
+                ),
               }
             : undefined,
         });

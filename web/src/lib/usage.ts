@@ -21,14 +21,21 @@ export interface SessionUsage {
   /** Count of turn_end events that contributed usage (debug + sanity check). */
   turnCount: number;
   /**
-   * Input tokens reported on the most recent `turn_end` event. Unlike
-   * `totalInput` (which sums every turn and over-counts because prior turns'
-   * input overlaps), this is a reasonable proxy for "current context size":
-   * each turn resends the full conversation to the model, so the latest
-   * turn's `inputTokens` ≈ how much context is live right now. Zero when no
-   * `turn_end` with usage has been seen.
+   * "How full is the context window right now" — the real size of the body
+   * shipped to the model on the most recent turn:
+   * `inputTokens + cacheReadInputTokens + cacheCreationInputTokens`. With
+   * prompt caching on, the SDK's `input_tokens` alone only counts *new*
+   * uncached input and severely underreports context; cache-read/creation
+   * carry the bulk. Zero when no `turn_end` with usage has been seen.
    */
   lastTurnInput: number;
+  /**
+   * *New* (billable-style) input tokens on the most recent turn — what the
+   * SDK calls `input_tokens`, before adding cache reads / creations. Exposed
+   * separately from `lastTurnInput` for UIs that want to show "new tokens
+   * billed this turn" alongside the full context-body number.
+   */
+  lastTurnNewInput: number;
 }
 
 /**
@@ -87,31 +94,49 @@ export function computeSessionUsage(
   >();
   let turnCount = 0;
   let lastTurnInput = 0;
+  let lastTurnNewInput = 0;
 
   for (const ev of events) {
     if (ev.kind !== "turn_end") continue;
     const usage = (ev.payload as Record<string, unknown>).usage as
-      | { inputTokens?: number; outputTokens?: number }
+      | {
+          inputTokens?: number;
+          outputTokens?: number;
+          cacheReadInputTokens?: number;
+          cacheCreationInputTokens?: number;
+        }
       | null
       | undefined;
     if (!usage) continue;
     const inp = Number(usage.inputTokens ?? 0) | 0;
     const out = Number(usage.outputTokens ?? 0) | 0;
-    if (inp === 0 && out === 0) continue;
+    const cacheRead = Number(usage.cacheReadInputTokens ?? 0) | 0;
+    const cacheCreate = Number(usage.cacheCreationInputTokens ?? 0) | 0;
+    // Full context body shipped this turn: new input + cached replays +
+    // newly-cached creations. This is the number the user actually cares
+    // about for "how full is my window" — the SDK's `input_tokens` alone
+    // would show ~0 on a warm cache.
+    const totalInputThisTurn = inp + cacheRead + cacheCreate;
+    if (totalInputThisTurn === 0 && out === 0) continue;
     // No per-event model today; attribute to the session's current model.
     const model = sessionModel;
     const key = String(model);
     const row = perModelMap.get(key);
     if (row) {
-      row.inputTokens += inp;
+      row.inputTokens += totalInputThisTurn;
       row.outputTokens += out;
     } else {
-      perModelMap.set(key, { model, inputTokens: inp, outputTokens: out });
+      perModelMap.set(key, {
+        model,
+        inputTokens: totalInputThisTurn,
+        outputTokens: out,
+      });
     }
     turnCount += 1;
     // Events are assumed to be in insertion order (server returns them
-    // ordered by id asc); the final turn_end's inputTokens wins.
-    lastTurnInput = inp;
+    // ordered by id asc); the final turn_end wins for "current context".
+    lastTurnInput = totalInputThisTurn;
+    lastTurnNewInput = inp;
   }
 
   const perModel: PerModelUsage[] = Array.from(perModelMap.values())
@@ -125,7 +150,15 @@ export function computeSessionUsage(
   const totalOutput = perModel.reduce((n, r) => n + r.outputTokens, 0);
   const costUsd = perModel.reduce((n, r) => n + r.costUsd, 0);
 
-  return { totalInput, totalOutput, costUsd, perModel, turnCount, lastTurnInput };
+  return {
+    totalInput,
+    totalOutput,
+    costUsd,
+    perModel,
+    turnCount,
+    lastTurnInput,
+    lastTurnNewInput,
+  };
 }
 
 /** Format a token count as "12.3M", "612k", or "1,234". */

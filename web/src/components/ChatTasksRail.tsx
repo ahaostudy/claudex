@@ -25,11 +25,19 @@ export function ChatTasksRail({
   session,
   pieces,
   pendingApprovalCount,
+  onReveal,
   onClose,
 }: {
   session: Session | null;
   pieces: UIPiece[];
   pendingApprovalCount: number;
+  /**
+   * Called when a task card is clicked. `attr` names the data-attribute to
+   * query (e.g. `tool-use-id`, `approval-id`) so Chat can scroll to the
+   * right DOM element. We don't pass refs down because the card list is
+   * derived — the stable hook is the attribute selector.
+   */
+  onReveal?: (attr: "tool-use-id" | "approval-id", id: string) => void;
   onClose: () => void;
 }) {
   // ----- Tasks list from tool_use / tool_result pairs -----
@@ -92,7 +100,13 @@ export function ChatTasksRail({
             they'll show up here.
           </div>
         ) : (
-          tasks.map((t) => <TaskCard key={t.id} task={t} />)
+          tasks.map((t) => (
+            <TaskCard
+              key={t.id}
+              task={t}
+              onReveal={onReveal}
+            />
+          ))
         )}
       </div>
       <div className="mt-auto p-3 border-t border-line">
@@ -126,6 +140,11 @@ interface Task {
   name: string;
   summary: string;
   state: TaskState;
+  // What to pass to onReveal when the card is clicked. We keep these
+  // separate from `id` because the rail card id can be prefixed (e.g.
+  // `perm-<approvalId>`) to avoid collisions across kinds.
+  revealAttr: "tool-use-id" | "approval-id";
+  revealId: string;
 }
 
 function buildTasks(pieces: UIPiece[]): Task[] {
@@ -145,6 +164,8 @@ function buildTasks(pieces: UIPiece[]): Task[] {
         name: p.name,
         summary: summarizeToolInput(p.name, p.input),
         state: matched ? "done" : "running",
+        revealAttr: "tool-use-id",
+        revealId: p.id,
       });
     } else if (p.kind === "permission_request") {
       tasks.push({
@@ -152,6 +173,8 @@ function buildTasks(pieces: UIPiece[]): Task[] {
         name: `${p.toolName} · awaiting you`,
         summary: p.summary,
         state: "awaiting",
+        revealAttr: "approval-id",
+        revealId: p.approvalId,
       });
     }
   }
@@ -185,7 +208,13 @@ function summarizeToolInput(
   return s.length > 80 ? s.slice(0, 78) + "…" : s;
 }
 
-function TaskCard({ task }: { task: Task }) {
+function TaskCard({
+  task,
+  onReveal,
+}: {
+  task: Task;
+  onReveal?: (attr: "tool-use-id" | "approval-id", id: string) => void;
+}) {
   const dot = cn(
     "h-1.5 w-1.5 rounded-full shrink-0",
     task.state === "running" && "bg-success animate-pulse",
@@ -199,9 +228,11 @@ function TaskCard({ task }: { task: Task }) {
         ? "—"
         : "done";
   return (
-    <div
+    <button
+      type="button"
+      onClick={() => onReveal?.(task.revealAttr, task.revealId)}
       className={cn(
-        "rounded-[8px] border border-line bg-canvas p-3",
+        "w-full text-left rounded-[8px] border border-line bg-canvas p-3 hover:bg-paper cursor-pointer",
         task.state === "done" && "opacity-80",
       )}
     >
@@ -217,7 +248,7 @@ function TaskCard({ task }: { task: Task }) {
       <div className="text-[12px] mono text-ink-muted mt-1.5 line-clamp-2 break-all">
         {task.summary}
       </div>
-    </div>
+    </button>
   );
 }
 

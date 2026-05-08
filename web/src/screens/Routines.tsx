@@ -132,94 +132,161 @@ export function RoutinesScreen() {
         </button>
       </header>
 
-      <section className="flex-1 min-h-0 overflow-y-auto px-4 py-4 space-y-3 max-w-[900px] mx-auto w-full">
+      <section className="flex-1 min-h-0 overflow-y-auto pb-20 md:pb-6">
         {loading ? (
           <div className="text-[13px] text-ink-muted text-center py-10 mono">
             loading…
           </div>
         ) : routines.length === 0 ? (
-          <div className="rounded-[12px] border border-dashed border-line-strong p-8 text-center">
-            <Calendar className="w-6 h-6 mx-auto text-ink-muted mb-2" />
-            <div className="display text-[1.1rem] mb-1">No routines yet.</div>
-            <div className="text-[13px] text-ink-muted max-w-[40ch] mx-auto">
-              Routines start a fresh session on a cron schedule. Useful for
-              nightly audits, morning summaries, or periodic health checks.
+          <div className="max-w-[900px] mx-auto w-full px-4 md:px-6 py-6">
+            <div className="rounded-[12px] border border-dashed border-line-strong p-8 text-center">
+              <Calendar className="w-6 h-6 mx-auto text-ink-muted mb-2" />
+              <div className="display text-[1.1rem] mb-1">No routines yet.</div>
+              <div className="text-[13px] text-ink-muted max-w-[40ch] mx-auto">
+                Routines start a fresh session on a cron schedule. Useful for
+                nightly audits, morning summaries, or periodic health checks.
+              </div>
             </div>
           </div>
         ) : (
-          <ul className="space-y-2">
+          <ul>
             {routines.map((r) => (
               <li
                 key={r.id}
-                className="rounded-[10px] border border-line bg-canvas px-4 py-3"
+                className="px-4 md:px-6 py-3 border-b border-line hover:bg-paper/40"
               >
-                <div className="flex items-center gap-2">
+                {/* Mobile stacked */}
+                <div className="md:hidden">
+                  <div className="flex items-center gap-2">
+                    <span
+                      className={`h-2 w-2 rounded-full shrink-0 ${
+                        r.status === "active"
+                          ? "bg-success"
+                          : "bg-line-strong"
+                      }`}
+                    />
+                    <div className="text-[14px] font-medium truncate flex-1">
+                      {r.name}
+                    </div>
+                    <span className="text-[11px] text-ink-muted shrink-0">
+                      next {formatRel(r.nextRunAt)}
+                    </span>
+                  </div>
+                  <div className="text-[12px] text-ink-muted truncate mt-0.5">
+                    {humanCron(r.cronExpr)}
+                  </div>
+                  <div className="mono text-[11px] text-ink-muted truncate mt-0.5">
+                    {r.cronExpr}
+                  </div>
+                  <div className="flex gap-1.5 mt-2">
+                    <button
+                      onClick={() => runNow(r)}
+                      className="h-8 px-2.5 rounded-[6px] border border-line text-[12px] inline-flex items-center gap-1 hover:bg-canvas"
+                    >
+                      <Play className="w-3 h-3" />
+                      Run now
+                    </button>
+                    <button
+                      onClick={() => togglePause(r)}
+                      className="h-8 px-2.5 rounded-[6px] border border-line text-[12px] inline-flex items-center gap-1 hover:bg-canvas"
+                    >
+                      {r.status === "active" ? (
+                        <>
+                          <Pause className="w-3 h-3" />
+                          Pause
+                        </>
+                      ) : (
+                        <>
+                          <Play className="w-3 h-3" />
+                          Resume
+                        </>
+                      )}
+                    </button>
+                    <button
+                      onClick={() => setEditing(r)}
+                      className="ml-auto h-8 w-8 rounded-[6px] border border-line flex items-center justify-center text-ink-soft hover:bg-canvas"
+                      title="Edit"
+                    >
+                      <Pencil className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      onClick={() => remove(r)}
+                      className="h-8 w-8 rounded-[6px] border border-line flex items-center justify-center text-danger hover:bg-danger-wash"
+                      title="Delete"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Desktop grid row: dot · name/cron · next · actions */}
+                <div className="hidden md:grid grid-cols-[22px_minmax(0,1fr)_180px_auto] gap-4 items-center">
                   <span
                     className={`h-2 w-2 rounded-full ${
-                      r.status === "active" ? "bg-success" : "bg-line-strong"
+                      r.status === "active"
+                        ? "bg-success"
+                        : "bg-line-strong"
                     }`}
                   />
-                  <span className="text-[11px] uppercase tracking-[0.12em] text-ink-muted">
-                    {r.status}
-                  </span>
-                  <span className="ml-auto text-[11px] text-ink-muted">
+                  <div className="min-w-0">
+                    <div className="text-[15px] font-medium truncate">
+                      {r.name}
+                    </div>
+                    <div className="mt-0.5 flex items-center gap-2 text-[12px] text-ink-muted">
+                      <span className="mono truncate">{r.cronExpr}</span>
+                      <span>·</span>
+                      <span className="truncate">{humanCron(r.cronExpr)}</span>
+                    </div>
+                  </div>
+                  <div className="text-[12px] text-ink-muted truncate">
                     next {formatRel(r.nextRunAt)}
-                  </span>
-                </div>
-                <div className="text-[15px] font-medium leading-snug mt-1">
-                  {r.name}
-                </div>
-                <div className="text-[12px] text-ink-muted mt-0.5">
-                  {humanCron(r.cronExpr)}
-                </div>
-                <div className="text-[11px] text-ink-muted mt-0.5 mono truncate">
-                  {r.cronExpr}
-                </div>
-                <div className="flex gap-1.5 mt-2">
-                  <button
-                    onClick={() => runNow(r)}
-                    className="h-8 px-2.5 rounded-[6px] border border-line text-[12px] inline-flex items-center gap-1 hover:bg-paper"
-                  >
-                    <Play className="w-3 h-3" />
-                    Run now
-                  </button>
-                  <button
-                    onClick={() => togglePause(r)}
-                    className="h-8 px-2.5 rounded-[6px] border border-line text-[12px] inline-flex items-center gap-1 hover:bg-paper"
-                  >
-                    {r.status === "active" ? (
-                      <>
-                        <Pause className="w-3 h-3" />
-                        Pause
-                      </>
-                    ) : (
-                      <>
-                        <Play className="w-3 h-3" />
-                        Resume
-                      </>
-                    )}
-                  </button>
-                  <button
-                    onClick={() => setEditing(r)}
-                    className="ml-auto h-8 w-8 rounded-[6px] border border-line flex items-center justify-center text-ink-soft hover:bg-paper"
-                    title="Edit"
-                  >
-                    <Pencil className="w-3.5 h-3.5" />
-                  </button>
-                  <button
-                    onClick={() => remove(r)}
-                    className="h-8 w-8 rounded-[6px] border border-line flex items-center justify-center text-danger hover:bg-danger-wash"
-                    title="Delete"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
+                  </div>
+                  <div className="flex items-center gap-1.5 justify-end">
+                    <button
+                      onClick={() => runNow(r)}
+                      className="h-8 px-2.5 rounded-[6px] border border-line text-[12px] inline-flex items-center gap-1 hover:bg-canvas"
+                    >
+                      <Play className="w-3 h-3" />
+                      Run now
+                    </button>
+                    <button
+                      onClick={() => togglePause(r)}
+                      className="h-8 px-2.5 rounded-[6px] border border-line text-[12px] inline-flex items-center gap-1 hover:bg-canvas"
+                    >
+                      {r.status === "active" ? (
+                        <>
+                          <Pause className="w-3 h-3" />
+                          Pause
+                        </>
+                      ) : (
+                        <>
+                          <Play className="w-3 h-3" />
+                          Resume
+                        </>
+                      )}
+                    </button>
+                    <button
+                      onClick={() => setEditing(r)}
+                      className="h-8 w-8 rounded-[6px] border border-line flex items-center justify-center text-ink-soft hover:bg-canvas"
+                      title="Edit"
+                    >
+                      <Pencil className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      onClick={() => remove(r)}
+                      className="h-8 w-8 rounded-[6px] border border-line flex items-center justify-center text-danger hover:bg-danger-wash"
+                      title="Delete"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
                 </div>
               </li>
             ))}
           </ul>
         )}
         {err && (
-          <div className="text-[13px] text-danger bg-danger-wash rounded-[8px] px-3 py-2 border border-danger/30">
+          <div className="mx-4 md:mx-6 my-3 text-[13px] text-danger bg-danger-wash rounded-[8px] px-3 py-2 border border-danger/30">
             {err}
           </div>
         )}

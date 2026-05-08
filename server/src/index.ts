@@ -3,6 +3,8 @@ import { createLogger } from "./lib/logger.js";
 import { openDb } from "./db/index.js";
 import { loadOrCreateJwtSecret } from "./auth/index.js";
 import { buildApp, defaultWebDist } from "./transport/app.js";
+import { SessionStore } from "./sessions/store.js";
+import { backfillSessionTitles } from "./sessions/backfill-titles.js";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -48,6 +50,21 @@ async function main() {
   };
   process.on("SIGINT", () => void shutdown("SIGINT"));
   process.on("SIGTERM", () => void shutdown("SIGTERM"));
+
+  // One-shot title backfill. See server/src/sessions/backfill-titles.ts —
+  // retitles historical sessions whose current title is still a placeholder
+  // using their first persisted user_message. Synchronous; fast because it
+  // only reads text.
+  try {
+    const backfillResult = backfillSessionTitles({
+      sessions: new SessionStore(db),
+    });
+    log.info(
+      `backfilled titles: ${backfillResult.retitled}/${backfillResult.scanned} sessions retitled`,
+    );
+  } catch (err) {
+    log.error({ err }, "session title backfill failed");
+  }
 
   try {
     await app.listen({ host: config.host, port: config.port });
