@@ -9,6 +9,7 @@ import {
   loadOrCreateJwtSecret,
   UserStore,
 } from "../src/auth/index.js";
+import { SlidingWindowLimiter } from "../src/auth/rate-limit.js";
 import { tempConfig } from "./helpers.js";
 
 interface Ctx {
@@ -379,5 +380,153 @@ describe("auth routes", () => {
       });
       expect(newLogin.statusCode).toBe(200);
     });
+  });
+
+  describe("rate limiting", () => {
+    it("429s the 6th failed login attempt from the same IP with a Retry-After header", async () => {
+      // Five wrong-password attempts are allowed through (each 401).
+      for (let i = 0; i < 5; i++) {
+        const res = await ctx.app.inject({
+          method: "POST",
+          url: "/api/auth/login",
+          payload: { username: ctx.username, password: "wrong-one" },
+        });
+        expect(res.statusCode).toBe(401);
+      }
+      // Sixth attempt trips the limiter — even a correct password gets
+      // rejected at the gate before we ever hash.
+      const blocked = await ctx.app.inject({
+        method: "POST",
+        url: "/api/auth/login",
+        payload: { username: ctx.username, password: ctx.password },
+      });
+      expect(blocked.statusCode).toBe(429);
+      expect(blocked.json().error).toBe("rate_limited");
+      expect(typeof blocked.json().retryAfterSec).toBe("number");
+      expect(blocked.headers["retry-after"]).toBeDefined();
+    });
+
+    it("resets the login counter for an IP after a successful login", async () => {
+      // Four failures — still under the cap of 5.
+      for (let i = 0; i < 4; i++) {
+        const res = await ctx.app.inject({
+          method: "POST",
+          url: "/api/auth/login",
+          payload: { username: ctx.username, password: "wrong-one" },
+        });
+        expect(res.statusCode).toBe(401);
+      }
+      // Valid login clears the accumulated failure count.
+      const ok = await ctx.app.inject({
+        method: "POST",
+        url: "/api/auth/login",
+        payload: { username: ctx.username, password: ctx.password },
+      });
+      expect(ok.statusCode).toBe(200);
+      // Fresh burst of five wrongs should all 401, not 429 — counter was
+      // reset by the successful login.
+      for (let i = 0; i < 5; i++) {
+        const res = await ctx.app.inject({
+          method: "POST",
+          url: "/api/auth/login",
+          payload: { username: ctx.username, password: "wrong-one" },
+        });
+        expect(res.statusCode).toBe(401);
+      }
+    });
+
+    it("429s the 11th failed TOTP attempt on the same challenge", async () => {
+      const login = await ctx.app.inject({
+        method: "POST",
+        url: "/api/auth/login",
+        payload: { username: ctx.username, password: ctx.password },
+      });
+      const challengeId = login.json().challengeId as string;
+      // 10 bad codes allowed through.
+      for (let i = 0; i < 10; i++) {
+        const res = await ctx.app.inject({
+          method: "POST",
+          url: "/api/auth/verify-totp",
+          payload: { challengeId, code: "000000" },
+        });
+        expect(res.statusCode).toBe(401);
+        expect(res.json().error).toBe("invalid_totp");
+      }
+      // 11th attempt — even a legitimate code would be rejected here; use
+      // a bad one to keep the test deterministic against clock skew.
+      const blocked = await ctx.app.inject({
+        method: "POST",
+        url: "/api/auth/verify-totp",
+        payload: { challengeId, code: "000000" },
+      });
+      expect(blocked.statusCode).toBe(429);
+      expect(blocked.json().error).toBe("rate_limited");
+      expect(blocked.headers["retry-after"]).toBeDefined();
+    });
+
+    it("keeps TOTP limits independent per challengeId", async () => {
+      // Challenge A — grind it up to the limit.
+      const loginA = await ctx.app.inject({
+        method: "POST",
+        url: "/api/auth/login",
+        payload: { username: ctx.username, password: ctx.password },
+      });
+      const challengeA = loginA.json().challengeId as string;
+      for (let i = 0; i < 10; i++) {
+        await ctx.app.inject({
+          method: "POST",
+          url: "/api/auth/verify-totp",
+          payload: { challengeId: challengeA, code: "000000" },
+        });
+      }
+      const blockedA = await ctx.app.inject({
+        method: "POST",
+        url: "/api/auth/verify-totp",
+        payload: { challengeId: challengeA, code: "000000" },
+      });
+      expect(blockedA.statusCode).toBe(429);
+
+      // Challenge B (fresh login) — should not inherit A's counter.
+      const loginB = await ctx.app.inject({
+        method: "POST",
+        url: "/api/auth/login",
+        payload: { username: ctx.username, password: ctx.password },
+      });
+      const challengeB = loginB.json().challengeId as string;
+      const freshB = await ctx.app.inject({
+        method: "POST",
+        url: "/api/auth/verify-totp",
+        payload: { challengeId: challengeB, code: "000000" },
+      });
+      // First attempt against B is a normal 401, not a 429.
+      expect(freshB.statusCode).toBe(401);
+      expect(freshB.json().error).toBe("invalid_totp");
+    });
+  });
+});
+
+describe("SlidingWindowLimiter", () => {
+  it("resets attempts after the window elapses (fake clock)", () => {
+    let now = 1_000_000;
+    const limiter = new SlidingWindowLimiter({
+      windowMs: 60_000,
+      max: 3,
+      clock: () => now,
+    });
+
+    // Burn the three allowed failures at t=0.
+    limiter.recordFailure("ip-a");
+    limiter.recordFailure("ip-a");
+    limiter.recordFailure("ip-a");
+    expect(limiter.check("ip-a").allowed).toBe(false);
+
+    // Nudge past the window — old stamps age out, the key is live again.
+    now += 61_000;
+    const after = limiter.check("ip-a");
+    expect(after.allowed).toBe(true);
+    expect(after.current).toBe(0);
+
+    // A different key was never touched, independent from "ip-a".
+    expect(limiter.check("ip-b").allowed).toBe(true);
   });
 });

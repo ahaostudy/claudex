@@ -808,6 +808,10 @@ function NewSessionSheet({
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
+  // When the target project is untrusted we pause here instead of creating
+  // the session. The card below captures the user's explicit confirmation
+  // before we flip the trust bit and proceed. Null = no pending trust step.
+  const [trustPending, setTrustPending] = useState<Project | null>(null);
 
   useEffect(() => {
     api.listProjects().then((r) => {
@@ -816,41 +820,86 @@ function NewSessionSheet({
     });
   }, []);
 
-  async function create() {
+  /**
+   * Resolve the project the user wants to spawn under — creating a new row
+   * if the NEW_PROJECT radio is selected, or looking up the existing one.
+   * Returns null on validation failure (err already set). Keeping this
+   * separate from the trust step lets us funnel both "brand new project"
+   * and "already-added but untrusted project" through the same confirm card.
+   */
+  async function resolveTargetProject(): Promise<Project | null> {
+    if (selected === NEW_PROJECT) {
+      const trimmedPath = projectPath.trim();
+      if (!trimmedPath) {
+        setErr("Pick an absolute path for the new project.");
+        return null;
+      }
+      const trimmedName =
+        projectName.trim() ||
+        trimmedPath.split("/").filter(Boolean).pop() ||
+        "project";
+      const p = await api.createProject({
+        name: trimmedName,
+        path: trimmedPath,
+      });
+      // Surface the new project in the in-memory list so subsequent renders
+      // of this sheet (if the user re-opens after cancel) show it.
+      setProjects((prev) => [p.project, ...prev]);
+      return p.project;
+    }
+    return projects.find((p) => p.id === selected) ?? null;
+  }
+
+  async function spawnSession(projectId: string) {
+    const res = await api.createSession({
+      projectId,
+      title: title || "Untitled",
+      model,
+      mode,
+      worktree: false,
+    });
+    onCreated(res.session.id);
+  }
+
+  async function onPrimary() {
     setBusy(true);
     setErr(null);
     try {
-      let projectId: string;
-      if (selected === NEW_PROJECT) {
-        const trimmedPath = projectPath.trim();
-        if (!trimmedPath) {
-          setErr("Pick an absolute path for the new project.");
-          setBusy(false);
-          return;
-        }
-        const trimmedName =
-          projectName.trim() ||
-          trimmedPath.split("/").filter(Boolean).pop() ||
-          "project";
-        const p = await api.createProject({
-          name: trimmedName,
-          path: trimmedPath,
-        });
-        projectId = p.project.id;
-        setProjects((prev) => [p.project, ...prev]);
-      } else {
-        projectId = selected;
+      const project = await resolveTargetProject();
+      if (!project) {
+        setBusy(false);
+        return;
       }
-      const res = await api.createSession({
-        projectId,
-        title: title || "Untitled",
-        model,
-        mode,
-        worktree: false,
-      });
-      onCreated(res.session.id);
+      if (!project.trusted) {
+        // Pause on the trust card — don't spawn until the user confirms.
+        setTrustPending(project);
+        setBusy(false);
+        return;
+      }
+      await spawnSession(project.id);
     } catch (e: any) {
       setErr(e?.code ?? e?.message ?? "create failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function confirmTrustAndCreate() {
+    if (!trustPending) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      const res = await api.trustProject(trustPending.id, true);
+      // Propagate the new trust state into the in-memory list so the card
+      // doesn't reappear if the user creates a second session in this
+      // sheet's lifetime.
+      setProjects((prev) =>
+        prev.map((p) => (p.id === res.project.id ? res.project : p)),
+      );
+      setTrustPending(null);
+      await spawnSession(res.project.id);
+    } catch (e: any) {
+      setErr(e?.code ?? e?.message ?? "trust failed");
     } finally {
       setBusy(false);
     }
@@ -1033,13 +1082,30 @@ function NewSessionSheet({
         )}
 
         <button
-          onClick={create}
+          onClick={onPrimary}
           disabled={busy}
           className="mt-4 w-full h-12 rounded-[8px] bg-ink text-canvas font-medium disabled:opacity-50"
         >
           {busy ? "Creating…" : "Start session"}
         </button>
       </div>
+      {trustPending && (
+        <TrustConfirmCard
+          project={trustPending}
+          busy={busy}
+          err={err}
+          onCancel={() => {
+            // Dismiss the trust card without creating the session. The
+            // project stays in the list (we don't roll back `createProject`
+            // on cancel — having an untrusted row lying around is fine; the
+            // user can either confirm next time or delete it from
+            // Settings → Security).
+            setTrustPending(null);
+            setErr(null);
+          }}
+          onConfirm={confirmTrustAndCreate}
+        />
+      )}
       {pickerOpen && (
         <FolderPicker
           initialPath={projectPath.trim() || undefined}
@@ -1050,6 +1116,69 @@ function NewSessionSheet({
           onClose={() => setPickerOpen(false)}
         />
       )}
+    </div>
+  );
+}
+
+// Confirm card shown when the selected project is untrusted. claudex's rule:
+// no session spawns under a project until the user has explicitly okayed
+// claude touching files in that folder. The card is nested inside the
+// NewSessionSheet overlay (z-50 on top of z-40) so dismissing it returns
+// the user to the sheet with their model/mode selection intact.
+function TrustConfirmCard({
+  project,
+  busy,
+  err,
+  onCancel,
+  onConfirm,
+}: {
+  project: Project;
+  busy: boolean;
+  err: string | null;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 bg-ink/40 flex items-end sm:items-center justify-center">
+      <div className="w-full max-w-md bg-canvas border-t sm:border border-line rounded-t-[20px] sm:rounded-[14px] shadow-lift p-5">
+        <div className="caps text-ink-muted">Security</div>
+        <h2 className="display text-[1.25rem] leading-tight mt-0.5">
+          Trust this folder?
+        </h2>
+        <div className="mt-3 rounded-[8px] border border-line bg-paper px-3 py-2">
+          <div className="text-[13px] font-medium truncate">{project.name}</div>
+          <div className="mono text-[11px] text-ink-muted break-all">
+            {project.path}
+          </div>
+        </div>
+        <p className="mt-3 text-[13px] text-ink-muted leading-relaxed">
+          claudex will ask claude to run shell commands and edit files inside
+          this folder. Only trust folders you own.
+        </p>
+        {err && (
+          <div className="mt-3 text-[13px] text-danger bg-danger-wash rounded-[8px] px-3 py-2 border border-danger/30">
+            {err}
+          </div>
+        )}
+        <div className="mt-4 flex gap-2">
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={busy}
+            className="h-11 px-4 rounded-[8px] border border-line bg-paper text-[14px] disabled:opacity-50"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            disabled={busy}
+            className="flex-1 h-11 rounded-[8px] bg-ink text-canvas text-[14px] font-medium disabled:opacity-50"
+          >
+            {busy ? "Trusting…" : "Trust and continue"}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

@@ -130,6 +130,19 @@ export async function bootstrapAuthedApp(
 }
 
 /**
+ * Flip `projects.trusted = 1` directly via the test DB. New projects
+ * created through `POST /api/projects` arrive untrusted by default (see
+ * migration 11 / the trust-gate flow); most suites want to immediately
+ * create a session under the project they just added, so they call this
+ * helper to bypass the confirm step. Idempotent.
+ */
+export function trustProject(dbh: ClaudexDb, projectId: string): void {
+  dbh.db
+    .prepare("UPDATE projects SET trusted = 1 WHERE id = ?")
+    .run(projectId);
+}
+
+/**
  * Create a throwaway git repo with a single initial commit so we can create
  * worktrees against it. Returns the absolute path + a cleanup function that
  * rms the dir.

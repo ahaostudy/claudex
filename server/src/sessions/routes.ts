@@ -50,6 +50,17 @@ const AddProject = z.object({
   path: z.string().min(1),
 });
 
+// Body for `POST /api/sessions/:id/edit-last-user-message` — typo-recovery
+// edit of the session's most recent user_message. Kept local to routes.ts
+// because this is a web-only flow (no CLI equivalent, no cross-consumer
+// contract) and defining it next to the handler keeps the two in lockstep.
+const EditLastUserMessage = z.object({
+  // Empty string is valid (the user might want to clear the message before
+  // resending); trailing-only whitespace is fine too. The server won't
+  // trim — transcripts preserve user intent verbatim.
+  text: z.string(),
+});
+
 export async function registerSessionRoutes(
   app: FastifyInstance,
   deps: SessionsRoutesDeps,
@@ -84,9 +95,47 @@ export async function registerSessionRoutes(
       const project = projects.create({
         name: parsed.data.name,
         path: abs,
-        trusted: true,
+        // Default untrusted — the caller must go through
+        // POST /api/projects/:id/trust (or its UI confirm card) before we'll
+        // let a session spawn under this project.
       });
       return reply.send({ project });
+    },
+  );
+
+  // POST /api/projects/:id/trust
+  //
+  // Flip the trust bit on a project. Body `{ trusted: boolean }`. Idempotent.
+  // Gate lives in POST /api/sessions (see below). Trust flips are
+  // security-relevant — the user is deciding whether claude can touch a
+  // folder — so we audit both directions.
+  app.post(
+    "/api/projects/:id/trust",
+    { preHandler: app.requireAuth as any },
+    async (req, reply) => {
+      const { id } = req.params as { id: string };
+      const parsed = z
+        .object({ trusted: z.boolean() })
+        .safeParse(req.body);
+      if (!parsed.success) return reply.code(400).send({ error: "bad_request" });
+      const existing = projects.findById(id);
+      if (!existing) return reply.code(404).send({ error: "not_found" });
+      projects.setTrusted(id, parsed.data.trusted);
+      const updated = projects.findById(id)!;
+      deps.audit.append({
+        userId: req.userId ?? null,
+        event: parsed.data.trusted ? "project_trusted" : "project_untrusted",
+        target: id,
+        detail: `Project ${updated.name} ${
+          parsed.data.trusted ? "trusted" : "untrusted"
+        }`,
+        ip: (req as { ip?: string }).ip ?? null,
+        userAgent:
+          typeof req.headers["user-agent"] === "string"
+            ? req.headers["user-agent"]
+            : null,
+      });
+      return reply.send({ project: updated });
     },
   );
 
@@ -280,6 +329,15 @@ export async function registerSessionRoutes(
       if (!parsed.success) return reply.code(400).send({ error: "bad_request" });
       const project = projects.findById(parsed.data.projectId);
       if (!project) return reply.code(400).send({ error: "project_not_found" });
+      // Trust gate. The web NewSessionSheet flips the bit via
+      // POST /api/projects/:id/trust before hitting this endpoint; a direct
+      // API caller that skipped the confirm step gets 409 with the projectId
+      // echoed so they can route to the trust flow.
+      if (!project.trusted) {
+        return reply
+          .code(409)
+          .send({ error: "project_not_trusted", projectId: project.id });
+      }
 
       const title = parsed.data.title ?? "Untitled";
       let worktreePath: string | null = null;
@@ -546,6 +604,99 @@ export async function registerSessionRoutes(
         session: updated,
         ...(warnings.length > 0 ? { warnings } : {}),
       });
+    },
+  );
+
+  // POST /api/sessions/:id/edit-last-user-message
+  //
+  // Typo recovery: rewrite the text of the session's most recent
+  // `user_message`, drop every event that followed it (assistant turns,
+  // tool calls, permission prompts — all now obsolete), and re-run the SDK
+  // so a fresh assistant reply takes their place. Only valid while the
+  // session is `idle` — a running turn would race with the truncation.
+  //
+  // Error codes:
+  //   401 (auth gate) — handled by `requireAuth` preHandler
+  //   404 not_found        — session row doesn't exist
+  //   409 archived         — archived sessions are read-only
+  //   409 not_idle         — session is running / awaiting / error
+  //   400 no_user_message  — session has no user_message to edit
+  //   400 has_attachments  — the message carried attachments; we don't have
+  //                          a re-link/delete story for those yet
+  //   400 bad_request      — body schema mismatch (missing `text`)
+  //
+  // Caveat (also in docs/FEATURES.md): CLI-imported sessions keep their
+  // original JSONL at `~/.claude/projects/<slug>/<uuid>.jsonl`; this route
+  // rewrites our own event log but NOT that file. The Agent SDK's in-memory
+  // conversation history also still contains the pre-edit message + any
+  // assistant reply, and will replay both when formulating the next turn.
+  // We ship it anyway: the web UX win (fix a typo without resending)
+  // outweighs the CLI-side divergence.
+  app.post(
+    "/api/sessions/:id/edit-last-user-message",
+    { preHandler: app.requireAuth as any },
+    async (req, reply) => {
+      const { id } = req.params as { id: string };
+      const parsed = EditLastUserMessage.safeParse(req.body);
+      if (!parsed.success) return reply.code(400).send({ error: "bad_request" });
+
+      const existing = sessions.findById(id);
+      if (!existing) return reply.code(404).send({ error: "not_found" });
+      if (existing.status === "archived") {
+        return reply.code(409).send({ error: "archived" });
+      }
+      if (existing.status !== "idle") {
+        return reply.code(409).send({ error: "not_idle" });
+      }
+
+      const lastUser = sessions.findLastEventByKind(id, "user_message");
+      if (!lastUser) {
+        return reply.code(400).send({ error: "no_user_message" });
+      }
+
+      // Attachments aren't editable yet — a resend would need to either
+      // re-link the existing attachment rows onto a new user_message seq
+      // or drop them. Refuse cleanly so the UI can show a tooltip rather
+      // than silently dropping the attached files.
+      const prevPayload = lastUser.payload as Record<string, unknown>;
+      const prevAttachments = prevPayload.attachments;
+      if (Array.isArray(prevAttachments) && prevAttachments.length > 0) {
+        return reply.code(400).send({ error: "has_attachments" });
+      }
+
+      const newText = parsed.data.text;
+
+      // 1. Drop every event after the user_message being edited — those
+      //    responses are no longer reachable from the transcript.
+      sessions.deleteEventsAboveSeq(id, lastUser.seq);
+
+      // 2. Rewrite the user_message payload. Preserve every pre-existing
+      //    key so future fields aren't accidentally wiped, then overwrite
+      //    `text` and stamp `editedAt`.
+      const nextPayload: Record<string, unknown> = {
+        ...prevPayload,
+        text: newText,
+        editedAt: new Date().toISOString(),
+      };
+      sessions.updateEventPayload(id, lastUser.seq, nextPayload);
+
+      // 3. Bump last_message_at so Home ordering reflects the edit.
+      sessions.touchLastMessage(id);
+
+      // 4. Kick the runner. The manager flips status→running, broadcasts a
+      //    refresh_transcript frame, and pushes the edited text into the
+      //    SDK. We don't await the runner's reply — this endpoint returns
+      //    as soon as the edit is persisted and the run has been queued.
+      try {
+        await deps.manager.rerunFromEditedMessage(id, newText);
+      } catch (err) {
+        req.log.warn(
+          { err, sessionId: id },
+          "rerunFromEditedMessage failed after edit; transcript edited but no assistant turn queued",
+        );
+      }
+
+      return reply.send({ ok: true, seq: lastUser.seq });
     },
   );
 

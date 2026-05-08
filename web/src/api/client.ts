@@ -98,6 +98,19 @@ export const api = {
   deleteProject(id: string) {
     return request<{ ok: true }>(`/api/projects/${id}`, { method: "DELETE" });
   },
+  /**
+   * Flip the trust bit on a project. `POST /api/sessions` refuses to spawn
+   * a session under a project with `trusted === false` and returns
+   * `409 project_not_trusted`; the NewSessionSheet's "Trust this folder?"
+   * confirm card calls this with `trusted: true` just before creating the
+   * session. Settings → Security → Trusted projects calls it both ways.
+   */
+  trustProject(id: string, trusted: boolean) {
+    return request<{ project: Project }>(`/api/projects/${id}/trust`, {
+      method: "POST",
+      json: { trusted },
+    });
+  },
   browseHome() {
     return request<{ path: string }>("/api/browse/home");
   },
@@ -174,6 +187,25 @@ export const api = {
     return request<{ session: Session; warnings?: string[] }>(
       `/api/sessions/${id}`,
       { method: "PATCH", json: body },
+    );
+  },
+  /**
+   * Rewrite the session's most recent user_message and re-run the assistant
+   * turn. Server-side this truncates every event after the edited message,
+   * updates its payload (with an `editedAt` stamp), broadcasts a
+   * `refresh_transcript` frame so other tabs catch up, and pushes the new
+   * text into the SDK's input queue. See the "Typo recovery" row in
+   * docs/FEATURES.md for the known CLI-parity caveat.
+   *
+   * Refused by the server with 409 `not_idle` when a turn is in flight,
+   * 400 `no_user_message` when the session has no user turn yet, and 400
+   * `has_attachments` when the message carried file attachments (not yet
+   * editable).
+   */
+  editLastUserMessage(id: string, text: string) {
+    return request<{ ok: true; seq: number }>(
+      `/api/sessions/${id}/edit-last-user-message`,
+      { method: "POST", json: { text } },
     );
   },
   listGrants(sessionId: string) {
@@ -349,4 +381,52 @@ export const api = {
     const q = qs.toString();
     return request<AuditListResponse>(`/api/audit${q ? `?${q}` : ""}`);
   },
+  /**
+   * List every claudex-managed `claude/*` git worktree across the user's
+   * projects, each tagged `linked` (a session row still owns it) or
+   * `orphaned` (nothing references it — safe to prune). Powers the Settings
+   * "Worktrees" advanced section.
+   */
+  listWorktrees() {
+    return request<{ worktrees: WorktreeSummary[] }>("/api/worktrees");
+  },
+  /**
+   * Bulk-prune one or more orphan worktrees. Each entry carries enough to
+   * anchor the prune in a specific project without trusting a free-form
+   * path from the client. The server refuses to touch any branch that
+   * doesn't start with `claude/`, so you can safely pass a mixed batch.
+   */
+  pruneWorktrees(
+    items: Array<{ projectId: string; branch: string; path: string }>,
+  ) {
+    return request<{
+      results: Array<{
+        projectId: string;
+        branch: string;
+        path: string;
+        removed: boolean;
+        error?: string;
+      }>;
+    }>("/api/worktrees/prune", {
+      method: "POST",
+      json: { worktrees: items },
+    });
+  },
 };
+
+/**
+ * One entry returned by `listWorktrees`. Matches the server's `Worktree`
+ * struct in `server/src/sessions/worktree-manage.ts`. Declared here rather
+ * than `@claudex/shared` because it's a pure diagnostic surface — no WS
+ * frames or persisted schema.
+ */
+export interface WorktreeSummary {
+  branch: string;
+  path: string;
+  sha: string | null;
+  projectId: string;
+  projectName: string;
+  projectPath: string;
+  status: "linked" | "orphaned";
+  lastModified: string | null;
+}

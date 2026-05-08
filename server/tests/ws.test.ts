@@ -129,6 +129,10 @@ async function harness(): Promise<WsHarness> {
       payload: { name: "demo", path: tmpDir },
     })
   ).json().project;
+  // Projects created via HTTP land untrusted — flip the bit directly so the
+  // subsequent POST /api/sessions doesn't trip the trust gate. Mirrors the
+  // web NewSessionSheet's confirm-card step.
+  dbh.db.prepare("UPDATE projects SET trusted = 1 WHERE id = ?").run(proj.id);
   const session = (
     await app.inject({
       method: "POST",

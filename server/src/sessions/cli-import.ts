@@ -70,6 +70,12 @@ export async function importCliSession(
     name: path.basename(input.cwd) || input.cwd,
     path: input.cwd,
   });
+  // CLI-adopted projects are implicitly trusted — the user is already
+  // operating in this cwd through the CLI. Flip the bit unconditionally so
+  // that a pre-existing untrusted row (e.g. added manually via the web UI
+  // but never confirmed) gets promoted on adoption, and so follow-up turns
+  // don't hit the `project_not_trusted` gate in POST /api/sessions.
+  deps.projects.setTrusted(project.id, true);
 
   const session = deps.sessions.create({
     title: input.title,

@@ -37,6 +37,7 @@ async function addProject(ctx: {
   app: FastifyInstance;
   cookie: string;
   tmpDir: string;
+  dbh: import("../src/db/index.js").ClaudexDb;
 }) {
   const res = await ctx.app.inject({
     method: "POST",
@@ -44,7 +45,13 @@ async function addProject(ctx: {
     headers: { cookie: ctx.cookie },
     payload: { name: "demo", path: ctx.tmpDir },
   });
-  return res.json().project as { id: string; path: string };
+  const project = res.json().project as { id: string; path: string };
+  // Trust immediately — these tests are about side-chat semantics, not the
+  // trust gate. Without this the addSession helper trips 409.
+  ctx.dbh.db
+    .prepare("UPDATE projects SET trusted = 1 WHERE id = ?")
+    .run(project.id);
+  return project;
 }
 
 async function addSession(

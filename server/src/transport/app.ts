@@ -20,6 +20,7 @@ import { registerUserEnvRoutes } from "../sessions/user-env.js";
 import { registerCliRoutes } from "../sessions/cli-routes.js";
 import { registerUsageRoutes } from "../sessions/usage-routes.js";
 import { registerSessionExportRoutes } from "../sessions/export-routes.js";
+import { registerWorktreeRoutes } from "../sessions/worktree-routes.js";
 import { registerSearchRoutes } from "../search/routes.js";
 import { AuditStore } from "../audit/store.js";
 import { registerAuditRoutes } from "../audit/routes.js";
@@ -209,6 +210,7 @@ export async function buildApp(
   });
   await registerUsageRoutes(app, { db: deps.db });
   await registerSessionExportRoutes(app, { db: deps.db });
+  await registerWorktreeRoutes(app, { db: deps.db });
   await registerSearchRoutes(app, { db: deps.db });
   await registerAuditRoutes(app, { db: deps.db, audit });
 

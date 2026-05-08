@@ -27,7 +27,11 @@ async function createProject(ctx: Ctx, name = "demo"): Promise<string> {
     headers: { cookie: ctx.cookie },
     payload: { name, path: ctx.tmpDir },
   });
-  return res.json().project.id as string;
+  const id = res.json().project.id as string;
+  // Flip trust so the subsequent POST /api/sessions doesn't hit the
+  // project_not_trusted gate. Usage routes are not about the trust flow.
+  ctx.dbh.db.prepare("UPDATE projects SET trusted = 1 WHERE id = ?").run(id);
+  return id;
 }
 
 async function createSession(

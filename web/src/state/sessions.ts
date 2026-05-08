@@ -25,6 +25,16 @@ export type UIPiece =
       // the matching broadcast, at which point we flip the flag rather
       // than push a second copy.
       serverAcked?: boolean;
+      // Shallow list of attachment metadata from the original user_message
+      // payload. Populated from persisted events only — optimistic echoes
+      // skip it. Drives the "edit disabled because attachments" hint in
+      // the Chat bubble; payload stays authoritative server-side.
+      attachments?: Array<{
+        id: string;
+        filename: string;
+        mime: string;
+        size: number;
+      }>;
     }
   | { kind: "assistant_text"; id: string; text: string }
   | {
@@ -137,6 +147,16 @@ function eventToPiece(ev: SessionEvent): UIPiece | null {
         text: String(p.text ?? ""),
         at: ev.createdAt,
         serverAcked: true,
+        // Pass attachments straight through from the persisted payload.
+        // Undefined when the message was plain text (the common case).
+        attachments: Array.isArray(p.attachments)
+          ? (p.attachments as Array<{
+              id: string;
+              filename: string;
+              mime: string;
+              size: number;
+            }>)
+          : undefined,
       };
     case "assistant_text":
       return {

@@ -32,6 +32,7 @@ async function createSessionFixture(ctx: {
   app: import("fastify").FastifyInstance;
   cookie: string;
   tmpDir: string;
+  dbh: import("../src/db/index.js").ClaudexDb;
 }) {
   // Project + session — the simplest fixture that uploads hang off of.
   const projRes = await ctx.app.inject({
@@ -41,6 +42,10 @@ async function createSessionFixture(ctx: {
     payload: { name: "demo", path: ctx.tmpDir },
   });
   const project = projRes.json().project as { id: string };
+  // Trust: these tests are about the upload surface, not the trust gate.
+  ctx.dbh.db
+    .prepare("UPDATE projects SET trusted = 1 WHERE id = ?")
+    .run(project.id);
   const sesRes = await ctx.app.inject({
     method: "POST",
     url: "/api/sessions",

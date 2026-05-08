@@ -157,6 +157,52 @@ export class SearchStore {
     }
   }
 
+  /**
+   * Delete every `session_search` row for a session with
+   * `event_seq > cutoffSeq`. Used by SessionStore.deleteEventsAboveSeq when
+   * the edit-last-user-message flow truncates the transcript — dropping
+   * rows from `session_events` without also dropping their FTS entries
+   * would leave global search returning snippets for text that no longer
+   * exists.
+   */
+  deleteEventsAbove(sessionId: string, cutoffSeq: number): void {
+    try {
+      this.db
+        .prepare(
+          `DELETE FROM session_search
+           WHERE session_id = ? AND event_seq > ?`,
+        )
+        .run(sessionId, cutoffSeq);
+    } catch {
+      /* best-effort */
+    }
+  }
+
+  /**
+   * Reindex a single event row — delete the existing FTS row (if any) and
+   * reinsert it using the new payload. Used by SessionStore.updateEventPayload
+   * when a persisted user_message is rewritten so the search snippet
+   * reflects the new text rather than the pre-edit one.
+   */
+  reindexMessage(input: {
+    sessionId: string;
+    seq: number;
+    kind: string;
+    payload: Record<string, unknown> | null | undefined;
+  }): void {
+    try {
+      this.db
+        .prepare(
+          `DELETE FROM session_search
+           WHERE session_id = ? AND event_seq = ?`,
+        )
+        .run(input.sessionId, input.seq);
+    } catch {
+      /* best-effort */
+    }
+    this.indexMessage(input);
+  }
+
   // ---- reads ------------------------------------------------------------
 
   /**

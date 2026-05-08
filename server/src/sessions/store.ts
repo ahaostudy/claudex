@@ -460,6 +460,94 @@ export class SessionStore {
       .prepare("UPDATE sessions SET cli_jsonl_seq = ? WHERE id = ?")
       .run(seq, id);
   }
+
+  /**
+   * Return the event with the largest `seq` for this session matching
+   * `kind`, or null when no such event exists. Used by the
+   * edit-last-user-message flow to find the most recent user_message before
+   * mutating it.
+   */
+  findLastEventByKind(
+    sessionId: string,
+    kind: EventKind,
+  ): SessionEvent | null {
+    const row = this.db
+      .prepare(
+        `SELECT id, session_id, kind, seq, created_at, payload
+         FROM session_events
+         WHERE session_id = ? AND kind = ?
+         ORDER BY seq DESC LIMIT 1`,
+      )
+      .get(sessionId, kind) as
+      | {
+          id: string;
+          session_id: string;
+          kind: string;
+          seq: number;
+          created_at: string;
+          payload: string;
+        }
+      | undefined;
+    return row ? rowToEvent(row) : null;
+  }
+
+  /**
+   * Delete every event with `seq > cutoffSeq` for this session. Used by
+   * the edit-last-user-message flow to drop the now-obsolete assistant
+   * turns / tool calls that followed the user_message being rewritten.
+   * The user_message row at `cutoffSeq` itself is preserved.
+   *
+   * FTS rows for the deleted events are cleared in the same pass —
+   * otherwise global search would keep returning snippets for text the
+   * user has already edited out. Best-effort, mirroring appendEvent's
+   * index semantics. Returns the number of rows deleted.
+   */
+  deleteEventsAboveSeq(sessionId: string, cutoffSeq: number): number {
+    // Clear FTS first so a SQL failure on the events delete doesn't leave
+    // orphaned search rows pointing at events we're about to drop.
+    this.search.deleteEventsAbove(sessionId, cutoffSeq);
+    const res = this.db
+      .prepare(
+        "DELETE FROM session_events WHERE session_id = ? AND seq > ?",
+      )
+      .run(sessionId, cutoffSeq);
+    return res.changes ?? 0;
+  }
+
+  /**
+   * Overwrite the JSON payload of a single event identified by
+   * (sessionId, seq). Used by the edit-last-user-message flow to rewrite
+   * user_message.text + stamp an editedAt marker. Returns false when no
+   * such event exists.
+   *
+   * Also refreshes the FTS row so the search index reflects the new text.
+   */
+  updateEventPayload(
+    sessionId: string,
+    seq: number,
+    payload: Record<string, unknown>,
+  ): boolean {
+    const res = this.db
+      .prepare(
+        "UPDATE session_events SET payload = ? WHERE session_id = ? AND seq = ?",
+      )
+      .run(JSON.stringify(payload), sessionId, seq);
+    if ((res.changes ?? 0) === 0) return false;
+    const row = this.db
+      .prepare(
+        "SELECT kind FROM session_events WHERE session_id = ? AND seq = ?",
+      )
+      .get(sessionId, seq) as { kind: string } | undefined;
+    if (row) {
+      this.search.reindexMessage({
+        sessionId,
+        seq,
+        kind: row.kind as EventKind,
+        payload,
+      });
+    }
+    return true;
+  }
 }
 
 function rowToEvent(r: {

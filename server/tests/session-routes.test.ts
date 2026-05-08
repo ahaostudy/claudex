@@ -1,6 +1,7 @@
 import { describe, it, expect, afterEach } from "vitest";
 import type { FastifyInstance } from "fastify";
-import { bootstrapAuthedApp } from "./helpers.js";
+import { bootstrapAuthedApp, trustProject } from "./helpers.js";
+import type { ClaudexDb } from "../src/db/index.js";
 import type {
   Runner,
   RunnerFactory,
@@ -160,6 +161,7 @@ describe("session HTTP routes", () => {
       app: FastifyInstance;
       cookie: string;
       tmpDir: string;
+      dbh: ClaudexDb;
     }) {
       const res = await ctx.app.inject({
         method: "POST",
@@ -167,7 +169,11 @@ describe("session HTTP routes", () => {
         headers: { cookie: ctx.cookie },
         payload: { name: "to-delete", path: ctx.tmpDir },
       });
-      return res.json().project as { id: string };
+      const project = res.json().project as { id: string };
+      // Trust so the "has_sessions" test can spawn a session under this
+      // project; every other DELETE test ignores trust.
+      trustProject(ctx.dbh, project.id);
+      return project;
     }
 
     it("requires auth", async () => {
@@ -244,7 +250,7 @@ describe("session HTTP routes", () => {
 
   describe("POST /api/sessions", () => {
     async function addProject(
-      ctx: { app: FastifyInstance; cookie: string; tmpDir: string },
+      ctx: { app: FastifyInstance; cookie: string; tmpDir: string; dbh: ClaudexDb },
     ) {
       const res = await ctx.app.inject({
         method: "POST",
@@ -252,7 +258,9 @@ describe("session HTTP routes", () => {
         headers: { cookie: ctx.cookie },
         payload: { name: "demo", path: ctx.tmpDir },
       });
-      return res.json().project;
+      const project = res.json().project;
+      trustProject(ctx.dbh, project.id);
+      return project;
     }
 
     it("creates a session under an existing project", async () => {
@@ -306,6 +314,187 @@ describe("session HTTP routes", () => {
       });
       expect(res.statusCode).toBe(400);
     });
+
+    // Trust gate: an untrusted project refuses to spawn sessions with
+    // 409 project_not_trusted; flipping the bit via the trust endpoint
+    // makes the next create succeed; untrusting puts the gate back.
+    // Mirrors the NewSessionSheet's "Trust this folder?" confirm step.
+    it("refuses to create a session when the project is untrusted (409)", async () => {
+      const ctx = await bootstrap();
+      disposers.push(ctx.cleanup);
+      const project = await ctx.app
+        .inject({
+          method: "POST",
+          url: "/api/projects",
+          headers: { cookie: ctx.cookie },
+          payload: { name: "untrusted", path: ctx.tmpDir },
+        })
+        .then((r) => r.json().project as { id: string; trusted: boolean });
+      expect(project.trusted).toBe(false);
+
+      const res = await ctx.app.inject({
+        method: "POST",
+        url: "/api/sessions",
+        headers: { cookie: ctx.cookie },
+        payload: {
+          projectId: project.id,
+          title: "nope",
+          model: "claude-opus-4-7",
+          mode: "default",
+          worktree: false,
+        },
+      });
+      expect(res.statusCode).toBe(409);
+      const body = res.json();
+      expect(body.error).toBe("project_not_trusted");
+      expect(body.projectId).toBe(project.id);
+    });
+
+    it("trust via endpoint → create succeeds; untrust → next create 409 again", async () => {
+      const ctx = await bootstrap();
+      disposers.push(ctx.cleanup);
+      const project = await ctx.app
+        .inject({
+          method: "POST",
+          url: "/api/projects",
+          headers: { cookie: ctx.cookie },
+          payload: { name: "tog", path: ctx.tmpDir },
+        })
+        .then((r) => r.json().project as { id: string });
+
+      const trustRes = await ctx.app.inject({
+        method: "POST",
+        url: `/api/projects/${project.id}/trust`,
+        headers: { cookie: ctx.cookie },
+        payload: { trusted: true },
+      });
+      expect(trustRes.statusCode).toBe(200);
+      expect(trustRes.json().project.trusted).toBe(true);
+
+      const ok = await ctx.app.inject({
+        method: "POST",
+        url: "/api/sessions",
+        headers: { cookie: ctx.cookie },
+        payload: {
+          projectId: project.id,
+          title: "after-trust",
+          model: "claude-opus-4-7",
+          mode: "default",
+          worktree: false,
+        },
+      });
+      expect(ok.statusCode).toBe(200);
+
+      const untrustRes = await ctx.app.inject({
+        method: "POST",
+        url: `/api/projects/${project.id}/trust`,
+        headers: { cookie: ctx.cookie },
+        payload: { trusted: false },
+      });
+      expect(untrustRes.statusCode).toBe(200);
+      expect(untrustRes.json().project.trusted).toBe(false);
+
+      const blocked = await ctx.app.inject({
+        method: "POST",
+        url: "/api/sessions",
+        headers: { cookie: ctx.cookie },
+        payload: {
+          projectId: project.id,
+          title: "after-untrust",
+          model: "claude-opus-4-7",
+          mode: "default",
+          worktree: false,
+        },
+      });
+      expect(blocked.statusCode).toBe(409);
+      expect(blocked.json().error).toBe("project_not_trusted");
+    });
+  });
+
+  describe("POST /api/projects/:id/trust", () => {
+    it("rejects unauthenticated", async () => {
+      const ctx = await bootstrap();
+      disposers.push(ctx.cleanup);
+      const res = await ctx.app.inject({
+        method: "POST",
+        url: "/api/projects/anything/trust",
+        payload: { trusted: true },
+      });
+      expect(res.statusCode).toBe(401);
+    });
+
+    it("returns 404 for an unknown project", async () => {
+      const ctx = await bootstrap();
+      disposers.push(ctx.cleanup);
+      const res = await ctx.app.inject({
+        method: "POST",
+        url: "/api/projects/no-such-id/trust",
+        headers: { cookie: ctx.cookie },
+        payload: { trusted: true },
+      });
+      expect(res.statusCode).toBe(404);
+    });
+
+    it("rejects a non-boolean body with 400", async () => {
+      const ctx = await bootstrap();
+      disposers.push(ctx.cleanup);
+      const project = await ctx.app
+        .inject({
+          method: "POST",
+          url: "/api/projects",
+          headers: { cookie: ctx.cookie },
+          payload: { name: "demo", path: ctx.tmpDir },
+        })
+        .then((r) => r.json().project as { id: string });
+      const res = await ctx.app.inject({
+        method: "POST",
+        url: `/api/projects/${project.id}/trust`,
+        headers: { cookie: ctx.cookie },
+        payload: { trusted: "yes" },
+      });
+      expect(res.statusCode).toBe(400);
+    });
+
+    it("flips the trust bit and is idempotent", async () => {
+      const ctx = await bootstrap();
+      disposers.push(ctx.cleanup);
+      const project = await ctx.app
+        .inject({
+          method: "POST",
+          url: "/api/projects",
+          headers: { cookie: ctx.cookie },
+          payload: { name: "demo", path: ctx.tmpDir },
+        })
+        .then((r) => r.json().project as { id: string; trusted: boolean });
+      expect(project.trusted).toBe(false);
+
+      const up = await ctx.app.inject({
+        method: "POST",
+        url: `/api/projects/${project.id}/trust`,
+        headers: { cookie: ctx.cookie },
+        payload: { trusted: true },
+      });
+      expect(up.statusCode).toBe(200);
+      expect(up.json().project.trusted).toBe(true);
+
+      const again = await ctx.app.inject({
+        method: "POST",
+        url: `/api/projects/${project.id}/trust`,
+        headers: { cookie: ctx.cookie },
+        payload: { trusted: true },
+      });
+      expect(again.statusCode).toBe(200);
+      expect(again.json().project.trusted).toBe(true);
+
+      const down = await ctx.app.inject({
+        method: "POST",
+        url: `/api/projects/${project.id}/trust`,
+        headers: { cookie: ctx.cookie },
+        payload: { trusted: false },
+      });
+      expect(down.statusCode).toBe(200);
+      expect(down.json().project.trusted).toBe(false);
+    });
   });
 
   describe("GET /api/sessions*", () => {
@@ -313,6 +502,7 @@ describe("session HTTP routes", () => {
       app: FastifyInstance;
       cookie: string;
       tmpDir: string;
+      dbh: ClaudexDb;
     }) {
       const proj = await ctx.app
         .inject({
@@ -322,6 +512,7 @@ describe("session HTTP routes", () => {
           payload: { name: "demo", path: ctx.tmpDir },
         })
         .then((r) => r.json().project);
+      trustProject(ctx.dbh, proj.id);
       const s = await ctx.app
         .inject({
           method: "POST",
@@ -544,6 +735,7 @@ describe("session HTTP routes", () => {
       app: FastifyInstance;
       cookie: string;
       tmpDir: string;
+      dbh: ClaudexDb;
     }) {
       const proj = await ctx.app
         .inject({
@@ -553,6 +745,7 @@ describe("session HTTP routes", () => {
           payload: { name: "demo", path: ctx.tmpDir },
         })
         .then((r) => r.json().project);
+      trustProject(ctx.dbh, proj.id);
       const s = await ctx.app
         .inject({
           method: "POST",
@@ -681,6 +874,7 @@ describe("session HTTP routes", () => {
       app: FastifyInstance;
       cookie: string;
       tmpDir: string;
+      dbh: ClaudexDb;
     }) {
       const res = await ctx.app.inject({
         method: "POST",
@@ -688,13 +882,16 @@ describe("session HTTP routes", () => {
         headers: { cookie: ctx.cookie },
         payload: { name: "demo", path: ctx.tmpDir },
       });
-      return res.json().project;
+      const project = res.json().project;
+      trustProject(ctx.dbh, project.id);
+      return project;
     }
 
     async function createSession(ctx: {
       app: FastifyInstance;
       cookie: string;
       tmpDir: string;
+      dbh: ClaudexDb;
     }) {
       const project = await addProject(ctx);
       const s = await ctx.app.inject({
@@ -818,12 +1015,15 @@ describe("session HTTP routes", () => {
     sessionId: string;
     sdkSessionId: string | null = null;
     modeChanges: PermissionMode[] = [];
+    userMessages: string[] = [];
     private listeners = new Set<RunnerListener>();
     constructor(sessionId: string) {
       this.sessionId = sessionId;
     }
     async start() {}
-    async sendUserMessage() {}
+    async sendUserMessage(content: string) {
+      this.userMessages.push(content);
+    }
     resolvePermission() {}
     async interrupt() {}
     async setPermissionMode(mode: PermissionMode) {
@@ -864,6 +1064,7 @@ describe("session HTTP routes", () => {
     app: FastifyInstance;
     cookie: string;
     tmpDir: string;
+    dbh: ClaudexDb;
   }) {
     const proj = await ctx.app
       .inject({
@@ -873,6 +1074,7 @@ describe("session HTTP routes", () => {
         payload: { name: "demo", path: ctx.tmpDir },
       })
       .then((r) => r.json().project);
+    trustProject(ctx.dbh, proj.id);
     const s = await ctx.app
       .inject({
         method: "POST",
@@ -1132,6 +1334,183 @@ describe("session HTTP routes", () => {
       });
       expect(res.statusCode).toBe(404);
       expect(res.json().error).toBe("not_found");
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // POST /api/sessions/:id/edit-last-user-message
+  //
+  // Typo-recovery flow. The happy path reuses the `RecordingRunner` +
+  // `makeRecordingFactory` defined in the PATCH block above so we can
+  // observe the edited prompt being re-sent into the runner without
+  // actually spinning up a real claude subprocess.
+  // ---------------------------------------------------------------------------
+  describe("POST /api/sessions/:id/edit-last-user-message", () => {
+    it("rejects unauthenticated", async () => {
+      const ctx = await bootstrap();
+      disposers.push(ctx.cleanup);
+      const { s } = await seedSession(ctx);
+      const res = await ctx.app.inject({
+        method: "POST",
+        url: `/api/sessions/${s.id}/edit-last-user-message`,
+        payload: { text: "new" },
+      });
+      expect(res.statusCode).toBe(401);
+    });
+
+    it("returns 404 for an unknown session id", async () => {
+      const ctx = await bootstrap();
+      disposers.push(ctx.cleanup);
+      const res = await ctx.app.inject({
+        method: "POST",
+        url: "/api/sessions/nope/edit-last-user-message",
+        headers: { cookie: ctx.cookie },
+        payload: { text: "x" },
+      });
+      expect(res.statusCode).toBe(404);
+      expect(res.json().error).toBe("not_found");
+    });
+
+    it("returns 409 not_idle when the session is running", async () => {
+      const ctx = await bootstrap();
+      disposers.push(ctx.cleanup);
+      const { s } = await seedSession(ctx);
+      // Flip status to running via a direct DB write — matches what
+      // SessionManager does on the first status:running event.
+      ctx.dbh.db
+        .prepare("UPDATE sessions SET status = 'running' WHERE id = ?")
+        .run(s.id);
+      const res = await ctx.app.inject({
+        method: "POST",
+        url: `/api/sessions/${s.id}/edit-last-user-message`,
+        headers: { cookie: ctx.cookie },
+        payload: { text: "new" },
+      });
+      expect(res.statusCode).toBe(409);
+      expect(res.json().error).toBe("not_idle");
+    });
+
+    it("returns 400 no_user_message when the session has no user_message", async () => {
+      const ctx = await bootstrap();
+      disposers.push(ctx.cleanup);
+      const { s } = await seedSession(ctx);
+      const res = await ctx.app.inject({
+        method: "POST",
+        url: `/api/sessions/${s.id}/edit-last-user-message`,
+        headers: { cookie: ctx.cookie },
+        payload: { text: "anything" },
+      });
+      expect(res.statusCode).toBe(400);
+      expect(res.json().error).toBe("no_user_message");
+    });
+
+    it("happy path: truncates events above the user_message, rewrites text + editedAt, re-kicks the runner", async () => {
+      const { factory, last } = makeRecordingFactory();
+      const ctx = await bootstrap(factory);
+      disposers.push(ctx.cleanup);
+      const { s } = await seedSession(ctx);
+
+      // Seed 1 user_message + 1 assistant_text via direct DB writes —
+      // we're testing the route shape, not SessionStore.appendEvent.
+      const now = new Date().toISOString();
+      ctx.dbh.db
+        .prepare(
+          `INSERT INTO session_events (id, session_id, kind, seq, created_at, payload)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          "ev-user-1",
+          s.id,
+          "user_message",
+          0,
+          now,
+          JSON.stringify({ text: "typoed message" }),
+        );
+      ctx.dbh.db
+        .prepare(
+          `INSERT INTO session_events (id, session_id, kind, seq, created_at, payload)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          "ev-assistant-1",
+          s.id,
+          "assistant_text",
+          1,
+          now,
+          JSON.stringify({ text: "…reply to the typo." }),
+        );
+
+      // Attach a runner to the session so rerunFromEditedMessage has
+      // somewhere to push the edited text.
+      ctx.manager.getOrCreate(s.id);
+      const runner = last()!;
+      expect(runner).not.toBeNull();
+
+      const res = await ctx.app.inject({
+        method: "POST",
+        url: `/api/sessions/${s.id}/edit-last-user-message`,
+        headers: { cookie: ctx.cookie },
+        payload: { text: "fixed message" },
+      });
+      expect(res.statusCode).toBe(200);
+      const body = res.json();
+      expect(body.ok).toBe(true);
+      expect(body.seq).toBe(0);
+
+      // Events above seq 0 must be gone; the user_message payload must
+      // carry the new text + an editedAt stamp.
+      const rows = ctx.dbh.db
+        .prepare(
+          "SELECT seq, kind, payload FROM session_events WHERE session_id = ? ORDER BY seq ASC",
+        )
+        .all(s.id) as Array<{ seq: number; kind: string; payload: string }>;
+      expect(rows).toHaveLength(1);
+      expect(rows[0].seq).toBe(0);
+      expect(rows[0].kind).toBe("user_message");
+      const editedPayload = JSON.parse(rows[0].payload) as {
+        text: string;
+        editedAt?: string;
+      };
+      expect(editedPayload.text).toBe("fixed message");
+      expect(typeof editedPayload.editedAt).toBe("string");
+
+      // The runner should have received the edited prompt as a follow-up
+      // user message. RecordingRunner captures every sendUserMessage call
+      // into its `userMessages` array.
+      expect(runner.userMessages).toContain("fixed message");
+    });
+
+    it("refuses edit when the last user_message carries attachments (400 has_attachments)", async () => {
+      const ctx = await bootstrap();
+      disposers.push(ctx.cleanup);
+      const { s } = await seedSession(ctx);
+      const now = new Date().toISOString();
+      ctx.dbh.db
+        .prepare(
+          `INSERT INTO session_events (id, session_id, kind, seq, created_at, payload)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          "ev-user-att",
+          s.id,
+          "user_message",
+          0,
+          now,
+          JSON.stringify({
+            text: "look at this",
+            attachments: [
+              { id: "att-1", filename: "cat.png", mime: "image/png", size: 42 },
+            ],
+          }),
+        );
+      const res = await ctx.app.inject({
+        method: "POST",
+        url: `/api/sessions/${s.id}/edit-last-user-message`,
+        headers: { cookie: ctx.cookie },
+        payload: { text: "new" },
+      });
+      expect(res.statusCode).toBe(400);
+      expect(res.json().error).toBe("has_attachments");
     });
   });
 });

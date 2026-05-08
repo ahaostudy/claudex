@@ -78,6 +78,9 @@ async function harness(): Promise<PtyHarness> {
       payload: { name: "demo", path: projectPath },
     })
   ).json().project;
+  // Flip trust so POST /api/sessions doesn't hit the project_not_trusted
+  // gate. These tests are about the PTY transport, not the trust flow.
+  dbh.db.prepare("UPDATE projects SET trusted = 1 WHERE id = ?").run(proj.id);
   const session = (
     await app.inject({
       method: "POST",

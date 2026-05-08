@@ -10,6 +10,7 @@ import {
   MoreVertical,
   PanelRight,
   Paperclip,
+  Pencil,
   Send,
   Settings2,
   StopCircle,
@@ -175,6 +176,18 @@ export function ChatScreen() {
     () => applyViewMode(pieces, viewMode),
     [pieces, viewMode],
   );
+
+  // Index of the newest user-message piece in the current visible list.
+  // Drives the "Edit" affordance on that bubble only — older user turns
+  // aren't editable because the truncation semantics only make sense for
+  // the tail. Falls back to -1 when the visible list has no user piece
+  // (pre-first-turn or Verbose-only reply).
+  const lastUserVisibleIndex = useMemo(() => {
+    for (let i = visiblePieces.length - 1; i >= 0; i--) {
+      if (visiblePieces[i].kind === "user") return i;
+    }
+    return -1;
+  }, [visiblePieces]);
 
   // Any still-pending permission request for a diff-producing tool
   // (Edit / Write / MultiEdit) surfaces a "Review diff" klein chip in the
@@ -517,6 +530,26 @@ export function ChatScreen() {
             viewMode={viewMode}
             session={session}
             project={project}
+            // The "edit last user message" pencil is only offered on the
+            // newest user bubble — and only when the session is idle (a
+            // running turn would race the server-side truncation). We
+            // compute the flag inline so Piece doesn't have to know about
+            // the whole transcript.
+            isLastUserMessage={
+              p.kind === "user" && lastUserVisibleIndex === i
+            }
+            canEdit={session?.status === "idle"}
+            onEditLastUserMessage={
+              id
+                ? async (text) => {
+                    // Server truncates events + broadcasts a refresh so
+                    // the transcript reloads on its own via the WS +
+                    // events refetch path. Propagate errors so the
+                    // bubble-level editor can show a hint.
+                    await api.editLastUserMessage(id, text);
+                  }
+                : undefined
+            }
             onDecide={(approvalId, decision) =>
               id && resolvePermission(id, approvalId, decision)
             }
@@ -846,6 +879,9 @@ function Piece({
   project,
   onDecide,
   onOpenLightbox,
+  isLastUserMessage,
+  canEdit,
+  onEditLastUserMessage,
 }: {
   p: UIPiece;
   viewMode: ViewMode;
@@ -856,6 +892,13 @@ function Piece({
     decision: "allow_once" | "allow_always" | "deny",
   ) => void;
   onOpenLightbox: (images: ImageRef[], index: number) => void;
+  /** True when this piece is the newest user_message currently visible. */
+  isLastUserMessage?: boolean;
+  /** True when the session is idle and the user can actually submit an edit. */
+  canEdit?: boolean;
+  /** Resolves after the server has accepted the edit. Caller handles the
+   * subsequent refresh_transcript / events refetch. */
+  onEditLastUserMessage?: (text: string) => Promise<void>;
 }) {
   // Verbose = everything expanded, no truncation. Normal = compact by default,
   // user can click to expand individual tool_use chips and tool_result blocks.
@@ -869,8 +912,30 @@ function Piece({
       // user turn can still carry images (e.g. CLI synthetic turns that pasted
       // a screenshot), so extract those and render them as thumbs above the
       // (image-stripped) text.
+      //
+      // The "edit last user message" affordance is only wired on the newest
+      // user bubble — older turns would need a cascading-edit UX we don't
+      // ship today. Bubbles carrying attachments are also locked down
+      // because the server refuses the edit (400 has_attachments), so we
+      // detect the attachment case inline and demote the affordance to a
+      // static hint.
+      const hasAttachments =
+        p.kind === "user" &&
+        Array.isArray(p.attachments) &&
+        p.attachments.length > 0;
       return (
-        <UserBubble text={p.text} onOpenLightbox={onOpenLightbox} />
+        <UserBubble
+          text={p.text}
+          onOpenLightbox={onOpenLightbox}
+          editable={
+            !!isLastUserMessage &&
+            !!canEdit &&
+            !!onEditLastUserMessage &&
+            !hasAttachments
+          }
+          attachmentLock={!!isLastUserMessage && hasAttachments}
+          onSubmitEdit={onEditLastUserMessage}
+        />
       );
     }
     case "assistant_text":
@@ -1145,17 +1210,146 @@ function ToolResultBlock({
 function UserBubble({
   text,
   onOpenLightbox,
+  editable,
+  attachmentLock,
+  onSubmitEdit,
 }: {
   text: string;
   onOpenLightbox: (images: ImageRef[], index: number) => void;
+  /** When true, show a Pencil affordance that opens the inline editor. */
+  editable?: boolean;
+  /** When true (only possible on the newest bubble) show an inline hint
+   * explaining why the Pencil is missing — the message has attachments the
+   * server won't let us edit yet. */
+  attachmentLock?: boolean;
+  /** Resolves when the server has accepted the edit. Required when
+   * `editable` is true. */
+  onSubmitEdit?: (text: string) => Promise<void>;
 }) {
   const { images, remainingText } = useMemo(
     () => extractImagesFromText(text),
     [text],
   );
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(text);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  // Keep the draft buffer in sync with the underlying text whenever it
+  // shifts out from under us — e.g. the server just broadcast a new
+  // user_message payload after someone else in another tab edited. We
+  // only overwrite while NOT editing so an in-progress draft survives
+  // unrelated rerenders.
+  useEffect(() => {
+    if (!editing) setDraft(text);
+  }, [text, editing]);
+
+  const save = async () => {
+    if (!onSubmitEdit) return;
+    if (draft === text) {
+      setEditing(false);
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    try {
+      await onSubmitEdit(draft);
+      setEditing(false);
+    } catch (err) {
+      // ApiError.code carries the server error enum ("not_idle",
+      // "has_attachments", etc.). Surface it verbatim so the user sees
+      // something actionable rather than a generic "failed".
+      const msg =
+        err instanceof Error && "code" in err
+          ? String((err as { code: string }).code)
+          : "edit failed";
+      setError(msg);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (editing) {
+    return (
+      <div className="flex justify-end">
+        <div className="max-w-[88%] w-full md:w-[520px] bg-paper border border-line rounded-[14px] rounded-br-[4px] px-3 py-2.5 shadow-card text-[14px] leading-[1.55]">
+          <textarea
+            autoFocus
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Escape") {
+                e.preventDefault();
+                setEditing(false);
+                setDraft(text);
+              } else if (
+                e.key === "Enter" &&
+                (e.metaKey || e.ctrlKey) &&
+                !saving
+              ) {
+                e.preventDefault();
+                void save();
+              }
+            }}
+            rows={Math.min(10, Math.max(2, draft.split("\n").length))}
+            className="w-full bg-canvas border border-line rounded-[10px] p-2 text-[13.5px] leading-[1.55] text-ink focus:outline-none focus:border-klein/60 resize-none mono"
+            disabled={saving}
+          />
+          {error && (
+            <div className="mt-1.5 text-[12px] text-danger mono">
+              {error === "not_idle"
+                ? "Can't edit while claude is working — hit Stop first."
+                : error === "has_attachments"
+                  ? "Messages with attachments can't be edited yet."
+                  : error === "no_user_message"
+                    ? "No user message to edit in this session."
+                    : `Edit failed: ${error}`}
+            </div>
+          )}
+          <div className="mt-2 flex items-center justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                setEditing(false);
+                setDraft(text);
+                setError(null);
+              }}
+              disabled={saving}
+              className="text-[12px] text-ink-muted hover:text-ink px-2 py-1 rounded-[6px] disabled:opacity-50"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={() => void save()}
+              disabled={saving || draft === text}
+              className="text-[12px] text-canvas bg-ink rounded-[6px] px-3 py-1 disabled:opacity-50"
+            >
+              {saving ? "Saving…" : "Save & resend"}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="flex justify-end">
-      <div className="max-w-[88%] bg-ink text-canvas rounded-[14px] rounded-br-[4px] px-3.5 py-2.5 shadow-card text-[14px] leading-[1.55]">
+    <div className="flex justify-end group">
+      <div className="relative max-w-[88%] bg-ink text-canvas rounded-[14px] rounded-br-[4px] px-3.5 py-2.5 shadow-card text-[14px] leading-[1.55]">
+        {editable && (
+          <button
+            type="button"
+            title="Edit this message and re-run"
+            aria-label="Edit this message and re-run"
+            onClick={() => {
+              setDraft(text);
+              setEditing(true);
+              setError(null);
+            }}
+            className="absolute -top-2 -left-2 h-6 w-6 rounded-full bg-paper text-ink border border-line shadow-card opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity flex items-center justify-center"
+          >
+            <Pencil className="h-3 w-3" />
+          </button>
+        )}
         {images.length > 0 && (
           <ImageThumbs
             images={images}
@@ -1167,6 +1361,14 @@ function UserBubble({
           <div className="whitespace-pre-wrap">{remainingText}</div>
         )}
       </div>
+      {attachmentLock && (
+        <div
+          className="absolute mt-[52px] -ml-2 hidden md:block text-[11px] text-ink-muted mono"
+          aria-hidden
+        >
+          attachments can't be edited yet
+        </div>
+      )}
     </div>
   );
 }

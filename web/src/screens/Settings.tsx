@@ -4,6 +4,7 @@ import {
   Bell,
   BellOff,
   ChevronLeft,
+  FolderOpen,
   KeyRound,
   Palette,
   Plug,
@@ -15,8 +16,8 @@ import {
   User as UserIcon,
 } from "lucide-react";
 import { useAuth } from "@/state/auth";
-import { api, ApiError } from "@/api/client";
-import type { PushDevice, UserEnvResponse, AuditEvent } from "@claudex/shared";
+import { api, ApiError, type WorktreeSummary } from "@/api/client";
+import type { Project, PushDevice, UserEnvResponse, AuditEvent } from "@claudex/shared";
 import { cn } from "@/lib/cn";
 import { AppShell } from "@/components/AppShell";
 import {
@@ -135,7 +136,7 @@ const TABS: TabSpec[] = [
     icon: Sliders,
     caps: "advanced",
     title: "Low-level knobs and power-user settings.",
-    lede: "Nothing here yet. Future home for JWT rotation, worktree defaults, and exposure diagnostics.",
+    lede: "Prune stale claudex-managed git worktrees. More power-user knobs (JWT rotation, exposure diagnostics) live here later.",
   },
 ];
 
@@ -545,6 +546,8 @@ function SecurityPanel() {
         </div>
       </div>
 
+      <TrustedProjectsCard />
+
       <AuditLogCard
         expanded={fullLog}
         onExpand={() => {
@@ -558,6 +561,147 @@ function SecurityPanel() {
           setSearchParams(next, { replace: true });
         }}
       />
+    </div>
+  );
+}
+
+// Trusted-projects card. Lists every project row with its trust state and a
+// one-click toggle. Untrusting is the dangerous direction (future sessions
+// under that project will refuse to spawn), so we require a second click to
+// confirm — the row flips into a "click again" affordance for ~3 seconds
+// and reverts if the user looks away. Trusting is a single click because the
+// user has presumably already been prompted once via the NewSessionSheet.
+function TrustedProjectsCard() {
+  const [projects, setProjects] = useState<Project[] | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  // When non-null, the "Untrust" button on that row has been clicked once
+  // and is armed — a second click commits. Cleared on timeout or on toggle.
+  const [confirmUntrustId, setConfirmUntrustId] = useState<string | null>(null);
+
+  async function refresh() {
+    try {
+      const res = await api.listProjects();
+      setProjects(res.projects);
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.code : "load failed");
+    }
+  }
+
+  useEffect(() => {
+    void refresh();
+  }, []);
+
+  // Auto-disarm the untrust confirm after 3s so a stray click doesn't linger
+  // as a hot commit button in the UI.
+  useEffect(() => {
+    if (!confirmUntrustId) return;
+    const t = window.setTimeout(() => setConfirmUntrustId(null), 3000);
+    return () => window.clearTimeout(t);
+  }, [confirmUntrustId]);
+
+  async function toggle(p: Project) {
+    setErr(null);
+    if (p.trusted) {
+      // Two-click commit for untrust.
+      if (confirmUntrustId !== p.id) {
+        setConfirmUntrustId(p.id);
+        return;
+      }
+      setConfirmUntrustId(null);
+    }
+    setBusyId(p.id);
+    try {
+      const res = await api.trustProject(p.id, !p.trusted);
+      setProjects((prev) =>
+        prev ? prev.map((x) => (x.id === p.id ? res.project : x)) : prev,
+      );
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.code : "update failed");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  return (
+    <div className="rounded-[12px] border border-line bg-canvas overflow-hidden">
+      <div className="flex items-center gap-3 px-5 py-4 border-b border-line">
+        <div className="h-9 w-9 rounded-[8px] bg-paper border border-line flex items-center justify-center shrink-0">
+          <FolderOpen className="w-4 h-4 text-ink-muted" />
+        </div>
+        <div className="min-w-0">
+          <div className="display text-[18px] leading-tight">
+            Trusted projects
+          </div>
+          <div className="text-[13px] text-ink-muted mt-0.5">
+            Untrusting a project blocks future sessions under it until you
+            re-confirm. Existing sessions keep running.
+          </div>
+        </div>
+      </div>
+      {projects === null ? (
+        <div className="px-5 py-5 text-[13px] mono text-ink-muted">loading…</div>
+      ) : projects.length === 0 ? (
+        <div className="px-5 py-5 text-[13px] text-ink-muted">
+          No projects yet. Add one from the New Session sheet.
+        </div>
+      ) : (
+        <ul className="divide-y divide-line">
+          {projects.map((p) => {
+            const armed = confirmUntrustId === p.id;
+            const busy = busyId === p.id;
+            return (
+              <li
+                key={p.id}
+                className="flex items-center gap-3 px-5 py-3 text-[13px]"
+              >
+                <div className="min-w-0 flex-1">
+                  <div className="font-medium truncate">{p.name}</div>
+                  <div className="mono text-[11px] text-ink-muted truncate">
+                    {p.path}
+                  </div>
+                </div>
+                <span
+                  className={cn(
+                    "shrink-0 inline-flex items-center gap-1.5 px-2 py-0.5 rounded-[6px] border text-[10px] font-medium uppercase tracking-[0.1em]",
+                    p.trusted
+                      ? "border-success/30 bg-success-wash text-[#1f5f21]"
+                      : "border-warn/30 bg-warn-wash text-[#7a4700]",
+                  )}
+                >
+                  {p.trusted ? "trusted" : "untrusted"}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => toggle(p)}
+                  disabled={busy}
+                  className={cn(
+                    "shrink-0 h-8 px-3 rounded-[8px] text-[12.5px] border disabled:opacity-50",
+                    p.trusted
+                      ? armed
+                        ? "border-danger/40 bg-danger-wash text-danger font-medium"
+                        : "border-line bg-canvas text-ink-soft hover:bg-paper"
+                      : "border-ink bg-ink text-canvas font-medium",
+                  )}
+                >
+                  {busy
+                    ? "…"
+                    : p.trusted
+                      ? armed
+                        ? "Click again to confirm"
+                        : "Untrust"
+                      : "Trust"}
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      {err && (
+        <div className="m-4 text-[13px] text-danger bg-danger-wash rounded-[8px] px-3 py-2 border border-danger/30">
+          {err}
+        </div>
+      )}
     </div>
   );
 }
@@ -617,6 +761,10 @@ function renderAuditDetail(row: AuditEvent): string {
       return `New push device: ${uaLabel(row.detail)}`;
     case "push_revoked":
       return `Removed push device: ${uaLabel(row.detail)}`;
+    case "project_trusted":
+      return row.detail ?? "Project trusted";
+    case "project_untrusted":
+      return row.detail ?? "Project untrusted";
     default:
       return row.detail ? `${row.event}: ${row.detail}` : row.event;
   }
@@ -1229,16 +1377,131 @@ function EnvironmentPanel() {
 }
 
 // ----------------------------------------------------------------------------
-// Advanced — empty state only.
+// Advanced — Worktrees pruning.
+//
+// Today when a session is deleted or worktree creation half-fails, stale
+// `claude/*` branches + `.claude/worktrees/*` dirs accumulate in user projects.
+// This panel surfaces them so the user can clean up. Linked rows (a session
+// row still owns them) render with a green dot and no action; orphan rows
+// render with a red dot and a Remove button. A bulk "Prune N orphans" action
+// sits at the bottom when any orphans exist.
 // ----------------------------------------------------------------------------
 
 function AdvancedPanel() {
+  const [worktrees, setWorktrees] = useState<WorktreeSummary[] | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  async function refresh() {
+    setErr(null);
+    try {
+      const res = await api.listWorktrees();
+      setWorktrees(res.worktrees);
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.code : "load failed");
+    }
+  }
+
+  useEffect(() => {
+    void refresh();
+  }, []);
+
+  async function prune(items: WorktreeSummary[]) {
+    if (items.length === 0) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      const res = await api.pruneWorktrees(
+        items.map((w) => ({
+          projectId: w.projectId,
+          branch: w.branch,
+          path: w.path,
+        })),
+      );
+      const firstError = res.results.find((r) => !r.removed)?.error;
+      if (firstError) {
+        setErr(firstError);
+      }
+      await refresh();
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.code : "prune failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const orphans = (worktrees ?? []).filter((w) => w.status === "orphaned");
+
   return (
-    <EmptyCard
-      icon={Sliders}
-      title="Nothing here yet."
-      body="Future home for JWT secret rotation, worktree defaults, cookie lifetime, and exposure diagnostics."
-    />
+    <Card
+      header="Claudex-managed git worktrees across your projects."
+    >
+      {worktrees === null ? (
+        <div className="px-4 py-6 text-[13px] mono text-ink-muted">
+          loading…
+        </div>
+      ) : worktrees.length === 0 ? (
+        <div className="px-4 py-4 text-[13px] text-ink-muted">
+          No claudex-managed worktrees found. When you create a session with{" "}
+          <span className="mono">worktree: true</span>, git branches under{" "}
+          <span className="mono">claude/</span> and directories under{" "}
+          <span className="mono">.claude/worktrees/</span> show up here so you
+          can clean up anything left behind.
+        </div>
+      ) : (
+        <ul className="divide-y divide-line">
+          {worktrees.map((w) => (
+            <li
+              key={`${w.projectId}:${w.branch}`}
+              className="px-4 py-3 flex items-center gap-3"
+            >
+              <span
+                className={cn(
+                  "h-1.5 w-1.5 rounded-full shrink-0",
+                  w.status === "orphaned" ? "bg-danger" : "bg-success",
+                )}
+              />
+              <div className="min-w-0 flex-1">
+                <div className="mono text-[13px] truncate">{w.branch}</div>
+                <div className="mono text-[11px] text-ink-muted truncate">
+                  {w.path}
+                </div>
+                <div className="text-[11px] text-ink-muted mt-0.5">
+                  {w.projectName} · {w.status}
+                </div>
+              </div>
+              {w.status === "orphaned" && (
+                <button
+                  type="button"
+                  onClick={() => prune([w])}
+                  disabled={busy}
+                  className="h-7 px-2 text-[11px] rounded-[4px] border border-line text-danger shrink-0 disabled:opacity-50"
+                >
+                  Remove
+                </button>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+      {orphans.length > 0 && (
+        <div className="px-4 py-2 border-t border-line">
+          <button
+            type="button"
+            onClick={() => prune(orphans)}
+            disabled={busy}
+            className="h-8 px-3 rounded-[8px] bg-danger/10 border border-danger/40 text-danger text-[13px] disabled:opacity-50"
+          >
+            Prune {orphans.length} orphan{orphans.length === 1 ? "" : "s"}
+          </button>
+        </div>
+      )}
+      {err && (
+        <div className="px-4 py-2 border-t border-line text-[12px] text-danger bg-danger-wash">
+          {err}
+        </div>
+      )}
+    </Card>
   );
 }
 

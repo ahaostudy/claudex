@@ -25,7 +25,11 @@ async function createProject(ctx: Ctx, name = "demo"): Promise<string> {
     headers: { cookie: ctx.cookie },
     payload: { name, path: ctx.tmpDir },
   });
-  return res.json().project.id as string;
+  const id = res.json().project.id as string;
+  // Flip trust so createSession below doesn't hit the project_not_trusted
+  // gate. Search tests don't care about the trust flow.
+  ctx.dbh.db.prepare("UPDATE projects SET trusted = 1 WHERE id = ?").run(id);
+  return id;
 }
 
 async function createSession(

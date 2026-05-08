@@ -61,12 +61,24 @@ export class ProjectStore {
     });
   }
 
-  create(input: { name: string; path: string; trusted: boolean }): Project {
+  create(input: {
+    name: string;
+    path: string;
+    /**
+     * Defaults to `false`. Projects created through the HTTP surface arrive
+     * untrusted — the UI's "Trust this folder?" confirm step flips the bit
+     * via `POST /api/projects/:id/trust` before the first session can spawn.
+     * The CLI-import path (`upsertByPath`) opts into `true` because the user
+     * is already operating in that cwd.
+     */
+    trusted?: boolean;
+  }): Project {
+    const trusted = input.trusted === true;
     const row: ProjectRow = {
       id: nanoid(12),
       name: input.name,
       path: input.path,
-      trusted: input.trusted ? 1 : 0,
+      trusted: trusted ? 1 : 0,
       created_at: new Date().toISOString(),
     };
     this.db

@@ -18,6 +18,7 @@ import {
   verifyPassword,
   verifyTotp,
 } from "./index.js";
+import { SlidingWindowLimiter } from "./rate-limit.js";
 import type { AuditStore } from "../audit/store.js";
 
 export interface AuthDeps {
@@ -79,6 +80,22 @@ export async function registerAuthRoutes(
 ): Promise<void> {
   const users = new UserStore(deps.db);
 
+  // Rate limiters — in-memory, per-process. The login limiter is keyed by
+  // client IP (classic brute-force signal). The TOTP limiter is keyed by
+  // challengeId so an attacker who's already past the password gate can't
+  // grind through the 6-digit space; it also means a shared tunnel IP
+  // (frpc / Cloudflare) doesn't penalize a second legitimate user whose
+  // challenge is independent. TOTP is stricter (10 per 15min) because a
+  // 6-digit code is 10^6 — anything looser is basically unlimited.
+  const loginLimiter = new SlidingWindowLimiter({
+    windowMs: 5 * 60 * 1000,
+    max: 5,
+  });
+  const totpLimiter = new SlidingWindowLimiter({
+    windowMs: 15 * 60 * 1000,
+    max: 10,
+  });
+
   // Small helper: pull best-effort ip + user-agent off a Fastify request for
   // audit rows. Keeps the `audit.append` call sites below to one line each so
   // the event flow stays readable when skim-reading this file.
@@ -111,6 +128,22 @@ export async function registerAuthRoutes(
     if (!parsed.success) {
       return reply.code(400).send({ error: "bad_request" });
     }
+    // Keyed by client IP; behind a tunnel all requests may share one IP and
+    // that's fine — if the attacker shares a tunnel with a user, the user's
+    // legitimate login still succeeds (success resets the counter).
+    const ipKey = (req as { ip?: string }).ip ?? "unknown";
+    const gate = loginLimiter.check(ipKey);
+    if (!gate.allowed) {
+      deps.audit.append({
+        event: "login_rate_limited",
+        detail: `ip=${ipKey}`,
+        ...reqCtx(req),
+      });
+      reply.header("Retry-After", String(gate.retryAfterSec ?? 1));
+      return reply
+        .code(429)
+        .send({ error: "rate_limited", retryAfterSec: gate.retryAfterSec });
+    }
     const { username, password } = parsed.data;
     const row = users.findByUsername(username);
     // Uniformly cost the request even when the user is missing so we don't
@@ -118,6 +151,10 @@ export async function registerAuthRoutes(
     const ok =
       row != null && (await verifyPassword(password, row.password_hash));
     if (!ok || !row) {
+      // Count against the per-IP limiter. Unknown users and wrong passwords
+      // both count — otherwise an attacker could probe usernames without
+      // tripping the limiter.
+      loginLimiter.recordFailure(ipKey);
       // Audit: failed password / unknown user. `userId` intentionally null so
       // we record brute-force probes against any username uniformly.
       deps.audit.append({
@@ -127,6 +164,9 @@ export async function registerAuthRoutes(
       });
       return reply.code(401).send({ error: "invalid_credentials" });
     }
+    // Legit credentials → drop any accumulated failures for this IP so a
+    // user who fat-fingered a couple times doesn't get throttled on TOTP.
+    loginLimiter.reset(ipKey);
     const challengeId = deps.challenges.create(row.id);
     const body: LoginResponse = { requireTotp: true, challengeId };
     return reply.send(body);
@@ -138,6 +178,24 @@ export async function registerAuthRoutes(
       return reply.code(400).send({ error: "bad_request" });
     }
     const { challengeId, code } = parsed.data;
+
+    // Keyed by challenge rather than IP: the attacker has already cleared
+    // bcrypt to get here, so the point is to cap guesses against _this_
+    // specific challenge — 10 per 15min keeps brute-force of the 10^6
+    // code space infeasible while still allowing a real user to retry
+    // after fat-fingering a digit.
+    const gate = totpLimiter.check(challengeId);
+    if (!gate.allowed) {
+      deps.audit.append({
+        event: "totp_rate_limited",
+        detail: `challenge=${challengeId}`,
+        ...reqCtx(req),
+      });
+      reply.header("Retry-After", String(gate.retryAfterSec ?? 1));
+      return reply
+        .code(429)
+        .send({ error: "rate_limited", retryAfterSec: gate.retryAfterSec });
+    }
 
     // Peek first so a wrong code doesn't burn the challenge. Only a successful
     // TOTP consumes it; an expired/missing challenge still looks the same to
@@ -152,6 +210,7 @@ export async function registerAuthRoutes(
       return reply.code(401).send({ error: "user_gone" });
     }
     if (!verifyTotp(row.totp_secret, code)) {
+      totpLimiter.recordFailure(challengeId);
       // Audit: wrong 2FA code against a valid challenge (i.e. the password
       // already matched). userId is known here — the attacker already cleared
       // the bcrypt gate.
@@ -162,8 +221,9 @@ export async function registerAuthRoutes(
       });
       return reply.code(401).send({ error: "invalid_totp" });
     }
-    // TOTP good → consume the challenge (prevents replay of this exact
-    // challenge + code pair) and issue the session cookie.
+    // TOTP good → clear counter, consume the challenge (prevents replay of
+    // this exact challenge + code pair) and issue the session cookie.
+    totpLimiter.reset(challengeId);
     deps.challenges.consume(challengeId);
     const token = await signAccessToken(deps.jwtSecret, row.id);
     reply.setCookie(ACCESS_COOKIE_NAME, token, {

@@ -127,7 +127,11 @@ describe("POST /api/sessions { worktree: true }", () => {
   });
 
   async function createProject(
-    ctx: { app: import("fastify").FastifyInstance; cookie: string },
+    ctx: {
+      app: import("fastify").FastifyInstance;
+      cookie: string;
+      dbh: import("../src/db/index.js").ClaudexDb;
+    },
     projPath: string,
   ) {
     const res = await ctx.app.inject({
@@ -136,7 +140,13 @@ describe("POST /api/sessions { worktree: true }", () => {
       headers: { cookie: ctx.cookie },
       payload: { name: path.basename(projPath), path: projPath },
     });
-    return res.json().project as { id: string; path: string };
+    const project = res.json().project as { id: string; path: string };
+    // Trust so POST /api/sessions can spawn under it — worktree tests care
+    // about git interaction, not the trust gate.
+    ctx.dbh.db
+      .prepare("UPDATE projects SET trusted = 1 WHERE id = ?")
+      .run(project.id);
+    return project;
   }
 
   it("creates a real worktree on a git repo and persists path + branch", async () => {
@@ -277,6 +287,9 @@ describe("POST /api/sessions/:id/archive with worktree", () => {
         payload: { name: "demo", path: repo.path },
       })
       .then((r) => r.json().project);
+    ctx.dbh.db
+      .prepare("UPDATE projects SET trusted = 1 WHERE id = ?")
+      .run(project.id);
     const session = await ctx.app
       .inject({
         method: "POST",
@@ -315,6 +328,9 @@ describe("POST /api/sessions/:id/archive with worktree", () => {
         payload: { name: "demo", path: repo.path },
       })
       .then((r) => r.json().project);
+    ctx.dbh.db
+      .prepare("UPDATE projects SET trusted = 1 WHERE id = ?")
+      .run(project.id);
     const session = await ctx.app
       .inject({
         method: "POST",

@@ -332,6 +332,29 @@ const MIGRATIONS: { id: number; name: string; up: string }[] = [
       CREATE INDEX idx_queue_status_seq ON queued_prompts(status, seq);
     `,
   },
+  {
+    id: 11,
+    name: "projects_trusted_default_zero",
+    // Tighten the project trust gate: new rows going forward must be
+    // explicitly confirmed via `POST /api/projects/:id/trust` before a
+    // session can spawn against them. The `projects.trusted` column was
+    // already DEFAULT 0 at the schema level (see migration 1), but the
+    // application-layer INSERT in ProjectStore.create was unconditionally
+    // writing `trusted:true` for the HTTP path. That's flipped — `create`
+    // now defaults `trusted` to false and the route layer no longer passes
+    // `trusted:true`.
+    //
+    // This migration exists as a marker so the application-layer change is
+    // bolted to a bumpable id (siblings already claimed 5..10), and so that
+    // pre-existing installations get exactly the behavior the task spec
+    // asked for: new rows land untrusted, existing rows stay as-is (the
+    // user has already trusted them by creating sessions there — flipping
+    // them to 0 would wedge every project until re-confirmed).
+    up: `
+      -- Schema is already correct; marker-only migration.
+      SELECT 1;
+    `,
+  },
 ];
 
 export function openDb(config: Config, log: Logger): ClaudexDb {

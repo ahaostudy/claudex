@@ -552,6 +552,43 @@ export class SessionManager {
   }
 
   /**
+   * Re-trigger the SDK runner for a session whose most recent user_message
+   * was edited in-place (by `POST /api/sessions/:id/edit-last-user-message`).
+   * Unlike `sendUserMessage`, this does NOT append a new `user_message` event
+   * — the edit path has already rewritten the existing row's payload, so
+   * appending again would duplicate it in the transcript.
+   *
+   * Flips the session to `running`, broadcasts a `refresh_transcript` so
+   * every subscribed tab refetches the now-truncated transcript, then pushes
+   * the edited prompt into the SDK's async input queue so a fresh assistant
+   * turn follows.
+   *
+   * Caveat (mirrored in docs/FEATURES.md): the SDK's own persisted history
+   * under `~/.claude/projects/` still contains the pre-edit message and any
+   * assistant reply. When the SDK formulates the next reply it will see both
+   * the old exchange and the edited message. We ship it anyway — the web UX
+   * win (typo recovery without resending) outweighs the CLI-side divergence.
+   */
+  async rerunFromEditedMessage(
+    sessionId: string,
+    editedText: string,
+  ): Promise<void> {
+    const runner = this.getOrCreate(sessionId);
+    // Side-chat seed edge case: a brand-new side chat with a pending seed
+    // can't have been edited (nothing to edit yet). Guard anyway — flushing
+    // the seed first is cheap and preserves the one-time-seed invariant.
+    const entry = this.runners.get(sessionId);
+    if (entry?.pendingSeed) {
+      const seed = entry.pendingSeed;
+      entry.pendingSeed = null;
+      await runner.sendUserMessage(seed);
+    }
+    this.deps.sessions.setStatus(sessionId, "running");
+    this.deps.broadcast(sessionId, { type: "refresh_transcript" });
+    await runner.sendUserMessage(editedText);
+  }
+
+  /**
    * Look up `ids` in the attachment store, keeping only rows whose session
    * matches and that are still unlinked. Empty + no-op when the store wasn't
    * wired (tests, legacy).
