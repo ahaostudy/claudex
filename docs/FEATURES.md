@@ -11,8 +11,8 @@ Three status tiers:
   use from the API; users won't see it yet.
 - ⬜ **Planned** — listed so nobody re-plans it from scratch, but not started.
 
-Last updated: see the git log of this file. Current revision lists **69 shipped
-behaviors** and **149 backend tests**.
+Last updated: see the git log of this file. Current revision lists **71 shipped
+behaviors** and **155 backend tests**.
 
 ---
 
@@ -106,7 +106,7 @@ behaviors** and **149 backend tests**.
 | ✅ | Permission mode selectable per session: `default` (ask), `acceptEdits`, `plan`, `bypassPermissions`. `auto` is accepted but falls through to `default` for now | `server/src/sessions/agent-runner.ts` |
 | ✅ | `interrupt()` supported at the Runner and manager layer | same |
 | ✅ | `setPermissionMode` wired end-to-end: the session settings sheet PATCHes `/api/sessions/:id` with a new `mode`, the server updates the DB and calls `Query.setPermissionMode` on the live runner | same |
-| 🟡 | Session resume via `resumeSdkSessionId` is plumbed through `RunnerInitOptions` but nothing stores/restores the SDK session id yet — after a server restart, continuing the thread will start a fresh Agent SDK conversation | `server/src/sessions/runner.ts` |
+| ✅ | Session resume via `resumeSdkSessionId` — the SDK `session_id` from the first `system/init` is persisted to `sessions.sdk_session_id` (first-write-wins, SQLite migration id=2) and passed as `resume` on subsequent `getOrCreate`, so re-opening an old session after a server restart continues the same Agent SDK conversation | `server/src/sessions/manager.ts`, `server/src/sessions/store.ts`, `server/src/db/index.ts` |
 
 ## Permissions
 
@@ -154,10 +154,10 @@ behaviors** and **149 backend tests**.
 | ✅ | Optimistic echo of user messages (shown before the WS ack) | `web/src/state/sessions.ts` |
 | ✅ | Transcript is reconstructed from both persisted events (initial load via `/api/sessions/:id/events`) and live WS frames, unified into a single UI piece list | same |
 | ✅ | Sign out clears the session cookie and returns to the login screen | `web/src/screens/Home.tsx` |
-| 🟡 | `/` slash commands and `@` file picker (from the mockup) not wired — the input is a plain textarea today |  |
+| ✅ | **Composer pickers** — typing `@` after whitespace pops a file-mention sheet (reuses `/api/browse`, defaults to the session's project root, inserts `@<relative>` or `@<abs>` fallback outside the root); typing `/` at the start of a line pops a slash-command sheet (`/review`, `/compact`, `/btw`, `/plan` — hardcoded built-ins, claude CLI interprets them). Both sheets share the s-09 bottom-sheet language. Side-rail icons also open the pickers explicitly | `web/src/screens/Chat.tsx`, `web/src/components/SlashCommandSheet.tsx`, `web/src/components/FileMentionSheet.tsx`, `web/src/lib/slash-commands.ts` |
 | ✅ | Session settings side sheet (gear button in the Chat header) — edit title, swap model (Opus 4.7 / Sonnet 4.6 / Haiku 4.5), switch permission mode (Ask / Accept / Plan / Bypass), read-only workspace panel (branch + worktree path placeholder for P4), and "Approved in this session" list with per-grant Revoke. Model change mid-run shows a yellow "applies to next turn" notice | `web/src/components/SessionSettingsSheet.tsx` + `web/src/screens/Chat.tsx` |
 | 🟡 | `/btw` side chat — not implemented |  |
-| 🟡 | View modes (Normal / Verbose / Summary) — transcript currently shows everything |  |
+| ✅ | **View modes (Normal / Verbose / Summary)** — dropdown picker in the Chat header (next to the gear). `normal` hides `thinking` blocks entirely (no inline expander yet — deferred); `verbose` shows every piece including thinking; `summary` keeps only user messages + the final `assistant_text` of each assistant turn and appends an **Outcome** card (driven by `session.status`) and a **Changes** card that aggregates `Edit`/`Write`/`MultiEdit` tool calls into per-file `+`/`−` line totals (PR card from mockup s-07 is still planned — no git integration yet). Session-scoped, no persistence across reloads | `web/src/screens/Chat.tsx`, `web/src/components/ViewModePicker.tsx`, `web/src/state/sessions.ts` |
 | 🟡 | Usage panel (context ring, plan usage, per-model today) — no UI |  |
 | 🟡 | Global settings page (2FA management, paired browsers, exposure audit log) — no UI |  |
 
@@ -165,7 +165,7 @@ behaviors** and **149 backend tests**.
 
 | Status | Feature | Where |
 |---|---|---|
-| ✅ | 149 backend tests, vitest, all green | `server/tests/` |
+| ✅ | 155 backend tests, vitest, all green | `server/tests/` |
 | ✅ | Bind-safety, DB migration + FK cascade | `tests/config.test.ts`, `tests/db.test.ts` |
 | ✅ | Password/TOTP/JWT edge cases (tampering, cross-secret, wrong audience, expiry, file-mode 0600) | `tests/auth.test.ts` |
 | ✅ | Auth HTTP routes including peek-retry TOTP, replay rejection, cookie attributes, user enumeration parity | `tests/auth-routes.test.ts` |
@@ -194,7 +194,7 @@ behaviors** and **149 backend tests**.
 ## Not started (candidates for P4+)
 
 - **P4** — git worktree creation on session start, parallel sessions per project, branch pickers, PR link-out
-- **P5** — `/compact`, `/btw` side chat, view modes (Normal/Verbose/Summary), usage/context panel, `@file` + `/command` pickers with virtual keyboard sticky row
+- **P5** — `/compact`, `/btw` side chat, usage/context panel, sticky virtual-keyboard row for the composer pickers
 - **P6** — routines (scheduled tasks) with catch-up on wake
 - **P7** — PR monitoring, auto-fix / auto-merge, preview (embedded browser), integrated terminal
 - **P8** — Skills / Plugins / Connectors management UI, CLAUDE.md editor, env-var editor, global settings (2FA + paired browsers + audit log)

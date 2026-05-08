@@ -56,6 +56,9 @@ export class SessionManager {
       cwd: session.worktreePath ?? project.path,
       model: session.model,
       permissionMode: session.mode,
+      // Resume the SDK-side conversation if we've seen one before. Null on
+      // first ever spawn; set after the SDK's system/init echoes its id back.
+      resumeSdkSessionId: session.sdkSessionId ?? undefined,
     };
     const runner = this.deps.runnerFactory.create(opts);
     const off = runner.on((event) => this.handleEvent(sessionId, event));
@@ -66,6 +69,11 @@ export class SessionManager {
   private handleEvent(sessionId: string, event: RunnerEvent) {
     try {
       switch (event.type) {
+        case "sdk_session_id":
+          // First-write-wins: setSdkSessionId only updates NULL rows. On resume
+          // the SDK re-emits the same id, and we intentionally skip that write.
+          this.deps.sessions.setSdkSessionId(sessionId, event.sdkSessionId);
+          break;
         case "assistant_text":
           this.deps.sessions.appendEvent({
             sessionId,

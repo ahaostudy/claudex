@@ -36,6 +36,16 @@ export type UIPiece =
       summary: string;
     };
 
+// Transcript view mode — controls how much detail the Chat screen shows.
+// Mirrors mockup s-07:
+//   - normal  (default): user, assistant text, tool_use chips/diffs,
+//                        tool_result. Thinking blocks hidden.
+//   - verbose : everything, including thinking.
+//   - summary : only user messages + the *final* assistant_text of each
+//                assistant turn, plus a Changes card synthesized from
+//                Edit/Write/MultiEdit tool calls.
+export type ViewMode = "normal" | "verbose" | "summary";
+
 interface SessionState {
   ws: WsClient | null;
   connected: boolean;
@@ -44,6 +54,9 @@ interface SessionState {
   // sessionId → pieces in order
   transcripts: Record<string, UIPiece[]>;
   loadingSessions: boolean;
+  // Current transcript view mode — session-scoped in spirit but not yet
+  // persisted per-session or to localStorage (intentional for first pass).
+  viewMode: ViewMode;
   init: () => void;
   refreshSessions: () => Promise<void>;
   ensureTranscript: (sessionId: string) => Promise<void>;
@@ -54,6 +67,7 @@ interface SessionState {
     approvalId: string,
     decision: "allow_once" | "allow_always" | "deny",
   ) => void;
+  setViewMode: (mode: ViewMode) => void;
 }
 
 function eventToPiece(ev: SessionEvent): UIPiece | null {
@@ -145,6 +159,11 @@ export const useSessions = create<SessionState>((set, get) => ({
   sessions: [],
   transcripts: {},
   loadingSessions: false,
+  viewMode: "normal",
+
+  setViewMode(mode) {
+    set({ viewMode: mode });
+  },
 
   init() {
     if (get().ws) return;

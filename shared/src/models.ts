@@ -55,6 +55,10 @@ export const Session = z.object({
   updatedAt: z.string(),
   lastMessageAt: z.string().nullable(),
   archivedAt: z.string().nullable(),
+  // Agent SDK session_id captured on first system/init; persisted so we can
+  // `resume` the same SDK conversation after a server restart. Null means the
+  // SDK has not yet initialized for this session.
+  sdkSessionId: z.string().nullable(),
   // aggregate counters, cheap to read
   stats: z.object({
     messages: z.number().int().nonnegative(),

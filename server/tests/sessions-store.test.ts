@@ -240,4 +240,25 @@ describe("SessionStore", () => {
     const [ev] = sessions.listEvents(s.id);
     expect(ev.payload).toEqual(complex);
   });
+
+  it("setSdkSessionId is first-write-wins and leaves the row NULL until called", () => {
+    const { sessions, project } = bootstrap();
+    const s = sessions.create({
+      title: "t",
+      projectId: project.id,
+      model: "claude-opus-4-7",
+      mode: "default",
+    });
+    // Fresh session: sdkSessionId defaults to null.
+    expect(s.sdkSessionId).toBeNull();
+    expect(sessions.findById(s.id)!.sdkSessionId).toBeNull();
+
+    // First write wins; returns true.
+    expect(sessions.setSdkSessionId(s.id, "sdk-first")).toBe(true);
+    expect(sessions.findById(s.id)!.sdkSessionId).toBe("sdk-first");
+
+    // Second write is a no-op; returns false and does not overwrite.
+    expect(sessions.setSdkSessionId(s.id, "sdk-second")).toBe(false);
+    expect(sessions.findById(s.id)!.sdkSessionId).toBe("sdk-first");
+  });
 });

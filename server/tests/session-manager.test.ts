@@ -8,6 +8,7 @@ import type {
   Runner,
   RunnerEvent,
   RunnerFactory,
+  RunnerInitOptions,
   RunnerListener,
 } from "../src/sessions/runner.js";
 import { tempConfig } from "./helpers.js";
@@ -17,6 +18,10 @@ import { tempConfig } from "./helpers.js";
 class MockRunner implements Runner {
   sessionId: string;
   sdkSessionId: string | null = null;
+  // Stashed init options so tests can assert what the factory passed in.
+  // This is test-only — we don't want to leak the full RunnerInitOptions into
+  // the Runner contract.
+  initOpts: RunnerInitOptions;
   private listeners = new Set<RunnerListener>();
   sent: string[] = [];
   interrupted = 0;
@@ -24,8 +29,9 @@ class MockRunner implements Runner {
   permissionModes: string[] = [];
   disposed = false;
 
-  constructor(sessionId: string) {
-    this.sessionId = sessionId;
+  constructor(opts: RunnerInitOptions) {
+    this.sessionId = opts.sessionId;
+    this.initOpts = opts;
   }
 
   async start(initial?: string) {
@@ -64,7 +70,7 @@ function createFactory(): { factory: RunnerFactory; last: () => MockRunner | nul
   return {
     factory: {
       create(opts) {
-        last = new MockRunner(opts.sessionId);
+        last = new MockRunner(opts);
         return last;
       },
     },
@@ -316,5 +322,53 @@ describe("SessionManager", () => {
     expect(afterAttach).toBe(true);
     expect(mock.permissionModes).toEqual(["acceptEdits"]);
     expect(s.manager.hasRunner(s.session.id)).toBe(true);
+  });
+
+  // ---- SDK session resume --------------------------------------------------
+
+  it("first getOrCreate has no resumeSdkSessionId when DB row is NULL", () => {
+    const s = setupManager();
+    cleanups.push(s.cleanup);
+    s.manager.getOrCreate(s.session.id);
+    const mock = s.last()!;
+    expect(mock.initOpts.resumeSdkSessionId).toBeUndefined();
+    // DB should still be NULL (nothing has emitted sdk_session_id yet).
+    expect(s.sessions.findById(s.session.id)!.sdkSessionId).toBeNull();
+  });
+
+  it("sdk_session_id event persists the id to the DB row", () => {
+    const s = setupManager();
+    cleanups.push(s.cleanup);
+    s.manager.getOrCreate(s.session.id);
+    const mock = s.last()!;
+    mock.emit({ type: "sdk_session_id", sdkSessionId: "sdk-abc-123" });
+    expect(s.sessions.findById(s.session.id)!.sdkSessionId).toBe("sdk-abc-123");
+  });
+
+  it("subsequent getOrCreate (after disposeAll) passes resumeSdkSessionId from the DB", async () => {
+    const s = setupManager();
+    cleanups.push(s.cleanup);
+    // First spawn + emit sdk_session_id.
+    s.manager.getOrCreate(s.session.id);
+    s.last()!.emit({ type: "sdk_session_id", sdkSessionId: "sdk-persisted" });
+    // Simulate a server restart: tear down all live runners, then re-create.
+    await s.manager.disposeAll();
+
+    s.manager.getOrCreate(s.session.id);
+    const second = s.last()!;
+    expect(second.initOpts.resumeSdkSessionId).toBe("sdk-persisted");
+    expect(second.initOpts.sessionId).toBe(s.session.id);
+  });
+
+  it("repeated sdk_session_id events are first-write-wins (DB not overwritten)", () => {
+    const s = setupManager();
+    cleanups.push(s.cleanup);
+    s.manager.getOrCreate(s.session.id);
+    const mock = s.last()!;
+    mock.emit({ type: "sdk_session_id", sdkSessionId: "sdk-first" });
+    // A second emit — shouldn't happen in practice (resume echoes the same id)
+    // but guard against the SDK changing ids mid-session.
+    mock.emit({ type: "sdk_session_id", sdkSessionId: "sdk-second" });
+    expect(s.sessions.findById(s.session.id)!.sdkSessionId).toBe("sdk-first");
   });
 });

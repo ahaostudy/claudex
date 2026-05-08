@@ -89,6 +89,16 @@ const MIGRATIONS: { id: number; name: string; up: string }[] = [
       );
     `,
   },
+  {
+    id: 2,
+    name: "session_sdk_id",
+    // Persisted Agent SDK session_id so we can `resume` the same SDK-side
+    // conversation across server restarts / session re-opens. First-write-wins
+    // semantics live in the manager; NULL means "no SDK conversation yet".
+    up: `
+      ALTER TABLE sessions ADD COLUMN sdk_session_id TEXT;
+    `,
+  },
 ];
 
 export function openDb(config: Config, log: Logger): ClaudexDb {

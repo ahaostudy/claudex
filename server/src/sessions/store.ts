@@ -22,6 +22,7 @@ interface SessionRow {
   updated_at: string;
   last_message_at: string | null;
   archived_at: string | null;
+  sdk_session_id: string | null;
   stats_messages: number;
   stats_files_changed: number;
   stats_lines_added: number;
@@ -43,6 +44,7 @@ function toSession(row: SessionRow): Session {
     updatedAt: row.updated_at,
     lastMessageAt: row.last_message_at,
     archivedAt: row.archived_at,
+    sdkSessionId: row.sdk_session_id,
     stats: {
       messages: row.stats_messages,
       filesChanged: row.stats_files_changed,
@@ -111,6 +113,7 @@ export class SessionStore {
       updated_at: now,
       last_message_at: null,
       archived_at: null,
+      sdk_session_id: null,
       stats_messages: 0,
       stats_files_changed: 0,
       stats_lines_added: 0,
@@ -121,12 +124,12 @@ export class SessionStore {
       .prepare(
         `INSERT INTO sessions (
            id, title, project_id, branch, worktree_path, status, model, mode,
-           created_at, updated_at, last_message_at, archived_at,
+           created_at, updated_at, last_message_at, archived_at, sdk_session_id,
            stats_messages, stats_files_changed, stats_lines_added,
            stats_lines_removed, stats_context_pct
          ) VALUES (
            @id, @title, @project_id, @branch, @worktree_path, @status, @model, @mode,
-           @created_at, @updated_at, @last_message_at, @archived_at,
+           @created_at, @updated_at, @last_message_at, @archived_at, @sdk_session_id,
            @stats_messages, @stats_files_changed, @stats_lines_added,
            @stats_lines_removed, @stats_context_pct
          )`,
@@ -157,6 +160,23 @@ export class SessionStore {
     this.db
       .prepare("UPDATE sessions SET mode = ?, updated_at = ? WHERE id = ?")
       .run(mode, new Date().toISOString(), id);
+  }
+
+  /**
+   * Persist the Agent SDK session_id for a claudex session. First-write-wins:
+   * once set, subsequent calls are no-ops, because `resume` on a live SDK
+   * conversation re-emits the same id and we don't want to thrash the row.
+   * Returns true if the write happened, false if the row already had one.
+   */
+  setSdkSessionId(id: string, sdkSessionId: string): boolean {
+    const res = this.db
+      .prepare(
+        `UPDATE sessions
+         SET sdk_session_id = ?, updated_at = ?
+         WHERE id = ? AND sdk_session_id IS NULL`,
+      )
+      .run(sdkSessionId, new Date().toISOString(), id);
+    return res.changes > 0;
   }
 
   touchLastMessage(id: string): void {
