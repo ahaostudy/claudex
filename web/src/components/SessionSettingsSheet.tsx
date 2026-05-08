@@ -3,6 +3,7 @@ import { GitBranch, X } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { api, ApiError } from "@/api/client";
 import { Markdown } from "@/components/Markdown";
+import { formatBytes } from "@/lib/format";
 import { useSessions } from "@/state/sessions";
 import type {
   MemoryResponse,
@@ -674,9 +675,4 @@ function deriveHomeDir(memory: MemoryResponse | null): string | null {
     return user.path.slice(0, -suffix.length);
   }
   return null;
-}
-
-function formatBytes(n: number): string {
-  if (n < 1024) return `${n} B`;
-  return `${Math.round(n / 1024)} KB`;
 }

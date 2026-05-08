@@ -7,6 +7,7 @@ import {
 } from "@/lib/slash-commands";
 import type { SlashClaudexAction } from "@claudex/shared";
 import { useFocusReturn } from "@/hooks/useFocusReturn";
+import { usePullToDismiss } from "@/hooks/usePullToDismiss";
 
 /**
  * Slash-command picker. Mobile-first bottom sheet that mirrors the mockup's
@@ -117,6 +118,10 @@ export const SlashCommandSheet = forwardRef<
   const [query, setQuery] = useState(initialQuery);
   const [selected, setSelected] = useState(0);
   const [recentNames, setRecentNames] = useState<string[]>(() => readRecents());
+  // Pull-to-dismiss — mobile only. On desktop the sheet centers via `sm:`
+  // layout and the handlers fire off `pointerType === "mouse"` as a no-op,
+  // so attaching unconditionally is safe.
+  const pull = usePullToDismiss(onClose);
   // One-line hint shown at the bottom of the sheet when the user taps an
   // unsupported row. Cleared when they move the selection or change the
   // query so it doesn't linger past relevance.
@@ -251,11 +256,18 @@ export const SlashCommandSheet = forwardRef<
         role="dialog"
         aria-modal="true"
         aria-label="Slash commands"
-        className="w-full sm:max-w-xl bg-canvas border-t sm:border border-line rounded-t-[24px] sm:rounded-[14px] shadow-lift flex flex-col max-h-[80vh] sm:max-h-[70vh]"
+        className={cn(
+          "w-full sm:max-w-xl bg-canvas border-t sm:border border-line rounded-t-[24px] sm:rounded-[14px] shadow-lift flex flex-col max-h-[80vh] sm:max-h-[70vh] touch-pan-y",
+          pull.releasing && "transition-transform duration-200",
+        )}
+        style={pull.style}
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Drag handle (mobile affordance) */}
-        <div className="flex justify-center pt-3 sm:hidden">
+        {/* Drag handle (mobile affordance + pull-to-dismiss grip) */}
+        <div
+          className="flex justify-center pt-3 pb-2 -mb-2 cursor-grab touch-none select-none sm:hidden"
+          {...pull.handlers}
+        >
           <span className="h-1 w-12 bg-line-strong rounded-full" />
         </div>
 

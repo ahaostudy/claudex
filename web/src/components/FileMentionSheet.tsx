@@ -11,6 +11,7 @@ import { api, ApiError } from "@/api/client";
 import type { BrowseEntry } from "@claudex/shared";
 import { cn } from "@/lib/cn";
 import type { PickerHandle } from "./SlashCommandSheet";
+import { usePullToDismiss } from "@/hooks/usePullToDismiss";
 
 /**
  * File-mention picker.
@@ -151,6 +152,10 @@ export const FileMentionSheet = forwardRef<
     el?.scrollIntoView({ block: "nearest" });
   }, [selected]);
 
+  // Pull-to-dismiss — mobile only. Desktop uses the separate popover block
+  // below and never attaches these handlers.
+  const pull = usePullToDismiss(onClose);
+
   // The desktop popover renders essentially the same list rows as mobile,
   // but with a slim header strip + divide-y list + footer-only hint. We
   // branch layout with responsive utilities rather than two components so
@@ -238,11 +243,18 @@ export const FileMentionSheet = forwardRef<
           role="dialog"
           aria-modal="true"
           aria-label="Mention a file"
-          className="w-full bg-canvas border-t border-line rounded-t-[24px] shadow-lift flex flex-col max-h-[92vh]"
+          className={cn(
+            "w-full bg-canvas border-t border-line rounded-t-[24px] shadow-lift flex flex-col max-h-[92vh] touch-pan-y",
+            pull.releasing && "transition-transform duration-200",
+          )}
+          style={pull.style}
           onClick={(e) => e.stopPropagation()}
         >
-          {/* Drag handle */}
-          <div className="flex justify-center pt-3">
+          {/* Drag handle — also the pull-to-dismiss grip on mobile. */}
+          <div
+            className="flex justify-center pt-3 pb-2 -mb-2 cursor-grab touch-none select-none"
+            {...pull.handlers}
+          >
             <span className="h-1 w-12 bg-line-strong rounded-full" />
           </div>
 

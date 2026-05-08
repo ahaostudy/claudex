@@ -24,6 +24,7 @@ import { useAuth } from "@/state/auth";
 import { api, ApiError, type WorktreeSummary } from "@/api/client";
 import type { Project, PushDevice, UserEnvResponse, AuditEvent, ToolGrant, ImportAllResponse } from "@claudex/shared";
 import { cn } from "@/lib/cn";
+import { timeAgoShort, timeAgoLong } from "@/lib/format";
 import { AppShell } from "@/components/AppShell";
 import {
   deviceLabel,
@@ -690,7 +691,7 @@ function RecoveryCodesCard() {
             <div>
               <span className="font-medium">{remaining} of 10 unused.</span>{" "}
               {generatedAt
-                ? `Generated ${relativeTimeShort(generatedAt)} ago.`
+                ? `Generated ${timeAgoShort(generatedAt)}.`
                 : "No codes generated yet."}
             </div>
             {exhausted && (
@@ -993,7 +994,7 @@ function GrantedToolsCard() {
                   </div>
                 </div>
                 <span className="shrink-0 text-[11px] mono text-ink-muted tabular-nums">
-                  {relativeTimeShort(g.createdAt)}
+                  {timeAgoShort(g.createdAt)}
                 </span>
                 <button
                   type="button"
@@ -1179,25 +1180,6 @@ function TrustedProjectsCard() {
   );
 }
 
-// Short relative-time formatter for audit rows ("5m", "2h", "3d", "1w"). Kept
-// terse so the 12-char fixed column stays tight on mobile. The longer
-// "5m ago" formatter further down is used by Notifications, which has room.
-function relativeTimeShort(iso: string): string {
-  const t = Date.parse(iso);
-  if (Number.isNaN(t)) return "—";
-  const delta = Math.max(0, Date.now() - t);
-  const sec = Math.floor(delta / 1000);
-  if (sec < 60) return `${sec}s`;
-  const min = Math.floor(sec / 60);
-  if (min < 60) return `${min}m`;
-  const hr = Math.floor(min / 60);
-  if (hr < 24) return `${hr}h`;
-  const day = Math.floor(hr / 24);
-  if (day < 7) return `${day}d`;
-  const wk = Math.floor(day / 7);
-  return `${wk}w`;
-}
-
 // Compose a short human-readable sentence per audit event. Open-ended on
 // purpose: unknown events fall back to `<event>` so new server-side kinds
 // don't require a UI deploy to show up.
@@ -1312,7 +1294,7 @@ function AuditLogCard({
           {visible.map((row) => (
             <div key={row.id} className="flex items-start gap-2">
               <span className="mono text-ink-muted w-12 mt-0.5 shrink-0">
-                {relativeTimeShort(row.createdAt)}
+                {timeAgoShort(row.createdAt)}
               </span>
               <span className="min-w-0 break-words">
                 {renderAuditDetail(row)}
@@ -1592,9 +1574,9 @@ function NotificationsPanel() {
                 <div className="min-w-0 flex-1">
                   <div className="font-medium truncate">{deviceLabel(d)}</div>
                   <div className="mono text-[11px] text-ink-muted truncate">
-                    added {relativeTime(d.createdAt)}
+                    added {timeAgoLong(d.createdAt)}
                     {d.lastUsedAt
-                      ? ` · last notified ${relativeTime(d.lastUsedAt)}`
+                      ? ` · last notified ${timeAgoLong(d.lastUsedAt)}`
                       : " · never notified"}
                   </div>
                 </div>
@@ -1623,28 +1605,6 @@ function NotificationsPanel() {
       </div>
     </div>
   );
-}
-
-/**
- * Loose "2m ago" / "3h ago" / "4d ago" formatter — matches the rest of the
- * app's relative-time language without pulling in a date library. Returns
- * the localized string on anything older than a week.
- */
-function relativeTime(iso: string): string {
-  const t = new Date(iso).getTime();
-  if (Number.isNaN(t)) return iso;
-  const s = Math.max(0, Math.round((Date.now() - t) / 1000));
-  if (s < 45) return "just now";
-  if (s < 90) return "1m ago";
-  const m = Math.round(s / 60);
-  if (m < 45) return `${m}m ago`;
-  if (m < 90) return "1h ago";
-  const h = Math.round(m / 60);
-  if (h < 22) return `${h}h ago`;
-  if (h < 36) return "1d ago";
-  const d = Math.round(h / 24);
-  if (d < 7) return `${d}d ago`;
-  return new Date(iso).toLocaleDateString();
 }
 
 // ----------------------------------------------------------------------------

@@ -361,6 +361,7 @@ export function HomeScreen() {
           <button
             onClick={() => setShowImport(true)}
             title="Import existing CLI sessions"
+            aria-label="Import CLI sessions"
             className="h-8 w-8 rounded-[8px] border border-line bg-canvas flex items-center justify-center hover:bg-paper"
           >
             <Download className="w-4 h-4 text-ink-soft" />
@@ -368,6 +369,7 @@ export function HomeScreen() {
           <button
             onClick={() => setShowStats(true)}
             title="Statistics"
+            aria-label="Statistics"
             className="h-8 w-8 rounded-[8px] border border-line bg-canvas flex items-center justify-center hover:bg-paper"
           >
             <BarChart3 className="w-4 h-4 text-ink-soft" />

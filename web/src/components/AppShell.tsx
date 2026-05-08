@@ -98,8 +98,9 @@ export function AppShell({
       <DesktopSidebar tab={tab} alertCount={alertCount} />
 
       {/* Main column. The bottom padding on mobile is to keep the tab bar
-          from covering the tail of the content. */}
-      <main className="flex-1 min-w-0 flex flex-col pb-[58px] md:pb-0">
+          from covering the tail of the content — plus `env(safe-area-inset-
+          bottom)` so the iOS home indicator doesn't eat the last row. */}
+      <main className="flex-1 min-w-0 flex flex-col pb-[calc(58px+env(safe-area-inset-bottom))] md:pb-0">
         {children}
       </main>
 

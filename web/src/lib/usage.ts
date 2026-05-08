@@ -1,5 +1,11 @@
 import type { ModelId, SessionEvent } from "@claudex/shared";
+import { scanTurnEnds } from "@claudex/shared";
 import { estimateCostUsd } from "./pricing";
+
+// Re-exported for components that imported the threshold from this module
+// before it moved to `@claudex/shared`. New code should import directly
+// from the shared package.
+export { HISTORICAL_TURN_THRESHOLD } from "@claudex/shared";
 
 /**
  * Per-model usage breakdown. Tokens are cumulative across every `turn_end`
@@ -55,19 +61,6 @@ export interface SessionUsage {
 }
 
 /**
- * Threshold below which `lastTurnInput` is treated as "historical row —
- * no cache fields persisted" rather than a real context measurement.
- *
- * Rationale: any real turn ships at least the system prompt + tool
- * definitions, which are thousands of tokens. `input_tokens` alone
- * (without cache reads) is ~6-30 on a cache-warmed turn, so anything below
- * this threshold is almost certainly a pre-cache-fields row. Using a
- * number instead of an explicit "has cache fields" bit keeps the check
- * honest even if the SDK ever returns `0` for cache reads on a cold turn.
- */
-export const HISTORICAL_TURN_THRESHOLD = 500;
-
-/**
  * Known context window sizes (in tokens) per model id. Used by the Usage
  * panel to render the "context %" ring as `lastTurnInput / contextWindow`.
  *
@@ -106,6 +99,9 @@ export function contextWindowTokens(model: ModelId | string): number {
  * `ModelId`. Every `turn_end` event whose payload has
  * `usage.inputTokens` / `usage.outputTokens` contributes.
  *
+ * Thin wrapper over the shared `scanTurnEnds` scanner; this function keeps
+ * the cost-enrichment on top (the pricing table lives in the web bundle).
+ *
  * Model attribution: the server does not persist a per-turn model on
  * `turn_end` today, so we attribute every turn to the session's current
  * model. This means a session that swapped models mid-stream will look like
@@ -117,77 +113,38 @@ export function computeSessionUsage(
   events: SessionEvent[],
   sessionModel: ModelId | string,
 ): SessionUsage {
-  const perModelMap = new Map<
-    string,
-    { model: ModelId | string; inputTokens: number; outputTokens: number }
-  >();
-  let turnCount = 0;
-  let lastTurnInput = 0;
-  let lastTurnNewInput = 0;
+  const scan = scanTurnEnds(events, sessionModel);
 
-  for (const ev of events) {
-    if (ev.kind !== "turn_end") continue;
-    const usage = (ev.payload as Record<string, unknown>).usage as
-      | {
-          inputTokens?: number;
-          outputTokens?: number;
-          cacheReadInputTokens?: number;
-          cacheCreationInputTokens?: number;
-        }
-      | null
-      | undefined;
-    if (!usage) continue;
-    const inp = Number(usage.inputTokens ?? 0) | 0;
-    const out = Number(usage.outputTokens ?? 0) | 0;
-    const cacheRead = Number(usage.cacheReadInputTokens ?? 0) | 0;
-    const cacheCreate = Number(usage.cacheCreationInputTokens ?? 0) | 0;
-    // Full context body shipped this turn: new input + cached replays +
-    // newly-cached creations. This is the number the user actually cares
-    // about for "how full is my window" — the SDK's `input_tokens` alone
-    // would show ~0 on a warm cache.
-    const totalInputThisTurn = inp + cacheRead + cacheCreate;
-    if (totalInputThisTurn === 0 && out === 0) continue;
-    // No per-event model today; attribute to the session's current model.
-    const model = sessionModel;
-    const key = String(model);
-    const row = perModelMap.get(key);
-    if (row) {
-      row.inputTokens += totalInputThisTurn;
-      row.outputTokens += out;
-    } else {
-      perModelMap.set(key, {
-        model,
-        inputTokens: totalInputThisTurn,
-        outputTokens: out,
-      });
-    }
-    turnCount += 1;
-    // Events are assumed to be in insertion order (server returns them
-    // ordered by id asc); the final turn_end wins for "current context".
-    lastTurnInput = totalInputThisTurn;
-    lastTurnNewInput = inp;
-  }
-
-  const perModel: PerModelUsage[] = Array.from(perModelMap.values())
-    .map((r) => ({
-      ...r,
-      costUsd: estimateCostUsd(r.model, r.inputTokens, r.outputTokens),
+  const perModel: PerModelUsage[] = Array.from(scan.perModel.entries())
+    .map(([model, row]) => ({
+      model,
+      inputTokens: row.inputTokens,
+      outputTokens: row.outputTokens,
+      costUsd: estimateCostUsd(model, row.inputTokens, row.outputTokens),
     }))
-    .sort((a, b) => b.inputTokens + b.outputTokens - (a.inputTokens + a.outputTokens));
+    .sort(
+      (a, b) =>
+        b.inputTokens + b.outputTokens - (a.inputTokens + a.outputTokens),
+    );
 
-  const totalInput = perModel.reduce((n, r) => n + r.inputTokens, 0);
-  const totalOutput = perModel.reduce((n, r) => n + r.outputTokens, 0);
   const costUsd = perModel.reduce((n, r) => n + r.costUsd, 0);
 
+  const lastTurnInput = scan.lastTurn
+    ? scan.lastTurn.inputTokens +
+      scan.lastTurn.cacheReadInputTokens +
+      scan.lastTurn.cacheCreationInputTokens
+    : 0;
+  const lastTurnNewInput = scan.lastTurn ? scan.lastTurn.inputTokens : 0;
+
   return {
-    totalInput,
-    totalOutput,
+    totalInput: scan.totalInput,
+    totalOutput: scan.totalOutput,
     costUsd,
     perModel,
-    turnCount,
+    turnCount: scan.turnCount,
     lastTurnInput,
     lastTurnNewInput,
-    lastTurnContextKnown: lastTurnInput >= HISTORICAL_TURN_THRESHOLD,
+    lastTurnContextKnown: scan.lastTurnContextKnown,
   };
 }
 

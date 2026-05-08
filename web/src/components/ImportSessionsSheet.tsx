@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { X, FolderGit2, Check, RefreshCcw } from "lucide-react";
 import { cn } from "@/lib/cn";
+import { timeAgoShort, formatBytes } from "@/lib/format";
 import { api, ApiError } from "@/api/client";
 import type { CliSessionSummary, Session } from "@claudex/shared";
 import { useFocusReturn } from "@/hooks/useFocusReturn";
@@ -235,8 +236,8 @@ export function ImportSessionsSheet({
                       <span className="truncate">{s.cwd}</span>
                     </div>
                     <div className="text-[11px] text-ink-muted mt-0.5">
-                      {s.lineCount} lines · {formatSize(s.fileSize)} ·{" "}
-                      {formatRelative(s.lastModified)}
+                      {s.lineCount} lines · {formatBytes(s.fileSize)} ·{" "}
+                      {timeAgoShort(s.lastModified)}
                     </div>
                   </div>
                 </button>
@@ -268,25 +269,4 @@ export function ImportSessionsSheet({
       </div>
     </div>
   );
-}
-
-function formatSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-function formatRelative(iso: string): string {
-  const then = new Date(iso).getTime();
-  if (!Number.isFinite(then)) return iso;
-  const diffMs = Date.now() - then;
-  const sec = Math.floor(diffMs / 1000);
-  if (sec < 60) return `${sec}s ago`;
-  const min = Math.floor(sec / 60);
-  if (min < 60) return `${min}m ago`;
-  const hr = Math.floor(min / 60);
-  if (hr < 24) return `${hr}h ago`;
-  const days = Math.floor(hr / 24);
-  if (days < 30) return `${days}d ago`;
-  return new Date(iso).toLocaleDateString();
 }

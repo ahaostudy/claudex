@@ -51,17 +51,14 @@ import type { SlashCommand } from "@/lib/slash-commands";
 import { BUILTIN_FALLBACK_SLASH_COMMANDS } from "@/lib/slash-commands";
 import type { UIPiece, ViewMode } from "@/state/sessions";
 import { contextWindowTokens } from "@/lib/usage";
+import { MODEL_LABEL } from "@/lib/pricing";
 import { extractImagesFromText, type ImageRef } from "@/lib/images";
+import { useVisualViewport } from "@/hooks/useVisualViewport";
 
 // ---------------------------------------------------------------------------
 // Model / mode label tables shared by the desktop header pills and the chat
 // overflow sheet. Keep these in sync with NewSessionSheet in Home.
 // ---------------------------------------------------------------------------
-const MODEL_LABEL: Record<ModelId, string> = {
-  "claude-opus-4-7": "Opus 4.7",
-  "claude-sonnet-4-6": "Sonnet 4.6",
-  "claude-haiku-4-5": "Haiku 4.5",
-};
 const MODEL_IDS: ModelId[] = [
   "claude-opus-4-7",
   "claude-sonnet-4-6",
@@ -112,6 +109,13 @@ export function ChatScreen() {
   // without a persisted seq can't be revealed via tap — acceptable tradeoff,
   // their chips only surface on desktop hover.
   const [revealedSeq, setRevealedSeq] = useState<number | null>(null);
+  // iOS Safari collapses its layout viewport when the software keyboard
+  // opens, which used to park the composer *under* the keyboard. We read
+  // the visual viewport's bottom offset and lift the composer wrapper by
+  // that many pixels on mobile (the `md:hidden` media check below no-ops
+  // this on desktop where `offsetBottom` is always 0). A zero-offset path
+  // leaves the desktop transform undefined so layout stays pristine.
+  const { offsetBottom: kbOffset } = useVisualViewport();
   // Mobile three-dot menu. Desktop uses header pills instead.
   const [showMore, setShowMore] = useState(false);
   // Desktop tasks rail visibility. Persisted across navigations so users
@@ -290,6 +294,23 @@ export function ChatScreen() {
       el.scrollTop = el.scrollHeight;
     });
   }, [id, meta?.initialLoading, pieces.length, location.hash]);
+
+  // Keyboard-open autoscroll. When `kbOffset` jumps from 0 to a positive
+  // value the iOS software keyboard has just appeared and the composer has
+  // been lifted above it — scroll the transcript tail into view so the user
+  // sees the latest message while they type. Desktop never sets kbOffset so
+  // this is a mobile-only effect in practice.
+  useEffect(() => {
+    if (kbOffset <= 0) return;
+    const el = scroller.current;
+    if (!el) return;
+    // rAF so the transform on the composer wrapper has actually landed
+    // before we measure scrollHeight — avoids a one-frame mis-scroll.
+    requestAnimationFrame(() => {
+      if (!scroller.current) return;
+      scroller.current.scrollTop = scroller.current.scrollHeight;
+    });
+  }, [kbOffset]);
 
   // Hash-anchored scroll-to-event. Permalinks from MessageActions / global
   // search look like `/session/<id>#seq-42`. We want that anchor to land
@@ -485,7 +506,7 @@ export function ChatScreen() {
     // mockup s-04 kicks in: 220px sessions rail · fluid center · 300px
     // tasks rail. The center column keeps its own flex-col so messages
     // scroll internally and the composer stays pinned.
-    <div className="flex h-full bg-canvas overflow-hidden">
+    <div className="flex h-[100dvh] bg-canvas overflow-hidden">
       <ChatSessionsRail currentId={id} />
       <main className="flex flex-col flex-1 min-w-0 min-h-0">
       {/* Mobile header — shown below md breakpoint (mockup 860-868). */}
@@ -735,6 +756,7 @@ export function ChatScreen() {
         project={project}
         session={session}
         busy={busy}
+        keyboardOffset={kbOffset}
         onSend={(text, attachmentIds) => {
           // Allow empty text when attachments are present (model can read
           // file contents via the @path prefix the server injects).
@@ -2356,6 +2378,7 @@ function Composer({
   onStop,
   onOpenSideChat,
   onClaudexAction,
+  keyboardOffset = 0,
 }: {
   project: Project | null;
   session: Session | null;
@@ -2369,6 +2392,14 @@ function Composer({
    * the `/x` token over the wire.
    */
   onClaudexAction?: (action: SlashClaudexAction) => void;
+  /**
+   * CSS pixels currently hidden under the mobile software keyboard (from
+   * `visualViewport`). When > 0 we translate the composer wrapper upward by
+   * that amount so it floats above the keyboard instead of disappearing
+   * beneath it. Always 0 on desktop (no visual-viewport shrink) — safe to
+   * apply unconditionally.
+   */
+  keyboardOffset?: number;
 }) {
   const [text, setText] = useState("");
   const [trigger, setTrigger] = useState<Trigger | null>(null);
@@ -2881,6 +2912,15 @@ function Composer({
 
       <div
         className="shrink-0 border-t border-line bg-canvas px-3 pt-2 pb-3 mt-2 md:px-5 md:pt-3 md:pb-4"
+        style={{
+          // Lift the composer above the mobile software keyboard. On
+          // desktop `keyboardOffset` stays 0 so `transform` is `undefined`
+          // and React omits the style entirely (no layout thrash). We use
+          // transform instead of padding so the message thread above keeps
+          // its own scroll geometry — only the composer floats up.
+          transform: keyboardOffset > 0 ? `translateY(-${keyboardOffset}px)` : undefined,
+          transition: "transform 120ms ease-out",
+        }}
         onDragOver={(e) => {
           if (!session) return;
           e.preventDefault();

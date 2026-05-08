@@ -13,6 +13,12 @@ html,
 body,
 #root {
   height: 100%;
+  /* Mobile Safari shrinks the layout viewport when the URL bar / keyboard
+     appears, which used to chop the bottom of `h-full` descendants and cut
+     off the chat composer. `100dvh` tracks the dynamic viewport, so the
+     cascade of `h-[100dvh]` in Chat / Login gets a real anchor to measure
+     against instead of a stale `100vh`. */
+  min-height: 100dvh;
 }
 
 body {

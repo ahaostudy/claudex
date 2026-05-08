@@ -71,7 +71,7 @@ export function LoginScreen() {
   const step = challengeId ? "totp" : "credentials";
 
   return (
-    <main className="min-h-screen flex items-center justify-center px-5 py-10 bg-canvas">
+    <main className="min-h-[100dvh] flex items-center justify-center px-5 py-10 bg-canvas">
       <div className="w-full max-w-[420px]">
         <div className="flex items-center gap-2 mb-8">
           <svg viewBox="0 0 32 32" className="w-6 h-6">
@@ -302,6 +302,7 @@ function TotpInput({
         pattern="\d{6}"
         maxLength={6}
         autoFocus
+        autoComplete="one-time-code"
         value={value}
         onChange={(e) =>
           onChange(e.target.value.replace(/\D/g, "").slice(0, 6))
