@@ -115,6 +115,35 @@ const MIGRATIONS: { id: number; name: string; up: string }[] = [
       CREATE INDEX idx_sessions_parent ON sessions(parent_session_id);
     `,
   },
+  {
+    id: 4,
+    name: "routines",
+    // Scheduled "recipes": on each cron fire the scheduler creates a fresh
+    // session (inheriting project/model/mode) and kicks it off with `prompt`.
+    // FK to projects is ON DELETE RESTRICT — we refuse to delete a project
+    // that still has routines hanging off it (same policy as sessions). We
+    // deliberately don't link routines to the sessions they spawn: each fire
+    // makes an independent session row, and the connection is conveyed in
+    // the session's title ("<routine name> · <timestamp>").
+    up: `
+      CREATE TABLE routines (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
+        prompt TEXT NOT NULL,
+        cron_expr TEXT NOT NULL,
+        model TEXT NOT NULL,
+        mode TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'active',
+        last_run_at TEXT,
+        next_run_at TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      CREATE INDEX idx_routines_status ON routines(status);
+      CREATE INDEX idx_routines_project ON routines(project_id);
+    `,
+  },
 ];
 
 export function openDb(config: Config, log: Logger): ClaudexDb {

@@ -157,6 +157,41 @@ export const WhoAmIResponse = z.object({
 });
 export type WhoAmIResponse = z.infer<typeof WhoAmIResponse>;
 
+// Change-password flow. Requires the caller's current password (so a stolen
+// JWT cookie alone can't rotate the password and lock the owner out) plus
+// the new password, which is min-8 for parity with bcrypt setup.
+export const ChangePasswordRequest = z.object({
+  currentPassword: z.string().min(1),
+  newPassword: z.string().min(8),
+});
+export type ChangePasswordRequest = z.infer<typeof ChangePasswordRequest>;
+
+// Read-only reflection of the user's Claude CLI environment: which plugins
+// are installed, which are flagged as enabled in `settings.json`. We don't
+// let the UI mutate any of this — the CLI owns those files, we just surface
+// them so the settings page isn't lying about what's loaded.
+export const UserEnvPlugin = z.object({
+  key: z.string(), // e.g. "skill-creator@claude-plugins-official"
+  name: z.string(), // e.g. "skill-creator"
+  marketplace: z.string().nullable(), // e.g. "claude-plugins-official" (null if the key has no @)
+  version: z.string().nullable(),
+  installPath: z.string().nullable(),
+  enabled: z.boolean(),
+});
+export type UserEnvPlugin = z.infer<typeof UserEnvPlugin>;
+
+export const UserEnvResponse = z.object({
+  user: User,
+  // Absolute path to `~/.claude` as the server sees it (informational only).
+  claudeDir: z.string(),
+  // Whether `~/.claude/settings.json` was readable. False means the panel
+  // should show a "no settings file" note instead of claiming everything's
+  // disabled.
+  settingsReadable: z.boolean(),
+  plugins: z.array(UserEnvPlugin),
+});
+export type UserEnvResponse = z.infer<typeof UserEnvResponse>;
+
 export const CreateSessionRequest = z.object({
   projectId: z.string(),
   title: z.string().optional(),
@@ -265,3 +300,67 @@ export const ListSlashCommandsResponse = z.object({
 export type ListSlashCommandsResponse = z.infer<
   typeof ListSlashCommandsResponse
 >;
+
+// ============================================================================
+// Routines (scheduled sessions)
+// ============================================================================
+
+// A routine is a cron-scheduled recipe: at each fire, the scheduler creates a
+// fresh session (with the routine's project/model/mode) and kicks it off with
+// `prompt` as the first user message. Independent conversation history per run.
+// `paused` routines stay in the list but skip scheduling.
+export const RoutineStatus = z.enum(["active", "paused"]);
+export type RoutineStatus = z.infer<typeof RoutineStatus>;
+
+export const Routine = z.object({
+  id: z.string(),
+  name: z.string(),
+  projectId: z.string(),
+  prompt: z.string(),
+  // Five-field cron expression (min hr dom mon dow). Evaluated in the host's
+  // local timezone by the scheduler.
+  cronExpr: z.string(),
+  model: ModelId,
+  mode: PermissionMode,
+  status: RoutineStatus,
+  lastRunAt: z.string().nullable(),
+  // ISO timestamp of the next scheduled fire; null when paused or the
+  // expression no longer yields future dates (shouldn't happen for 5-field).
+  nextRunAt: z.string().nullable(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+export type Routine = z.infer<typeof Routine>;
+
+export const CreateRoutineRequest = z.object({
+  name: z.string().min(1),
+  projectId: z.string().min(1),
+  prompt: z.string().min(1),
+  cronExpr: z.string().min(1),
+  model: ModelId,
+  mode: PermissionMode,
+});
+export type CreateRoutineRequest = z.infer<typeof CreateRoutineRequest>;
+
+// Partial update. At least one field must be present — the route rejects
+// empty bodies rather than bumping `updated_at` for nothing.
+export const UpdateRoutineRequest = z
+  .object({
+    name: z.string().min(1).optional(),
+    prompt: z.string().min(1).optional(),
+    cronExpr: z.string().min(1).optional(),
+    model: ModelId.optional(),
+    mode: PermissionMode.optional(),
+    status: RoutineStatus.optional(),
+  })
+  .refine(
+    (v) =>
+      v.name !== undefined ||
+      v.prompt !== undefined ||
+      v.cronExpr !== undefined ||
+      v.model !== undefined ||
+      v.mode !== undefined ||
+      v.status !== undefined,
+    { message: "at least one field is required" },
+  );
+export type UpdateRoutineRequest = z.infer<typeof UpdateRoutineRequest>;

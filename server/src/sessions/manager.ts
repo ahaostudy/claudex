@@ -266,6 +266,15 @@ export class SessionManager {
       payload: { text: content },
     });
     this.deps.sessions.touchLastMessage(sessionId);
+    // Broadcast the user message to every subscriber — including the tab
+    // that sent it. Multi-tab sees the message show up instantly; the
+    // sending tab reconciles against its local optimistic echo using
+    // content + createdAt proximity (see web/src/state/sessions.ts).
+    this.deps.broadcast(sessionId, {
+      type: "user_message",
+      text: content,
+      at: new Date().toISOString(),
+    });
     await runner.sendUserMessage(content);
   }
 

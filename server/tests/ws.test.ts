@@ -415,6 +415,38 @@ describe("WebSocket transport", () => {
     expect(ctx.hub.runners[0].interrupted).toBeGreaterThanOrEqual(1);
   });
 
+  it("broadcasts user_message to every subscribed tab (including the sender)", async () => {
+    const ctx = await harness();
+    disposers.push(ctx.cleanup);
+    const a = await openSocket(ctx.url, ctx.cookie);
+    const b = await openSocket(ctx.url, ctx.cookie);
+    disposers.push(() => a.close());
+    disposers.push(() => b.close());
+
+    await Promise.all([
+      a.waitFor((f) => f.type === "hello_ack"),
+      b.waitFor((f) => f.type === "hello_ack"),
+    ]);
+
+    a.send({ type: "subscribe", sessionId: ctx.sessionId });
+    b.send({ type: "subscribe", sessionId: ctx.sessionId });
+    await new Promise((r) => setTimeout(r, 50));
+
+    // Tab A sends; both A and B should get the broadcast.
+    a.send({
+      type: "user_message",
+      sessionId: ctx.sessionId,
+      content: "hello from tab A",
+    });
+
+    const fromA = await a.waitFor((f) => f.type === "user_message");
+    const fromB = await b.waitFor((f) => f.type === "user_message");
+    expect((fromA as any).content).toBe("hello from tab A");
+    expect((fromB as any).content).toBe("hello from tab A");
+    expect((fromA as any).sessionId).toBe(ctx.sessionId);
+    expect(Number.isNaN(Date.parse((fromA as any).createdAt))).toBe(false);
+  });
+
   it("rejects malformed frames with an error response, socket stays open", async () => {
     const ctx = await harness();
     disposers.push(ctx.cleanup);

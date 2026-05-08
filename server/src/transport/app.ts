@@ -14,9 +14,14 @@ import { ToolGrantStore } from "../sessions/grants.js";
 import { registerSessionRoutes } from "../sessions/routes.js";
 import { registerBrowseRoutes } from "../sessions/browse.js";
 import { registerSlashCommandRoutes } from "../sessions/slash-commands.js";
+import { registerUserEnvRoutes } from "../sessions/user-env.js";
 import { registerWsRoute } from "./ws.js";
+import { registerPtyRoutes } from "./pty.js";
 import { agentRunnerFactory } from "../sessions/agent-runner.js";
 import type { RunnerFactory } from "../sessions/runner.js";
+import { RoutineStore } from "../routines/store.js";
+import { RoutineScheduler } from "../routines/scheduler.js";
+import { registerRoutineRoutes } from "../routines/routes.js";
 
 export interface AppDeps {
   db: Database.Database;
@@ -45,7 +50,11 @@ export interface AppDeps {
 
 export async function buildApp(
   deps: AppDeps,
-): Promise<{ app: FastifyInstance; manager: SessionManager }> {
+): Promise<{
+  app: FastifyInstance;
+  manager: SessionManager;
+  scheduler: RoutineScheduler;
+}> {
   const app =
     deps.logger === false
       ? Fastify({ logger: false })
@@ -83,8 +92,29 @@ export async function buildApp(
     db: deps.db,
     userClaudeDir: deps.userClaudeDir,
   });
+  await registerUserEnvRoutes(app, {
+    db: deps.db,
+    userClaudeDir: deps.userClaudeDir,
+  });
+
+  // Routines: periodic cron-driven session spawns. The scheduler owns a single
+  // timer chained across all active routines and reloads itself on any CRUD.
+  const scheduler = new RoutineScheduler({
+    routines: new RoutineStore(deps.db),
+    sessions: new SessionStore(deps.db),
+    projects: new ProjectStore(deps.db),
+    manager,
+    logger: deps.logger === false ? undefined : deps.logger,
+  });
+  scheduler.start();
+  await registerRoutineRoutes(app, { db: deps.db, scheduler });
+
   await registerWsRoute(app, {
     manager,
+    db: deps.db,
+    jwtSecret: deps.jwtSecret,
+  });
+  await registerPtyRoutes(app, {
     db: deps.db,
     jwtSecret: deps.jwtSecret,
   });
@@ -93,7 +123,7 @@ export async function buildApp(
     await registerWebStatic(app, deps.webDist);
   }
 
-  return { app, manager };
+  return { app, manager, scheduler };
 }
 
 async function registerWebStatic(
@@ -137,7 +167,9 @@ async function registerWebStatic(
       url.startsWith("/api/") ||
       url === "/api" ||
       url === "/ws" ||
-      url.startsWith("/ws/")
+      url.startsWith("/ws/") ||
+      url === "/pty" ||
+      url.startsWith("/pty/")
     ) {
       return reply.code(404).send({ error: "not_found" });
     }

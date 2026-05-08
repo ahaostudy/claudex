@@ -271,4 +271,113 @@ describe("auth routes", () => {
       expect(cleared!.value).toBe("");
     });
   });
+
+  describe("POST /api/auth/change-password", () => {
+    async function loggedInCookie(): Promise<string> {
+      const login = await ctx.app.inject({
+        method: "POST",
+        url: "/api/auth/login",
+        payload: { username: ctx.username, password: ctx.password },
+      });
+      const challengeId = login.json().challengeId as string;
+      const verify = await ctx.app.inject({
+        method: "POST",
+        url: "/api/auth/verify-totp",
+        payload: { challengeId, code: currentTotp(ctx.totpSecret) },
+      });
+      return cookieFor(verify);
+    }
+
+    it("401s when not logged in", async () => {
+      const res = await ctx.app.inject({
+        method: "POST",
+        url: "/api/auth/change-password",
+        payload: {
+          currentPassword: ctx.password,
+          newPassword: "new-password-xyz",
+        },
+      });
+      expect(res.statusCode).toBe(401);
+    });
+
+    it("401s when the current password is wrong", async () => {
+      const cookie = await loggedInCookie();
+      const res = await ctx.app.inject({
+        method: "POST",
+        url: "/api/auth/change-password",
+        headers: { cookie },
+        payload: {
+          currentPassword: "not-the-password",
+          newPassword: "new-password-xyz",
+        },
+      });
+      expect(res.statusCode).toBe(401);
+      expect(res.json().error).toBe("invalid_credentials");
+    });
+
+    it("400s when the new password is too short", async () => {
+      const cookie = await loggedInCookie();
+      const res = await ctx.app.inject({
+        method: "POST",
+        url: "/api/auth/change-password",
+        headers: { cookie },
+        payload: {
+          currentPassword: ctx.password,
+          newPassword: "short",
+        },
+      });
+      expect(res.statusCode).toBe(400);
+    });
+
+    it("400s when the new password equals the current one", async () => {
+      const cookie = await loggedInCookie();
+      const res = await ctx.app.inject({
+        method: "POST",
+        url: "/api/auth/change-password",
+        headers: { cookie },
+        payload: {
+          currentPassword: ctx.password,
+          newPassword: ctx.password,
+        },
+      });
+      expect(res.statusCode).toBe(400);
+      expect(res.json().error).toBe("same_password");
+    });
+
+    it("rotates the hash, re-signs the cookie, and lets the old password fail afterwards", async () => {
+      const cookie = await loggedInCookie();
+      const newPassword = "a-brand-new-one-2026";
+      const res = await ctx.app.inject({
+        method: "POST",
+        url: "/api/auth/change-password",
+        headers: { cookie },
+        payload: {
+          currentPassword: ctx.password,
+          newPassword,
+        },
+      });
+      expect(res.statusCode).toBe(200);
+      // A fresh session cookie is issued (re-sign).
+      const fresh = res.cookies.find((c) => c.name === "claudex_session");
+      expect(fresh).toBeDefined();
+      expect(fresh!.value.length).toBeGreaterThan(0);
+      expect(fresh!.value).not.toBe(cookie.split("=")[1]);
+
+      // Old password no longer works.
+      const badLogin = await ctx.app.inject({
+        method: "POST",
+        url: "/api/auth/login",
+        payload: { username: ctx.username, password: ctx.password },
+      });
+      expect(badLogin.statusCode).toBe(401);
+
+      // New password works.
+      const newLogin = await ctx.app.inject({
+        method: "POST",
+        url: "/api/auth/login",
+        payload: { username: ctx.username, password: newPassword },
+      });
+      expect(newLogin.statusCode).toBe(200);
+    });
+  });
 });

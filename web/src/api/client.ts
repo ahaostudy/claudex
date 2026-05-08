@@ -1,14 +1,19 @@
 import type {
   BrowseResponse,
+  ChangePasswordRequest,
+  CreateRoutineRequest,
   CreateSessionRequest,
   CreateSideSessionRequest,
   Project,
+  Routine,
   Session,
   SessionEvent,
   SlashCommand,
   ToolGrant,
   UpdateProjectRequest,
+  UpdateRoutineRequest,
   UpdateSessionRequest,
+  UserEnvResponse,
 } from "@claudex/shared";
 
 export class ApiError extends Error {
@@ -152,5 +157,40 @@ export const api = {
     return request<{ commands: SlashCommand[] }>(
       `/api/slash-commands${q}`,
     );
+  },
+  listRoutines() {
+    return request<{ routines: Routine[] }>("/api/routines");
+  },
+  getRoutine(id: string) {
+    return request<{ routine: Routine }>(`/api/routines/${id}`);
+  },
+  createRoutine(body: CreateRoutineRequest) {
+    return request<{ routine: Routine }>("/api/routines", {
+      method: "POST",
+      json: body,
+    });
+  },
+  updateRoutine(id: string, body: UpdateRoutineRequest) {
+    return request<{ routine: Routine }>(`/api/routines/${id}`, {
+      method: "PATCH",
+      json: body,
+    });
+  },
+  deleteRoutine(id: string) {
+    return request<{ ok: true }>(`/api/routines/${id}`, { method: "DELETE" });
+  },
+  runRoutine(id: string) {
+    return request<{ sessionId: string }>(`/api/routines/${id}/run`, {
+      method: "POST",
+    });
+  },
+  changePassword(body: ChangePasswordRequest) {
+    return request<{ ok: true }>("/api/auth/change-password", {
+      method: "POST",
+      json: body,
+    });
+  },
+  getUserEnv() {
+    return request<UserEnvResponse>("/api/user/env");
   },
 };

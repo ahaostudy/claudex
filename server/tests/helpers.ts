@@ -18,6 +18,7 @@ import {
 } from "../src/auth/index.js";
 import type { RunnerFactory } from "../src/sessions/runner.js";
 import type { SessionManager } from "../src/sessions/manager.js";
+import type { RoutineScheduler } from "../src/routines/scheduler.js";
 
 /**
  * Create a fully isolated Config pointing at a fresh tmp dir and a silent logger.
@@ -65,12 +66,13 @@ export async function bootstrapAuthedApp(
   cookie: string;
   tmpDir: string;
   manager: SessionManager;
+  scheduler: RoutineScheduler;
   cleanup: () => Promise<void>;
 }> {
   const { config, log, cleanup } = tempConfig();
   const dbh = openDb(config, log);
   const jwtSecret = loadOrCreateJwtSecret(config);
-  const { app, manager } = await buildApp({
+  const { app, manager, scheduler } = await buildApp({
     db: dbh.db,
     jwtSecret,
     logger: false,
@@ -107,8 +109,10 @@ export async function bootstrapAuthedApp(
     cookie,
     tmpDir,
     manager,
+    scheduler,
     cleanup: async () => {
       fs.rmSync(tmpDir, { recursive: true, force: true });
+      scheduler.dispose();
       await manager.disposeAll();
       await app.close();
       dbh.close();

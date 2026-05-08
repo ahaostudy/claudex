@@ -273,6 +273,13 @@ function runnerEventToFrame(
         seq: 0,
         stopReason: event.stopReason,
       };
+    case "user_message":
+      return {
+        type: "user_message",
+        sessionId,
+        content: event.text,
+        createdAt: event.at,
+      };
     case "error":
       return {
         type: "error",

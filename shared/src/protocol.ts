@@ -129,6 +129,18 @@ export const ServerTurnEnd = z.object({
   stopReason: z.string(),
 });
 
+// Broadcast when a user message lands in a session — including the tab that
+// sent it. Other tabs subscribed to the same session use this to surface
+// the message immediately, instead of waiting until `turn_end` to refresh.
+// The originating tab uses `content` + `createdAt` to reconcile its local
+// optimistic echo (see web/src/state/sessions.ts for the de-dupe rule).
+export const ServerUserMessage = z.object({
+  type: z.literal("user_message"),
+  sessionId: z.string(),
+  content: z.string(),
+  createdAt: z.string(),
+});
+
 export const ServerError = z.object({
   type: z.literal("error"),
   sessionId: z.string().nullable(),
@@ -146,6 +158,7 @@ export const ServerFrame = z.discriminatedUnion("type", [
   ServerToolResult,
   ServerPermissionRequest,
   ServerTurnEnd,
+  ServerUserMessage,
   ServerError,
 ]);
 export type ServerFrame = z.infer<typeof ServerFrame>;

@@ -13,7 +13,19 @@ import type {
 // load) and live WS frames.
 
 export type UIPiece =
-  | { kind: "user"; id: string; text: string; at: string }
+  | {
+      kind: "user";
+      id: string;
+      text: string;
+      at: string;
+      // True once we've matched this piece against a server-broadcast
+      // `user_message` frame (or it came straight from the server in the
+      // first place). Used by the multi-tab de-dupe rule — a tab's locally
+      // echoed user piece is `serverAcked=false` until its own ws receives
+      // the matching broadcast, at which point we flip the flag rather
+      // than push a second copy.
+      serverAcked?: boolean;
+    }
   | { kind: "assistant_text"; id: string; text: string }
   | {
       kind: "tool_use";
@@ -97,6 +109,7 @@ function eventToPiece(ev: SessionEvent): UIPiece | null {
         id: ev.id,
         text: String(p.text ?? ""),
         at: ev.createdAt,
+        serverAcked: true,
       };
     case "assistant_text":
       return {
@@ -267,6 +280,68 @@ export const useSessions = create<SessionState>((set, get) => {
           dropFirstPending(sid);
         }
       }
+      // Multi-tab: a user_message broadcast can land in any subscribed tab —
+      // including the one that sent it. De-dupe rule: if an existing user
+      // piece with the same text and a close-enough `at` is already in the
+      // transcript (either a local optimistic echo or a prior persisted copy
+      // we loaded from /events), upgrade it to `serverAcked=true` rather than
+      // push a duplicate. Otherwise append a fresh piece.
+      if (frame.type === "user_message") {
+        const sid = frame.sessionId;
+        const ts = Date.parse(frame.createdAt) || Date.now();
+        set((s) => {
+          const list = s.transcripts[sid] ?? [];
+          // Scan newest → oldest; match on content first, then ensure the
+          // timestamps are within 3s (covers optimistic echoes whose `at` is
+          // generated client-side and won't be identical to the server's).
+          let matchIdx = -1;
+          for (let i = list.length - 1; i >= 0; i--) {
+            const piece = list[i];
+            if (piece.kind !== "user") continue;
+            if (piece.text !== frame.content) continue;
+            if (piece.serverAcked) {
+              // Already reconciled for an earlier broadcast; don't flip again.
+              matchIdx = i;
+              break;
+            }
+            const pTs = Date.parse(piece.at) || 0;
+            if (Math.abs(ts - pTs) <= 3000) {
+              matchIdx = i;
+              break;
+            }
+          }
+          if (matchIdx !== -1) {
+            const existing = list[matchIdx];
+            if (existing.kind === "user" && existing.serverAcked) {
+              return s; // already acked, nothing to do
+            }
+            const next = [...list];
+            next[matchIdx] = {
+              ...(existing as UIPiece & { kind: "user" }),
+              at: frame.createdAt,
+              serverAcked: true,
+            };
+            return { transcripts: { ...s.transcripts, [sid]: next } };
+          }
+          // No local echo to reconcile — a *different* tab sent this. Insert
+          // before any trailing `pending` placeholder so the UI keeps its
+          // "claude is thinking" bubble at the very bottom.
+          const piece: UIPiece = {
+            kind: "user",
+            id: `remote-${ts}`,
+            text: frame.content,
+            at: frame.createdAt,
+            serverAcked: true,
+          };
+          const tailIsPending =
+            list.length > 0 && list[list.length - 1].kind === "pending";
+          const next = tailIsPending
+            ? [...list.slice(0, -1), piece, list[list.length - 1]]
+            : [...list, piece];
+          return { transcripts: { ...s.transcripts, [sid]: next } };
+        });
+        return;
+      }
       // Any substantive reply frame means the pending placeholder did its job.
       if (
         frame.type === "assistant_text_delta" ||
@@ -337,6 +412,7 @@ export const useSessions = create<SessionState>((set, get) => {
             id: `local-${Date.now()}`,
             text,
             at: new Date().toISOString(),
+            serverAcked: false,
           },
           {
             kind: "pending",

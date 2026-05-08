@@ -27,7 +27,7 @@ async function main() {
     webDist = fs.existsSync(candidate) ? candidate : undefined;
   }
 
-  const { app, manager } = await buildApp({
+  const { app, manager, scheduler } = await buildApp({
     db,
     jwtSecret,
     logger: log as any,
@@ -38,6 +38,7 @@ async function main() {
   const shutdown = async (signal: string) => {
     log.info({ signal }, "shutting down");
     try {
+      scheduler.dispose();
       await manager.disposeAll();
       await app.close();
     } finally {

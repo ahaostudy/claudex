@@ -10,6 +10,7 @@ import {
   Settings2,
   Slash,
   Square,
+  Terminal,
 } from "lucide-react";
 import { useSessions } from "@/state/sessions";
 import { api } from "@/api/client";
@@ -21,6 +22,7 @@ import { SessionSettingsSheet } from "@/components/SessionSettingsSheet";
 import { SideChatDrawer } from "@/components/SideChatDrawer";
 import { SlashCommandSheet } from "@/components/SlashCommandSheet";
 import { FileMentionSheet } from "@/components/FileMentionSheet";
+import { TerminalDrawer } from "@/components/TerminalDrawer";
 import { ViewModePicker } from "@/components/ViewModePicker";
 import { ContextRingButton, UsagePanel } from "@/components/UsagePanel";
 import { Markdown } from "@/components/Markdown";
@@ -38,6 +40,9 @@ export function ChatScreen() {
   // the actual child session alive across close/re-open so the conversation
   // is preserved.
   const [showSideChat, setShowSideChat] = useState(false);
+  // Terminal drawer: a PTY attached to the session's cwd. Independent of the
+  // chat WS; see components/TerminalDrawer.tsx.
+  const [showTerminal, setShowTerminal] = useState(false);
   const {
     transcripts,
     init,
@@ -180,6 +185,15 @@ export function ChatScreen() {
         >
           <Settings2 className="w-4 h-4 text-ink-soft" />
         </button>
+        <button
+          onClick={() => setShowTerminal(true)}
+          disabled={!session}
+          title="Open terminal in session cwd"
+          aria-label="Open terminal"
+          className="h-8 w-8 rounded-[8px] border border-line bg-canvas flex items-center justify-center hover:bg-paper disabled:opacity-40"
+        >
+          <Terminal className="w-4 h-4 text-ink-soft" />
+        </button>
       </header>
 
       <div ref={scroller} className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
@@ -225,6 +239,13 @@ export function ChatScreen() {
         <SideChatDrawer
           parentSession={session}
           onClose={() => setShowSideChat(false)}
+        />
+      )}
+      {showTerminal && session && (
+        <TerminalDrawer
+          session={session}
+          projectPath={project?.path ?? null}
+          onClose={() => setShowTerminal(false)}
         />
       )}
 

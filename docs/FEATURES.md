@@ -11,8 +11,8 @@ Three status tiers:
   use from the API; users won't see it yet.
 - ⬜ **Planned** — listed so nobody re-plans it from scratch, but not started.
 
-Last updated: see the git log of this file. Current revision lists **78 shipped
-behaviors** and **193 backend tests**.
+Last updated: see the git log of this file. Current revision lists **85 shipped
+behaviors** and **229 backend tests**.
 
 ---
 
@@ -51,6 +51,8 @@ behaviors** and **193 backend tests**.
 | ✅ | Cookie `Secure` attribute auto-detected from request protocol and `X-Forwarded-Proto`; override with `CLAUDEX_COOKIE_SECURE=1/0`. `SameSite=Lax`, `HttpOnly`, `Path=/` | same |
 | ✅ | `GET /api/auth/whoami` — returns the logged-in user or 401 | same |
 | ✅ | `POST /api/auth/logout` — clears the session cookie | same |
+| ✅ | `POST /api/auth/change-password` — logged-in only. Requires the caller's current password (401 `invalid_credentials` on mismatch), min-8 on new password (400 `bad_request`), rejects identical-to-current (400 `same_password`). On success rotates the bcrypt hash and issues a fresh session cookie so the caller's tab keeps working. The JWT secret is not rotated, so other tabs' old cookies remain valid until their own `exp` — we don't maintain a revocation list yet | `server/src/auth/routes.ts`, `server/src/auth/index.ts` (`UserStore.setPasswordHash`) |
+| ✅ | `GET /api/user/env` — logged-in only. Read-only reflection of the user's Claude CLI environment: the session user, `claudeDir` (absolute `~/.claude`), `settingsReadable`, and a merged plugin list keyed by `<plugin>@<marketplace>` — union of `~/.claude/settings.json` `enabledPlugins` and `~/.claude/plugins/installed_plugins.json`. Each entry carries `name`, `marketplace`, `version`, `installPath`, `enabled`. Missing or malformed files degrade gracefully rather than erroring | `server/src/sessions/user-env.ts` |
 | ✅ | JWT signed with a 48-byte random secret persisted at `~/.claudex/jwt.secret` (mode 0600) | `server/src/auth/index.ts` |
 | ✅ | Bcrypt password hashing (12 rounds); rejects passwords under 8 chars | same |
 | ✅ | `otplib` TOTP with issuer `claudex`; current-code helper exposed for tests | same |
@@ -83,7 +85,7 @@ behaviors** and **193 backend tests**.
 |---|---|---|
 | ✅ | `GET /api/slash-commands?projectId=<id>` — returns the merged list that powers the composer's `/` picker: curated CLI built-ins, then `~/.claude/commands/*.md` (kind `user`), then `<project>/.claude/commands/*.md` (kind `project`, only when `projectId` is given). Each entry is `{name, description, kind, source?}`. Descriptions are parsed from YAML frontmatter (`description:`), a leading `# Heading`, or the first non-empty line — whichever lands first in the first 1 KB / 10 lines. Top-level `.md` only; dotfiles skipped; unreadable files are quietly skipped rather than 500-ing. Unknown `projectId` is soft-ignored (still returns built-in + user) | `server/src/sessions/slash-commands.ts` |
 | ✅ | Built-ins are a curated list (`add-dir`, `bug`, `clear`, `compact`, `config`, `continue`, `cost`, `doctor`, `help`, `init`, `login`, `logout`, `mcp`, `model`, `plugin`, `pr-comments`, `resume`, `review`, `status`) — the `claude` CLI owns the real behavior, we just surface the token so the picker isn't empty | same |
-| ⚠ | Plugin commands (`~/.claude/plugins/cache/<marketplace>/<plugin>/<version>/commands/*.md`) are **not** scanned — the versioned cache layout has multiple valid entries per plugin and we don't guess. Revisit once the CLI exposes a canonical listing | — |
+| ✅ | Plugin commands — driven by `~/.claude/plugins/installed_plugins.json`. For each installed plugin we scan `<installPath>/commands/*.md`; multiple installed versions of the same plugin de-duplicate to the most recently updated install (by `lastUpdated`, else `installedAt`). Missing or malformed manifest is swallowed silently rather than 500-ing. Tagged `kind: "plugin"`; `source` points at the absolute `.md` path | `server/src/sessions/slash-commands.ts` (`scanPluginCommands`) |
 
 ## Sessions
 
@@ -119,6 +121,7 @@ behaviors** and **193 backend tests**.
 | ✅ | Session resume via `resumeSdkSessionId` — the SDK `session_id` from the first `system/init` is persisted to `sessions.sdk_session_id` (first-write-wins, SQLite migration id=2) and passed as `resume` on subsequent `getOrCreate`, so re-opening an old session after a server restart continues the same Agent SDK conversation | `server/src/sessions/manager.ts`, `server/src/sessions/store.ts`, `server/src/db/index.ts` |
 | ✅ | Agent SDK spawned with `thinking: { type: "adaptive", display: "summarized" }` so Opus 4.7 forwards summarized thinking text to the runner (default display is `"omitted"`, which keeps the model thinking silently). This is what makes Verbose view-mode show anything beyond Normal — without it both modes render identically for the vast majority of turns | `server/src/sessions/agent-runner.ts` |
 | ✅ | **Side-chat context injection** — when a session has `parent_session_id` set (a `/btw` child) and has never spawned an SDK conversation before, the manager synthesizes a context seed from the parent's `user_message` + `assistant_text` events (tool calls / thinking stripped so the child isn't drowned in noise) and pushes it to the SDK as a synthetic first user message. Seed never hits the child's `session_events` log — the transcript only shows what the user actually typed. Resumes skip the seed because the SDK already has the full history | `server/src/sessions/manager.ts` |
+| ✅ | **User-message broadcast** — `SessionManager.sendUserMessage` broadcasts a manager-synthesized `user_message` RunnerEvent (translated to a `ServerUserMessage` WS frame as `{type, sessionId, content, createdAt}`) so every tab subscribed to the session sees the user's turn the moment it lands, not after `turn_end`. The originating tab receives its own broadcast and reconciles it against its local optimistic echo (match on content + `createdAt` within 3s → flip `serverAcked`) rather than rendering a duplicate. Other tabs insert a fresh piece above any trailing `pending` placeholder | `server/src/sessions/manager.ts`, `server/src/transport/ws.ts`, `web/src/state/sessions.ts` |
 
 ## Permissions
 
@@ -152,6 +155,13 @@ behaviors** and **193 backend tests**.
 | ✅ | Auto-reconnecting WS client on the web side with exponential-ish backoff capped at 1s | `web/src/api/ws.ts` |
 | 🟡 | `hello` carries a per-session `resume: {sessionId: lastSeq}` map so the server can replay missed events on reconnect — schema and storage are in place but the server-side replay is not wired yet (reconnect today relies on `/api/sessions/:id/events` as history backfill) | `server/src/transport/ws.ts` |
 
+## Terminal
+
+| Status | Feature | Where |
+|---|---|---|
+| ✅ | `GET /pty` WebSocket endpoint — authenticated via the session cookie, attaches a `node-pty` subprocess rooted in the session's cwd (worktree path if present, else project root). Shell is `$SHELL` with a `/bin/zsh` / `/bin/bash` fallback; the client cannot pick the shell or inject env (server-side only, plus `TERM=xterm-256color`). JSON frames: server → `{data}` / `{exit, exitCode, signal}` / `{error, code, message}`; client → `{data}` / `{resize, cols, rows}`. One PTY per session — a second concurrent attach for the same `sessionId` is refused with `{error: "busy"}`. Archived sessions refuse with `archived`, unknown sessions with `not_found`. PTY is killed on socket close / error; socket is closed on PTY exit | `server/src/transport/pty.ts` |
+| ✅ | TerminalDrawer in the Chat header — button next to Settings. Mounts an `@xterm/xterm` terminal with fit-addon, JetBrains Mono 13px, light palette matching the app canvas. Opens as a full-screen bottom sheet on mobile and a lower-right panel on desktop. Header shows the cwd and a live/connecting/closed/error indicator. ResizeObserver drives `fit + resize` frames so the PTY honors the actual viewport size. No auto-reconnect — a PTY session is stateful and silent reconnects would be worse than visible breakage | `web/src/components/TerminalDrawer.tsx`, `web/src/screens/Chat.tsx` |
+
 ## Web UI
 
 | Status | Feature | Where |
@@ -175,7 +185,7 @@ behaviors** and **193 backend tests**.
 | ✅ | **View modes (Normal / Verbose / Summary)** — dropdown picker in the Chat header (next to the gear). **Normal** collapses non-diff tool_use calls to single-line chips (click to expand to full pretty-printed input), truncates tool_result to 1200 chars with a "show N more chars" toggle, hides thinking blocks entirely. **Verbose** expands every piece, never truncates tool_result, and surfaces thinking blocks (requires the Agent SDK to be started with `thinking.display: "summarized"` — see the Chat-loop row). **Summary** keeps only user messages + the final `assistant_text` of each assistant turn and appends an **Outcome** card (driven by `session.status`) and a **Changes** card that aggregates `Edit`/`Write`/`MultiEdit` tool calls into per-file `+`/`−` line totals (PR card from mockup s-07 is still planned — no git integration yet). Session-scoped, no persistence across reloads | `web/src/screens/Chat.tsx`, `web/src/components/ViewModePicker.tsx`, `web/src/state/sessions.ts` |
 | ✅ | Markdown rendering for assistant text via `react-markdown` + `remark-gfm` — headings, bold/italic, strikethrough, inline & fenced code (Tailwind-styled, language tag, no syntax highlighter), lists, task lists (GFM `- [ ]` / `- [x]` → disabled checkboxes), blockquotes, tables, links (external `href` opens in a new tab with `rel="noopener noreferrer"`). User messages are kept verbatim — no markdown processing — so literal `**` or backticks the user typed render as entered. `tool_result` blocks are also verbatim (mono/pre-wrap), because tool output is usually command stdout, not prose | `web/src/components/Markdown.tsx`, `web/src/screens/Chat.tsx` |
 | ✅ | Context ring in the chat header opens a Usage panel with current-session token counts (input/output/total) and a cost estimate using a front-end pricing table. Aggregated by model when a session spanned multiple models. Plan-period usage and cross-session charts are not yet shown (single-session data only); `session.stats.contextPct` is still 0 server-side, so the ring renders as `—` pending SDK support | `web/src/components/UsagePanel.tsx`, `web/src/lib/usage.ts`, `web/src/lib/pricing.ts`, `web/src/screens/Chat.tsx` |
-| 🟡 | Global settings page (2FA management, paired browsers, exposure audit log) — no UI |  |
+| 🟡 | Global settings page partially shipped — Account (change password), Security (2FA status only — recovery-code rotation and paired-browser list still planned), Appearance (light theme only — dark + text-size toggles rendered as disabled placeholders), Plugins (read-only view of `~/.claude/settings.json` `enabledPlugins` merged with `~/.claude/plugins/installed_plugins.json`). No audit log, no exposure panel | `web/src/screens/Settings.tsx`, `server/src/auth/routes.ts`, `server/src/sessions/user-env.ts` |
 
 ## Tests
 
@@ -197,7 +207,28 @@ behaviors** and **193 backend tests**.
 | ✅ | Static web serving: index at /, immutable asset cache, SPA fallback for GET, /api 404s stay JSON, non-GET doesn't fall back, /api/health works alongside static | `tests/static.test.ts` |
 | ✅ | Worktree lifecycle: `isGitRepo` classification (dir / file / missing), `createWorktree` branch collision fallback, `removeWorktree` cleanup, POST /api/sessions `worktree: true` round-trip on a tmp git repo, 400 `not_a_git_repo` on non-git project, archive path removes the worktree dir, archive tolerates a pre-deleted worktree dir | `tests/worktree.test.ts` |
 | ✅ | `/btw` side chat: POST + GET routes (create copies parent project/model and defaults to `plan`, persists `parent_session_id`, cascades on parent delete, 404 on unknown parent, idempotent re-POST reuses the active child), default session list hides children, SessionManager context seed injection (strips tool/thinking noise, seeds only once on first spawn, top-level sessions unaffected, seed never written to the child's event log) | `tests/side-sessions.test.ts` |
+| ✅ | Routines CRUD + scheduler: REST round-trip (POST / GET / PATCH / DELETE), `invalid_cron` on bad expression, `project_not_found` on unknown project, `POST /:id/run` spawns a session and delivers the prompt. Scheduler fires on elapsed `next_run_at` (capturing fake timer — no `vitest.useFakeTimers()` needed), paused routines skip, deleted routines stop firing, `reload()` rearms after cron edits, missed fires are logged and skipped (no catch-up), `fire()` direct-call advances `last_run_at` + `next_run_at`. `cron-parser` wrapper helpers (`isValidCron` / `computeNextRun`) | `tests/routines.test.ts` |
 | ⬜ | Frontend unit/component tests — none yet (mockup + visual review cover this for MVP) |  |
+
+## Routines
+
+| Status | Feature | Where |
+|---|---|---|
+| ✅ | `routines` table (SQLite migration id=4) keyed on `id` with FK to `projects` (`ON DELETE RESTRICT`). Columns: `name`, `prompt`, `cron_expr`, `model`, `mode`, `status` (`active` / `paused`), `last_run_at`, `next_run_at`, `created_at`, `updated_at`. Two indexes: `status`, `project_id` | `server/src/db/index.ts` |
+| ✅ | `RoutineStore` — same-shape API as `ProjectStore` / `SessionStore`: `create` / `list` / `listActive` / `findById` / `update` / `setStatus` / `setSchedule` / `setLastRun` / `delete` | `server/src/routines/store.ts` |
+| ✅ | `RoutineScheduler` — single chained `setTimeout` anchored to the next-due active routine. On fire: creates a fresh session titled `"<name> · <timestamp>"` with the routine's project/model/mode, delivers `prompt` via `SessionManager.sendUserMessage`, rolls `last_run_at` + `next_run_at` forward, and rearms. `reload()` on any CRUD change. No catch-up: missed fires (server was down) are logged and the schedule is rolled forward to the next future slot. Uses `cron-parser@5` (`CronExpressionParser.parse`) to evaluate 5-field expressions in the host's local timezone. Injectable `now` / `setTimeout` / `clearTimeout` for deterministic tests | `server/src/routines/scheduler.ts` |
+| ✅ | REST (login-gated): `GET /api/routines`, `GET /api/routines/:id`, `POST /api/routines` (400 `invalid_cron` on parse failure, 400 `project_not_found` on unknown project), `PATCH /api/routines/:id` (partial — same invalid-cron check), `DELETE /api/routines/:id`, `POST /api/routines/:id/run` ("Run now" — invokes `scheduler.fire()` and returns `sessionId`). Every mutating route calls `scheduler.reload()` | `server/src/routines/routes.ts` |
+| ✅ | `RoutinesSheet` on the Home header (calendar icon to the left of the projects gear) — list with status dot, human-readable cron ("Every day at 9:00"), next-fire relative time; per-row Run now / Pause-Resume / Edit / Delete. Editor dialog has name, project picker (locked after create), prompt textarea, five cron presets (hourly / daily 9 / weekdays 9 / Mondays 9 / every 30m) + Custom cron field, model pills, 4-way permission mode selector. Invalid cron surfaces the server's `invalid_cron` as a friendly message | `web/src/components/RoutinesSheet.tsx` + `web/src/screens/Home.tsx` |
+
+## Settings
+
+| Status | Feature | Where |
+|---|---|---|
+| ✅ | `/settings` route, reached via a gear button in the Home header (between Projects and Sign out). Four-tab layout — left rail on desktop, horizontal scroll strip on mobile. Tabs: Account / Security / Appearance / Plugins | `web/src/screens/Settings.tsx`, `web/src/App.tsx` |
+| ✅ | **Account** tab — username, createdAt, 2FA-enabled badge, and a "Change password" button that opens a modal. Modal enforces current password, new-password ≥ 8, and non-identity; surfaces server error codes (`invalid_credentials`, `same_password`, `bad_request`) in human words. On success the modal shows a "password updated — other tabs keep working until cookie exp" note | `web/src/screens/Settings.tsx` (`AccountPanel`, `ChangePasswordModal`) |
+| ✅ | **Security** tab — honest about current scope: shows 2FA issuer + enabled state; "Regenerate recovery codes" rendered as a disabled placeholder with a hint to use `pnpm reset-credentials` for now. Paired-browsers list is called out as planned (we don't track individual JWT jtis yet) | same (`SecurityPanel`) |
+| ✅ | **Appearance** tab — light theme marker with a disabled "Dark (soon)" pill and a disabled text-size slider, matching the mockup's affordance without lying about availability | same (`AppearancePanel`) |
+| ✅ | **Plugins** tab — read-only reflection of `~/.claude/settings.json` `enabledPlugins` merged with `~/.claude/plugins/installed_plugins.json`. Shows `claudeDir`, settings-readable state, and each plugin with name / marketplace / version / enabled badge. Empty state explicitly says claudex does not install plugins itself. Zero mutation — fetched via `GET /api/user/env` | same (`PluginsPanel`) |
 
 ## Operational details
 
@@ -214,8 +245,7 @@ behaviors** and **193 backend tests**.
 
 - **P4** — parallel sessions per project surfaced in the UI, branch pickers, PR link-out
 - **P5** — `/compact`, usage/context panel, sticky virtual-keyboard row for the composer pickers
-- **P6** — routines (scheduled tasks) with catch-up on wake
-- **P7** — PR monitoring, auto-fix / auto-merge, preview (embedded browser), integrated terminal
+- **P7** — PR monitoring, auto-fix / auto-merge, preview (embedded browser)
 - **P8** — Skills / Plugins / Connectors management UI, CLAUDE.md editor, env-var editor, global settings (2FA + paired browsers + audit log)
 - **P9** — Docker image, signed release binaries, dashboards
 

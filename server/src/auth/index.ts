@@ -183,6 +183,13 @@ export class UserStore {
       );
     return row;
   }
+
+  /** Rotate the stored bcrypt hash for a user. Used by change-password. */
+  setPasswordHash(id: string, passwordHash: string): void {
+    this.db
+      .prepare("UPDATE users SET password_hash = ? WHERE id = ?")
+      .run(passwordHash, id);
+  }
 }
 
 // -----------------------------------------------------------------------------

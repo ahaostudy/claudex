@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Plus, GitBranch, Pencil, Trash2, FolderOpen, Settings2 } from "lucide-react";
+import { Calendar, Plus, GitBranch, Pencil, Trash2, FolderOpen, Settings2, Settings } from "lucide-react";
 import { useAuth } from "@/state/auth";
 import { useSessions } from "@/state/sessions";
 import { api, ApiError } from "@/api/client";
 import type { Project, ModelId, PermissionMode } from "@claudex/shared";
 import { FolderPicker } from "@/components/FolderPicker";
+import { RoutinesSheet } from "@/components/RoutinesSheet";
 import { cn } from "@/lib/cn";
 
 const statusTone: Record<string, string> = {
@@ -29,6 +30,7 @@ export function HomeScreen() {
   const navigate = useNavigate();
   const [showNew, setShowNew] = useState(false);
   const [showProjects, setShowProjects] = useState(false);
+  const [showRoutines, setShowRoutines] = useState(false);
   const [showWsDiag, setShowWsDiag] = useState(false);
 
   useEffect(() => {
@@ -68,11 +70,25 @@ export function HomeScreen() {
             signed in as <span className="mono">{user?.username}</span>
           </span>
           <button
+            onClick={() => setShowRoutines(true)}
+            title="Routines"
+            className="h-8 w-8 rounded-[8px] border border-line bg-canvas flex items-center justify-center hover:bg-paper"
+          >
+            <Calendar className="w-4 h-4 text-ink-soft" />
+          </button>
+          <button
             onClick={() => setShowProjects(true)}
             title="Manage projects"
             className="h-8 w-8 rounded-[8px] border border-line bg-canvas flex items-center justify-center hover:bg-paper"
           >
             <Settings2 className="w-4 h-4 text-ink-soft" />
+          </button>
+          <button
+            onClick={() => navigate("/settings")}
+            title="Global settings"
+            className="h-8 w-8 rounded-[8px] border border-line bg-canvas flex items-center justify-center hover:bg-paper"
+          >
+            <Settings className="w-4 h-4 text-ink-soft" />
           </button>
           <button
             onClick={() => logout()}
@@ -148,6 +164,9 @@ export function HomeScreen() {
       )}
       {showProjects && (
         <ProjectsSheet onClose={() => setShowProjects(false)} />
+      )}
+      {showRoutines && (
+        <RoutinesSheet onClose={() => setShowRoutines(false)} />
       )}
       {showWsDiag && (
         <WsDiagPanel diag={wsDiag} onClose={() => setShowWsDiag(false)} />

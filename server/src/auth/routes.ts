@@ -1,6 +1,7 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import type Database from "better-sqlite3";
 import {
+  ChangePasswordRequest,
   LoginRequest,
   VerifyTotpRequest,
   type LoginResponse,
@@ -11,6 +12,7 @@ import {
   ACCESS_COOKIE_NAME,
   ChallengeStore,
   UserStore,
+  hashPassword,
   signAccessToken,
   verifyAccessToken,
   verifyPassword,
@@ -164,6 +166,43 @@ export async function registerAuthRoutes(
         },
       };
       return reply.send(body);
+    },
+  );
+
+  // Change the current user's password. Mandates the current password even
+  // though the caller is already logged in — defense in depth against a
+  // stolen cookie, and parity with the pattern every other serious app uses.
+  // On success, re-signs the session cookie: the old JWT stays valid until
+  // its own exp (we don't maintain a revocation list — not worth the SQLite
+  // writes for MVP), but the caller's tab keeps working seamlessly instead
+  // of surprising the user with a forced re-login.
+  app.post(
+    "/api/auth/change-password",
+    { preHandler: app.requireAuth as any },
+    async (req, reply) => {
+      const parsed = ChangePasswordRequest.safeParse(req.body);
+      if (!parsed.success) {
+        return reply.code(400).send({ error: "bad_request" });
+      }
+      const { currentPassword, newPassword } = parsed.data;
+      const row = users.findById(req.userId!);
+      if (!row) return reply.code(401).send({ error: "user_gone" });
+      const ok = await verifyPassword(currentPassword, row.password_hash);
+      if (!ok) return reply.code(401).send({ error: "invalid_credentials" });
+      // Defense against a subtle footgun: accepting the same password back
+      // would silently no-op but cost a bcrypt hash. Reject so the UI can
+      // tell the user "pick a different one."
+      if (currentPassword === newPassword) {
+        return reply.code(400).send({ error: "same_password" });
+      }
+      const newHash = await hashPassword(newPassword);
+      users.setPasswordHash(row.id, newHash);
+      const token = await signAccessToken(deps.jwtSecret, row.id);
+      reply.setCookie(ACCESS_COOKIE_NAME, token, {
+        ...cookieOpts(req),
+        maxAge: 60 * 60 * 24 * 30,
+      });
+      return reply.send({ ok: true });
     },
   );
 }

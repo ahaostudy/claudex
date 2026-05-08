@@ -254,6 +254,24 @@ describe("SessionManager", () => {
     expect(s.grants.has(s.session.id, "Edit", "/x/y.ts")).toBe(false);
   });
 
+  it("sendUserMessage broadcasts a user_message event to subscribers", async () => {
+    const s = setupManager();
+    cleanups.push(s.cleanup);
+    await s.manager.sendUserMessage(s.session.id, "hey");
+    const userBroadcasts = s.broadcasts.filter(
+      (b) => b.event.type === "user_message",
+    );
+    expect(userBroadcasts).toHaveLength(1);
+    const ev = userBroadcasts[0].event as {
+      type: "user_message";
+      text: string;
+      at: string;
+    };
+    expect(ev.text).toBe("hey");
+    // ISO 8601 timestamp.
+    expect(Number.isNaN(Date.parse(ev.at))).toBe(false);
+  });
+
   it("broadcasts every event to subscribers", () => {
     const s = setupManager();
     cleanups.push(s.cleanup);

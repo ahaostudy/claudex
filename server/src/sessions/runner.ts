@@ -55,6 +55,11 @@ export type RunnerEvent =
       stopReason: string;
       usage?: { inputTokens?: number; outputTokens?: number };
     }
+  // Manager-synthesized (not emitted by the Agent SDK). Broadcast when a
+  // user message lands in the session so every subscribed tab sees it
+  // right away. The originating tab gets it too and reconciles it
+  // against its local optimistic echo.
+  | { type: "user_message"; text: string; at: string }
   | { type: "error"; code: string; message: string };
 
 export type RunnerListener = (event: RunnerEvent) => void;

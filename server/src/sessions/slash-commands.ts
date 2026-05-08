@@ -12,7 +12,7 @@ import { ProjectStore } from "./projects.js";
  * `claude` CLI knows about so the web composer's `/` picker can show more
  * than the four hardcoded tokens we shipped in P2.
  *
- * Three sources, in priority order:
+ * Four sources, in priority order:
  *   1. Built-in CLI commands — hardcoded below. These ship with `claude`
  *      itself and have no on-disk manifest we can scan, so we keep a
  *      curated list of the common ones. Safer to under-report than to
@@ -22,12 +22,13 @@ import { ProjectStore } from "./projects.js";
  *      frontmatter or a leading `# …` line.
  *   3. Project commands — `<project.path>/.claude/commands/*.md`, only
  *      when the caller passes a `projectId`.
- *
- * Plugin commands (`~/.claude/plugins/cache/<marketplace>/<plugin>/
- * <version>/commands/*.md`) are intentionally skipped for MVP — the
- * versioned-cache layout has multiple valid entries per plugin and we
- * don't want to guess which one is current. Documented as unsupported
- * in docs/FEATURES.md.
+ *   4. Plugin commands — driven by `~/.claude/plugins/installed_plugins.json`
+ *      which lists every installed plugin with its `installPath`. For each
+ *      plugin we scan `<installPath>/commands/*.md`. If the manifest is
+ *      missing or unparseable, plugin scanning is skipped silently (we
+ *      don't guess the versioned cache layout). Commands are de-duplicated
+ *      across multiple installed versions of the same plugin — the most
+ *      recently updated entry (by `lastUpdated`, else `installedAt`) wins.
  */
 
 // ---------------------------------------------------------------------------
@@ -174,6 +175,90 @@ async function scanCommandsDir(
 }
 
 // ---------------------------------------------------------------------------
+// Plugin scanning
+// ---------------------------------------------------------------------------
+
+// Shape of `~/.claude/plugins/installed_plugins.json` (v2). We're intentionally
+// permissive: anything we don't recognize is skipped rather than failing hard.
+interface InstalledPluginEntry {
+  scope?: string;
+  installPath?: string;
+  version?: string;
+  installedAt?: string;
+  lastUpdated?: string;
+}
+interface InstalledPluginsFile {
+  version?: number;
+  plugins?: Record<string, InstalledPluginEntry[]>;
+}
+
+/**
+ * Pick the "current" install for a plugin when multiple versions appear in
+ * the manifest. Strategy: prefer the entry with the most recent
+ * `lastUpdated`, falling back to `installedAt`, falling back to the first
+ * entry as it appears. Deterministic enough for a stable listing.
+ */
+function pickCurrentInstall(
+  installs: InstalledPluginEntry[],
+): InstalledPluginEntry | null {
+  if (installs.length === 0) return null;
+  const withTime = installs.map((e) => ({
+    entry: e,
+    t: Date.parse(e.lastUpdated ?? e.installedAt ?? "") || 0,
+  }));
+  withTime.sort((a, b) => b.t - a.t);
+  return withTime[0].entry;
+}
+
+/**
+ * Scan plugin commands off `~/.claude/plugins/installed_plugins.json`.
+ * Returns [] on any failure — missing file, bad JSON, unexpected shape, or a
+ * plugin whose `installPath` has no `commands/` dir. This is best-effort;
+ * the picker should never blow up because the plugin manifest changed
+ * shape. De-duplicates across multiple installed versions of the same
+ * plugin (keyed on the manifest key, e.g. `skill-creator@marketplace`).
+ */
+export async function scanPluginCommands(
+  userClaudeDir: string,
+): Promise<SlashCommand[]> {
+  const manifestPath = path.join(
+    userClaudeDir,
+    "plugins",
+    "installed_plugins.json",
+  );
+  let raw: string;
+  try {
+    raw = await fsp.readFile(manifestPath, "utf8");
+  } catch {
+    return [];
+  }
+  let parsed: InstalledPluginsFile;
+  try {
+    parsed = JSON.parse(raw) as InstalledPluginsFile;
+  } catch {
+    return [];
+  }
+  const plugins = parsed?.plugins;
+  if (!plugins || typeof plugins !== "object") return [];
+
+  const out: SlashCommand[] = [];
+  // Iterate deterministically — sort by the manifest key so the output
+  // order is stable across runs regardless of JSON iteration quirks.
+  const keys = Object.keys(plugins).sort();
+  for (const key of keys) {
+    const installs = plugins[key];
+    if (!Array.isArray(installs)) continue;
+    const current = pickCurrentInstall(installs);
+    if (!current?.installPath) continue;
+    const cmdDir = path.join(current.installPath, "commands");
+    const entries = await scanCommandsDir(cmdDir, "plugin");
+    for (const e of entries) out.push(e);
+  }
+  out.sort((a, b) => a.name.localeCompare(b.name));
+  return out;
+}
+
+// ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
@@ -218,7 +303,9 @@ export async function listSlashCommands(
     projectCmds.sort((a, b) => a.name.localeCompare(b.name));
   }
 
-  return [...builtIns, ...userCmds, ...projectCmds];
+  const pluginCmds = await scanPluginCommands(userClaudeDir);
+
+  return [...builtIns, ...userCmds, ...projectCmds, ...pluginCmds];
 }
 
 // ---------------------------------------------------------------------------

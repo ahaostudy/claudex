@@ -4,6 +4,7 @@ import { useAuth } from "@/state/auth";
 import { LoginScreen } from "@/screens/Login";
 import { HomeScreen } from "@/screens/Home";
 import { ChatScreen } from "@/screens/Chat";
+import { SettingsScreen } from "@/screens/Settings";
 
 function Guard({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
@@ -40,6 +41,14 @@ export default function App() {
         element={
           <Guard>
             <ChatScreen />
+          </Guard>
+        }
+      />
+      <Route
+        path="/settings"
+        element={
+          <Guard>
+            <SettingsScreen />
           </Guard>
         }
       />

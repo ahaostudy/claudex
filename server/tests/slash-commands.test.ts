@@ -5,6 +5,7 @@ import path from "node:path";
 import {
   extractDescription,
   listSlashCommands,
+  scanPluginCommands,
   BUILT_IN_SLASH_COMMANDS,
 } from "../src/sessions/slash-commands.js";
 import { bootstrapAuthedApp } from "./helpers.js";
@@ -152,6 +153,191 @@ describe("slash-commands scanner", () => {
         userClaudeDir: path.join(home, ".claude"),
       });
       expect(out.some((c) => c.kind === "project")).toBe(false);
+    });
+  });
+
+  describe("scanPluginCommands", () => {
+    it("returns [] when installed_plugins.json is absent", async () => {
+      const home = mkTmp("claudex-slash-home-");
+      // No plugins/ dir at all.
+      const out = await scanPluginCommands(path.join(home, ".claude"));
+      expect(out).toEqual([]);
+    });
+
+    it("returns [] when installed_plugins.json is malformed", async () => {
+      const home = mkTmp("claudex-slash-home-");
+      const pluginsDir = path.join(home, ".claude", "plugins");
+      fs.mkdirSync(pluginsDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(pluginsDir, "installed_plugins.json"),
+        "{not valid json",
+      );
+      const out = await scanPluginCommands(path.join(home, ".claude"));
+      expect(out).toEqual([]);
+    });
+
+    it("scans commands for each installed plugin via installPath", async () => {
+      const home = mkTmp("claudex-slash-home-");
+      const pluginsDir = path.join(home, ".claude", "plugins");
+      fs.mkdirSync(pluginsDir, { recursive: true });
+
+      // Build two fake plugin installs off a cache/-style layout.
+      const installA = path.join(
+        pluginsDir,
+        "cache",
+        "mk-a",
+        "alpha",
+        "v1",
+      );
+      fs.mkdirSync(path.join(installA, "commands"), { recursive: true });
+      fs.writeFileSync(
+        path.join(installA, "commands", "alpha-cmd.md"),
+        ["---", "description: Alpha does things", "---"].join("\n"),
+      );
+
+      const installB = path.join(
+        pluginsDir,
+        "cache",
+        "mk-b",
+        "beta",
+        "v1",
+      );
+      fs.mkdirSync(path.join(installB, "commands"), { recursive: true });
+      fs.writeFileSync(
+        path.join(installB, "commands", "beta-cmd.md"),
+        "# Beta makes it go\n",
+      );
+
+      fs.writeFileSync(
+        path.join(pluginsDir, "installed_plugins.json"),
+        JSON.stringify({
+          version: 2,
+          plugins: {
+            "alpha@mk-a": [
+              {
+                scope: "user",
+                installPath: installA,
+                version: "v1",
+                installedAt: "2026-01-01T00:00:00Z",
+              },
+            ],
+            "beta@mk-b": [
+              {
+                scope: "user",
+                installPath: installB,
+                version: "v1",
+                installedAt: "2026-02-01T00:00:00Z",
+              },
+            ],
+          },
+        }),
+      );
+
+      const out = await scanPluginCommands(path.join(home, ".claude"));
+      const names = out.map((c) => c.name);
+      expect(names).toEqual(["alpha-cmd", "beta-cmd"]);
+      const alpha = out.find((c) => c.name === "alpha-cmd")!;
+      expect(alpha.kind).toBe("plugin");
+      expect(alpha.description).toBe("Alpha does things");
+      expect(alpha.source).toBe(
+        path.join(installA, "commands", "alpha-cmd.md"),
+      );
+    });
+
+    it("de-duplicates across multiple installed versions, picking the newest by lastUpdated", async () => {
+      const home = mkTmp("claudex-slash-home-");
+      const pluginsDir = path.join(home, ".claude", "plugins");
+      fs.mkdirSync(pluginsDir, { recursive: true });
+
+      const installV1 = path.join(
+        pluginsDir,
+        "cache",
+        "mk",
+        "plug",
+        "v1",
+      );
+      const installV2 = path.join(
+        pluginsDir,
+        "cache",
+        "mk",
+        "plug",
+        "v2",
+      );
+      fs.mkdirSync(path.join(installV1, "commands"), { recursive: true });
+      fs.mkdirSync(path.join(installV2, "commands"), { recursive: true });
+      fs.writeFileSync(
+        path.join(installV1, "commands", "plug-cmd.md"),
+        ["---", "description: v1 description", "---"].join("\n"),
+      );
+      fs.writeFileSync(
+        path.join(installV2, "commands", "plug-cmd.md"),
+        ["---", "description: v2 description", "---"].join("\n"),
+      );
+
+      fs.writeFileSync(
+        path.join(pluginsDir, "installed_plugins.json"),
+        JSON.stringify({
+          version: 2,
+          plugins: {
+            "plug@mk": [
+              {
+                installPath: installV1,
+                installedAt: "2026-01-01T00:00:00Z",
+                lastUpdated: "2026-01-01T00:00:00Z",
+              },
+              {
+                installPath: installV2,
+                installedAt: "2026-01-15T00:00:00Z",
+                lastUpdated: "2026-04-01T00:00:00Z",
+              },
+            ],
+          },
+        }),
+      );
+
+      const out = await scanPluginCommands(path.join(home, ".claude"));
+      expect(out).toHaveLength(1);
+      expect(out[0].name).toBe("plug-cmd");
+      expect(out[0].description).toBe("v2 description");
+      expect(out[0].source).toBe(
+        path.join(installV2, "commands", "plug-cmd.md"),
+      );
+    });
+
+    it("listSlashCommands merges plugin entries into the full list", async () => {
+      const home = mkTmp("claudex-slash-home-");
+      const pluginsDir = path.join(home, ".claude", "plugins");
+      fs.mkdirSync(pluginsDir, { recursive: true });
+      const install = path.join(pluginsDir, "cache", "mk", "plug", "v1");
+      fs.mkdirSync(path.join(install, "commands"), { recursive: true });
+      fs.writeFileSync(
+        path.join(install, "commands", "plug-cmd.md"),
+        "# Plug it in\n",
+      );
+      fs.writeFileSync(
+        path.join(pluginsDir, "installed_plugins.json"),
+        JSON.stringify({
+          version: 2,
+          plugins: {
+            "plug@mk": [{ installPath: install }],
+          },
+        }),
+      );
+
+      const out = await listSlashCommands({
+        userClaudeDir: path.join(home, ".claude"),
+      });
+      const plugin = out.filter((c) => c.kind === "plugin");
+      expect(plugin).toHaveLength(1);
+      expect(plugin[0].name).toBe("plug-cmd");
+      // Bucket order: built-in first, then user (none), then project (none),
+      // then plugin.
+      const firstPluginIdx = out.findIndex((c) => c.kind === "plugin");
+      const lastBuiltinIdx = out.reduce(
+        (acc, c, i) => (c.kind === "built-in" ? i : acc),
+        -1,
+      );
+      expect(firstPluginIdx).toBeGreaterThan(lastBuiltinIdx);
     });
   });
 });
