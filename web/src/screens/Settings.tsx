@@ -1,7 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { useNavigate } from "react-router-dom";
 import {
-  ChevronLeft,
   KeyRound,
   Shield,
   Palette,
@@ -12,6 +10,7 @@ import { useAuth } from "@/state/auth";
 import { api, ApiError } from "@/api/client";
 import type { UserEnvResponse } from "@claudex/shared";
 import { cn } from "@/lib/cn";
+import { AppShell } from "@/components/AppShell";
 
 // Tabs mirror mockup s-12 in spirit: a small, focused set that actually
 // maps onto things claudex controls today. Notifications / Environment /
@@ -27,20 +26,12 @@ const TABS: Array<{ id: Tab; label: string; icon: typeof UserIcon }> = [
 ];
 
 export function SettingsScreen() {
-  const navigate = useNavigate();
   const { user } = useAuth();
   const [tab, setTab] = useState<Tab>("account");
 
   return (
-    <main className="min-h-screen bg-canvas">
+    <AppShell tab="settings">
       <header className="sticky top-0 z-10 bg-canvas/90 backdrop-blur border-b border-line px-4 sm:px-5 py-3 flex items-center gap-3">
-        <button
-          onClick={() => navigate("/")}
-          title="Back"
-          className="h-8 w-8 rounded-[8px] border border-line bg-paper flex items-center justify-center text-ink-soft"
-        >
-          <ChevronLeft className="w-4 h-4" />
-        </button>
         <div>
           <div className="text-[11px] uppercase tracking-[0.14em] text-ink-muted">
             Settings
@@ -54,41 +45,43 @@ export function SettingsScreen() {
         </div>
       </header>
 
-      <div className="max-w-[1100px] mx-auto flex flex-col lg:flex-row">
-        {/* Tab list: horizontal scroll on mobile, left rail on desktop. */}
-        <aside className="lg:w-[220px] lg:shrink-0 border-b lg:border-b-0 lg:border-r border-line bg-paper/30">
-          <nav
-            className={cn(
-              "flex lg:flex-col gap-1 px-3 py-3 overflow-x-auto",
-              "lg:sticky lg:top-[57px] lg:overflow-x-visible",
-            )}
-          >
-            {TABS.map(({ id, label, icon: Icon }) => (
-              <button
-                key={id}
-                onClick={() => setTab(id)}
-                className={cn(
-                  "shrink-0 inline-flex items-center gap-2 px-3 h-9 rounded-[8px] text-[13px]",
-                  tab === id
-                    ? "bg-canvas shadow-card border border-line text-ink"
-                    : "text-ink-muted hover:text-ink hover:bg-canvas/40",
-                )}
-              >
-                <Icon className="w-3.5 h-3.5" />
-                {label}
-              </button>
-            ))}
-          </nav>
-        </aside>
+      <div className="flex-1 min-h-0 overflow-y-auto">
+        <div className="max-w-[1100px] mx-auto flex flex-col lg:flex-row">
+          {/* Tab list: horizontal scroll on mobile, left rail on desktop. */}
+          <aside className="lg:w-[220px] lg:shrink-0 border-b lg:border-b-0 lg:border-r border-line bg-paper/30">
+            <nav
+              className={cn(
+                "flex lg:flex-col gap-1 px-3 py-3 overflow-x-auto",
+                "lg:sticky lg:top-0 lg:overflow-x-visible",
+              )}
+            >
+              {TABS.map(({ id, label, icon: Icon }) => (
+                <button
+                  key={id}
+                  onClick={() => setTab(id)}
+                  className={cn(
+                    "shrink-0 inline-flex items-center gap-2 px-3 h-9 rounded-[8px] text-[13px]",
+                    tab === id
+                      ? "bg-canvas shadow-card border border-line text-ink"
+                      : "text-ink-muted hover:text-ink hover:bg-canvas/40",
+                  )}
+                >
+                  <Icon className="w-3.5 h-3.5" />
+                  {label}
+                </button>
+              ))}
+            </nav>
+          </aside>
 
-        <section className="flex-1 min-w-0 p-5 sm:p-8 pb-24 space-y-5">
-          {tab === "account" && <AccountPanel />}
-          {tab === "security" && <SecurityPanel />}
-          {tab === "appearance" && <AppearancePanel />}
-          {tab === "mcp" && <PluginsPanel />}
-        </section>
+          <section className="flex-1 min-w-0 p-5 sm:p-8 space-y-5">
+            {tab === "account" && <AccountPanel />}
+            {tab === "security" && <SecurityPanel />}
+            {tab === "appearance" && <AppearancePanel />}
+            {tab === "mcp" && <PluginsPanel />}
+          </section>
+        </div>
       </div>
-    </main>
+    </AppShell>
   );
 }
 

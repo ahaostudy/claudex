@@ -5,6 +5,8 @@ import { LoginScreen } from "@/screens/Login";
 import { HomeScreen } from "@/screens/Home";
 import { ChatScreen } from "@/screens/Chat";
 import { SettingsScreen } from "@/screens/Settings";
+import { RoutinesScreen } from "@/screens/Routines";
+import { AlertsScreen } from "@/screens/Alerts";
 
 function Guard({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
@@ -28,11 +30,28 @@ export default function App() {
   return (
     <Routes>
       <Route path="/login" element={<LoginScreen />} />
+      <Route path="/" element={<Navigate to="/sessions" replace />} />
       <Route
-        path="/"
+        path="/sessions"
         element={
           <Guard>
             <HomeScreen />
+          </Guard>
+        }
+      />
+      <Route
+        path="/routines"
+        element={
+          <Guard>
+            <RoutinesScreen />
+          </Guard>
+        }
+      />
+      <Route
+        path="/alerts"
+        element={
+          <Guard>
+            <AlertsScreen />
           </Guard>
         }
       />
@@ -52,7 +71,7 @@ export default function App() {
           </Guard>
         }
       />
-      <Route path="*" element={<Navigate to="/" replace />} />
+      <Route path="*" element={<Navigate to="/sessions" replace />} />
     </Routes>
   );
 }

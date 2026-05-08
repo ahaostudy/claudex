@@ -1,20 +1,26 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import {
-  AtSign,
+  Check,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
   MessageCircle,
+  MoreVertical,
+  Paperclip,
   Send,
   Settings2,
-  Slash,
-  Square,
+  StopCircle,
   Terminal,
 } from "lucide-react";
 import { useSessions } from "@/state/sessions";
 import { api } from "@/api/client";
-import type { Project, Session } from "@claudex/shared";
+import type {
+  ModelId,
+  PermissionMode,
+  Project,
+  Session,
+} from "@claudex/shared";
 import { cn } from "@/lib/cn";
 import { DiffView, toolCallToDiff } from "@/components/DiffView";
 import { diffForToolCall } from "@/lib/diff";
@@ -30,19 +36,51 @@ import type { SlashCommand } from "@/lib/slash-commands";
 import { BUILTIN_FALLBACK_SLASH_COMMANDS } from "@/lib/slash-commands";
 import type { UIPiece, ViewMode } from "@/state/sessions";
 
+// ---------------------------------------------------------------------------
+// Model / mode label tables shared by the desktop header pills and the chat
+// overflow sheet. Keep these in sync with NewSessionSheet in Home.
+// ---------------------------------------------------------------------------
+const MODEL_LABEL: Record<ModelId, string> = {
+  "claude-opus-4-7": "Opus 4.7",
+  "claude-sonnet-4-6": "Sonnet 4.6",
+  "claude-haiku-4-5": "Haiku 4.5",
+};
+const MODEL_IDS: ModelId[] = [
+  "claude-opus-4-7",
+  "claude-sonnet-4-6",
+  "claude-haiku-4-5",
+];
+const MODE_LABEL: Record<PermissionMode, string> = {
+  default: "Ask",
+  acceptEdits: "Accept",
+  plan: "Plan",
+  bypassPermissions: "Bypass",
+  auto: "Auto",
+};
+const MODE_IDS: PermissionMode[] = [
+  "default",
+  "acceptEdits",
+  "plan",
+  "bypassPermissions",
+];
+
+const VIEW_LABEL: Record<ViewMode, string> = {
+  normal: "Normal",
+  verbose: "Verbose",
+  summary: "Summary",
+};
+
 export function ChatScreen() {
   const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
   const [session, setSession] = useState<Session | null>(null);
   const [project, setProject] = useState<Project | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [showUsage, setShowUsage] = useState(false);
-  // `/btw` side chat drawer. One drawer per main session; the server keeps
-  // the actual child session alive across close/re-open so the conversation
-  // is preserved.
   const [showSideChat, setShowSideChat] = useState(false);
-  // Terminal drawer: a PTY attached to the session's cwd. Independent of the
-  // chat WS; see components/TerminalDrawer.tsx.
   const [showTerminal, setShowTerminal] = useState(false);
+  // Mobile three-dot menu. Desktop uses header pills instead.
+  const [showMore, setShowMore] = useState(false);
   const {
     transcripts,
     init,
@@ -64,11 +102,6 @@ export function ChatScreen() {
     if (!id) return;
     api.getSession(id).then((r) => {
       setSession(r.session);
-      // Refresh-time: if the server says this session is currently running,
-      // drop an inline "claude is processing" marker into the transcript so
-      // the user sees something's in flight. First real WS frame (or a
-      // session_update back to idle) will clear it. See state/sessions.ts
-      // for the lifecycle.
       if (r.session.status === "running" || r.session.status === "awaiting") {
         ensurePendingFor(id);
       }
@@ -77,9 +110,6 @@ export function ChatScreen() {
     subscribeSession(id);
   }, [id, ensureTranscript, subscribeSession, ensurePendingFor]);
 
-  // Resolve the session's project so the @-mention sheet can default to its
-  // root and we can insert relative paths. Best-effort — if it fails the
-  // sheet simply won't be offered.
   useEffect(() => {
     if (!session) return;
     let cancelled = false;
@@ -90,9 +120,7 @@ export function ChatScreen() {
         const hit = r.projects.find((p) => p.id === session.projectId) ?? null;
         setProject(hit);
       })
-      .catch(() => {
-        /* ignore — composer gracefully degrades without project */
-      });
+      .catch(() => {});
     return () => {
       cancelled = true;
     };
@@ -100,9 +128,6 @@ export function ChatScreen() {
 
   const pieces = id ? transcripts[id] ?? [] : [];
 
-  // Apply the view-mode filter to the raw transcript. Summary mode also
-  // synthesizes a Changes card from Edit/Write/MultiEdit tool calls, so we
-  // compute that in the same memo.
   const { visiblePieces, changes } = useMemo(
     () => applyViewMode(pieces, viewMode),
     [pieces, viewMode],
@@ -116,87 +141,180 @@ export function ChatScreen() {
     });
   }, [visiblePieces.length]);
 
+  // Helper: update a field on the session via the REST patch endpoint and
+  // reflect the result in local state. Used by both the desktop header
+  // pills and the mobile overflow sheet so they share one code path.
+  async function patchSession(partial: {
+    model?: ModelId;
+    mode?: PermissionMode;
+  }) {
+    if (!id || !session) return;
+    try {
+      const r = await api.updateSession(id, partial);
+      setSession(r.session);
+    } catch {
+      // Silent: the session settings sheet has a more explicit error UI.
+      // Quick header changes degrade gracefully.
+    }
+  }
+
   if (!id) return null;
 
+  const busy = session?.status === "running" || session?.status === "awaiting";
+  const statusDot = cn(
+    "h-2 w-2 rounded-full shrink-0",
+    session?.status === "running" && "bg-success animate-pulse",
+    session?.status === "awaiting" && "bg-warn",
+    session?.status === "idle" && "bg-ink-faint",
+    session?.status === "archived" && "bg-line-strong",
+    session?.status === "error" && "bg-danger",
+    !session && "bg-line-strong",
+  );
+  const metaLine = (
+    <>
+      {project && (
+        <>
+          <span className="mono">{project.name}</span>
+          <span>·</span>
+        </>
+      )}
+      <span className="mono">
+        {session ? MODEL_LABEL[session.model] ?? session.model : "—"}
+      </span>
+      <span>·</span>
+      <span>{session ? MODE_LABEL[session.mode] ?? session.mode : "—"}</span>
+    </>
+  );
+
   return (
-    <main className="min-h-screen flex flex-col bg-canvas">
-      <header className="sticky top-0 z-10 bg-canvas/95 backdrop-blur border-b border-line px-3 py-2.5 flex items-center gap-2">
-        <Link
-          to="/"
-          className="h-8 w-8 rounded-[8px] bg-paper border border-line flex items-center justify-center"
+    // Full-viewport flex column so the messages list scrolls internally and
+    // the composer stays pinned. `h-[100dvh]` respects the mobile URL bar
+    // (safari), unlike `h-screen` which leaves the composer under it.
+    <main className="flex flex-col h-[100dvh] bg-canvas">
+      {/* Mobile header — shown below md breakpoint (mockup 860-868). */}
+      <header className="md:hidden shrink-0 px-4 py-2.5 border-b border-line flex items-center gap-2 bg-canvas">
+        <button
+          type="button"
+          onClick={() => navigate("/sessions")}
+          className="h-8 w-8 rounded-[8px] bg-paper border border-line flex items-center justify-center shrink-0"
+          aria-label="Back to sessions"
         >
           <ChevronLeft className="w-4 h-4" />
-        </Link>
+        </button>
         <div className="min-w-0 flex-1">
-          <div className="text-[14px] font-medium truncate">
-            {session?.title ?? "Session"}
+          <div className="flex items-center gap-1.5">
+            <span className={statusDot} />
+            <div className="text-[14px] font-medium truncate">
+              {session?.title ?? "Session"}
+            </div>
           </div>
           <div className="flex items-center gap-1.5 text-[11px] text-ink-muted mt-0.5">
-            <span
-              className={cn(
-                "h-1.5 w-1.5 rounded-full",
-                session?.status === "running" && "bg-success animate-pulse",
-                session?.status === "awaiting" && "bg-warn",
-                session?.status === "idle" && "bg-ink-faint",
-                session?.status === "archived" && "bg-line-strong",
-                session?.status === "error" && "bg-danger",
-                !session && "bg-line-strong",
-              )}
-            />
-            <span className="mono">{session?.model}</span>
-            <span>·</span>
-            <span>{session?.mode}</span>
+            {metaLine}
           </div>
         </div>
-        <ViewModePicker mode={viewMode} onChange={setViewMode} />
         <ContextRingButton
-          // TODO(contextPct): server never populates contextPct yet, so the
-          // ring is always empty. UI renders it anyway as the entry point to
-          // the Usage panel, which has real token/cost data.
           pct={session?.stats.contextPct ?? 0}
           known={false}
           disabled={!session}
           onClick={() => setShowUsage(true)}
         />
-        {(session?.status === "running" || session?.status === "awaiting") && (
-          <button
-            onClick={() => id && interruptSession(id)}
-            title="Stop claude"
-            aria-label="Stop claude"
-            className="h-8 w-8 rounded-[8px] border border-danger/40 bg-danger-wash text-danger flex items-center justify-center hover:bg-danger-wash/80"
-          >
-            <Square className="w-4 h-4" fill="currentColor" />
-          </button>
-        )}
         <button
-          onClick={() => setShowSideChat(true)}
+          type="button"
+          onClick={() => setShowMore(true)}
           disabled={!session}
-          title="Ask on the side (/btw)"
-          aria-label="Open side chat"
-          className="h-8 w-8 rounded-[8px] border border-line bg-canvas flex items-center justify-center hover:bg-paper disabled:opacity-40"
+          className="h-8 w-8 rounded-[8px] bg-paper border border-line flex items-center justify-center shrink-0 disabled:opacity-40"
+          aria-label="More actions"
         >
-          <MessageCircle className="w-4 h-4 text-klein" />
-        </button>
-        <button
-          onClick={() => setShowSettings(true)}
-          disabled={!session}
-          title="Session settings"
-          className="h-8 w-8 rounded-[8px] border border-line bg-canvas flex items-center justify-center hover:bg-paper disabled:opacity-40"
-        >
-          <Settings2 className="w-4 h-4 text-ink-soft" />
-        </button>
-        <button
-          onClick={() => setShowTerminal(true)}
-          disabled={!session}
-          title="Open terminal in session cwd"
-          aria-label="Open terminal"
-          className="h-8 w-8 rounded-[8px] border border-line bg-canvas flex items-center justify-center hover:bg-paper disabled:opacity-40"
-        >
-          <Terminal className="w-4 h-4 text-ink-soft" />
+          <MoreVertical className="w-4 h-4" />
         </button>
       </header>
 
-      <div ref={scroller} className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
+      {/* Desktop header — shown at md+ (mockup 967-979). Pills are live
+          dropdowns bound to PATCH /api/sessions/:id. */}
+      <header className="hidden md:flex shrink-0 px-5 py-3 border-b border-line items-center gap-3 bg-canvas">
+        <Link
+          to="/sessions"
+          className="h-8 w-8 rounded-[8px] bg-paper border border-line flex items-center justify-center shrink-0"
+          aria-label="Back to sessions"
+        >
+          <ChevronLeft className="w-4 h-4" />
+        </Link>
+        <span className={statusDot} />
+        <div className="min-w-0">
+          <div className="text-[14px] font-medium truncate">
+            {session?.title ?? "Session"}
+          </div>
+          <div className="flex items-center gap-2 text-[11px] text-ink-muted mt-0.5">
+            {metaLine}
+          </div>
+        </div>
+        <div className="ml-auto flex items-center gap-1.5">
+          <ViewModePicker mode={viewMode} onChange={setViewMode} />
+          <PillPicker
+            label={session ? MODEL_LABEL[session.model] ?? session.model : "—"}
+            disabled={!session}
+            items={MODEL_IDS.map((m) => ({
+              id: m,
+              label: MODEL_LABEL[m],
+              active: session?.model === m,
+            }))}
+            onPick={(m) => patchSession({ model: m as ModelId })}
+          />
+          <PillPicker
+            label={session ? MODE_LABEL[session.mode] ?? session.mode : "—"}
+            disabled={!session}
+            items={MODE_IDS.map((m) => ({
+              id: m,
+              label: MODE_LABEL[m],
+              active: session?.mode === m,
+            }))}
+            onPick={(m) => patchSession({ mode: m as PermissionMode })}
+          />
+          <ContextRingButton
+            pct={session?.stats.contextPct ?? 0}
+            known={false}
+            disabled={!session}
+            onClick={() => setShowUsage(true)}
+          />
+          {/* /btw button — kept on desktop header because the chip rail
+              also has it, but desktop users are pointer-first so the direct
+              affordance is worth the slot. Mobile moves it to the chip rail
+              only. */}
+          <button
+            onClick={() => setShowSideChat(true)}
+            disabled={!session}
+            title="Ask on the side (/btw)"
+            className="h-8 w-8 rounded-[8px] border border-line bg-canvas flex items-center justify-center hover:bg-paper disabled:opacity-40"
+          >
+            <MessageCircle className="w-4 h-4 text-klein" />
+          </button>
+          <button
+            onClick={() => setShowSettings(true)}
+            disabled={!session}
+            title="Session settings"
+            className="h-8 w-8 rounded-[8px] border border-line bg-canvas flex items-center justify-center hover:bg-paper disabled:opacity-40"
+          >
+            <Settings2 className="w-4 h-4 text-ink-soft" />
+          </button>
+          <button
+            onClick={() => setShowTerminal(true)}
+            disabled={!session}
+            title="Open terminal in session cwd"
+            className="h-8 w-8 rounded-[8px] border border-line bg-canvas flex items-center justify-center hover:bg-paper disabled:opacity-40"
+          >
+            <Terminal className="w-4 h-4 text-ink-soft" />
+          </button>
+        </div>
+      </header>
+
+      {/* Messages — `flex-1 min-h-0` is the magic pair that lets the child
+          scroller take the remaining column height. Without `min-h-0` a
+          flex child would grow past the viewport and the composer would
+          scroll out. */}
+      <div
+        ref={scroller}
+        className="flex-1 min-h-0 overflow-y-auto px-4 py-4 space-y-4"
+      >
         {visiblePieces.length === 0 && viewMode !== "summary" && (
           <div className="text-[13px] text-ink-muted text-center py-8">
             Send your first message to wake claude up.
@@ -219,15 +337,38 @@ export function ChatScreen() {
 
       <Composer
         project={project}
-        busy={
-          session?.status === "running" || session?.status === "awaiting"
-        }
+        session={session}
+        busy={busy}
         onSend={(text) => {
           if (!text.trim() || !id) return;
           sendUserMessage(id, text);
         }}
+        onStop={() => id && interruptSession(id)}
+        onOpenSideChat={() => setShowSideChat(true)}
       />
 
+      {showMore && session && (
+        <ChatMoreSheet
+          viewMode={viewMode}
+          onPickViewMode={(m) => {
+            setViewMode(m);
+            setShowMore(false);
+          }}
+          onOpenSettings={() => {
+            setShowMore(false);
+            setShowSettings(true);
+          }}
+          onOpenSideChat={() => {
+            setShowMore(false);
+            setShowSideChat(true);
+          }}
+          onOpenTerminal={() => {
+            setShowMore(false);
+            setShowTerminal(true);
+          }}
+          onClose={() => setShowMore(false)}
+        />
+      )}
       {showSettings && session && (
         <SessionSettingsSheet
           session={session}
@@ -253,6 +394,185 @@ export function ChatScreen() {
         <UsagePanel session={session} onClose={() => setShowUsage(false)} />
       )}
     </main>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Desktop header pill dropdowns — simple button + menu for the 3-state
+// picks (model and permission mode). Click-outside + Esc close the menu.
+// ---------------------------------------------------------------------------
+function PillPicker({
+  label,
+  items,
+  onPick,
+  disabled,
+}: {
+  label: string;
+  items: Array<{ id: string; label: string; active: boolean }>;
+  onPick: (id: string) => void;
+  disabled?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (ev: MouseEvent) => {
+      if (ref.current && !ref.current.contains(ev.target as Node)) {
+        setOpen(false);
+      }
+    };
+    const onKey = (ev: KeyboardEvent) => {
+      if (ev.key === "Escape") setOpen(false);
+    };
+    window.addEventListener("mousedown", onDoc);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", onDoc);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        onClick={() => !disabled && setOpen((v) => !v)}
+        disabled={disabled}
+        className="h-8 px-2.5 rounded-[6px] border border-line bg-canvas text-[12px] text-ink-soft flex items-center gap-1 hover:bg-paper disabled:opacity-40"
+      >
+        <span className="mono">{label}</span>
+        <ChevronDown className="w-3 h-3 text-ink-muted" />
+      </button>
+      {open && (
+        <div
+          role="menu"
+          className="absolute right-0 mt-1.5 z-30 w-[180px] rounded-[10px] border border-line bg-canvas shadow-lift p-1"
+        >
+          {items.map((it) => (
+            <button
+              key={it.id}
+              role="menuitemradio"
+              aria-checked={it.active}
+              onClick={() => {
+                onPick(it.id);
+                setOpen(false);
+              }}
+              className={cn(
+                "w-full flex items-center gap-2 px-2 py-1.5 rounded-[6px] text-left text-[13px]",
+                it.active
+                  ? "bg-klein-wash/40 text-ink"
+                  : "text-ink-soft hover:bg-paper/60",
+              )}
+            >
+              <span
+                className={cn(
+                  "h-3.5 w-3.5 rounded-full border-2 shrink-0 flex items-center justify-center",
+                  it.active
+                    ? "border-klein bg-klein text-canvas"
+                    : "border-line-strong bg-canvas",
+                )}
+              >
+                {it.active && <Check className="w-2 h-2" />}
+              </span>
+              <span className="mono">{it.label}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Mobile "more" bottom sheet — houses the buttons evicted from the mobile
+// header (view mode, session settings, terminal, /btw side chat). Desktop
+// never opens this because those affordances are in the header pills.
+// ---------------------------------------------------------------------------
+function ChatMoreSheet({
+  viewMode,
+  onPickViewMode,
+  onOpenSettings,
+  onOpenSideChat,
+  onOpenTerminal,
+  onClose,
+}: {
+  viewMode: ViewMode;
+  onPickViewMode: (m: ViewMode) => void;
+  onOpenSettings: () => void;
+  onOpenSideChat: () => void;
+  onOpenTerminal: () => void;
+  onClose: () => void;
+}) {
+  const viewModes: ViewMode[] = ["normal", "verbose", "summary"];
+  return (
+    <div className="fixed inset-0 z-40 bg-ink/30 flex items-end justify-center">
+      <div className="w-full bg-canvas border-t border-line rounded-t-[20px] shadow-lift p-4">
+        <div className="flex justify-center mb-3">
+          <span className="h-1 w-12 bg-line-strong rounded-full" />
+        </div>
+        <div className="caps text-ink-muted mb-2">Transcript view</div>
+        <div className="grid grid-cols-3 gap-1.5 mb-4">
+          {viewModes.map((m) => (
+            <button
+              key={m}
+              onClick={() => onPickViewMode(m)}
+              className={cn(
+                "h-10 rounded-[8px] text-[13px] font-medium border",
+                viewMode === m
+                  ? "border-klein bg-klein-wash/40 text-ink"
+                  : "border-line bg-canvas text-ink-soft",
+              )}
+            >
+              {VIEW_LABEL[m]}
+            </button>
+          ))}
+        </div>
+        <div className="caps text-ink-muted mb-2">Actions</div>
+        <div className="space-y-1">
+          <SheetAction
+            icon={<MessageCircle className="w-4 h-4 text-klein" />}
+            label="Side chat (/btw)"
+            onClick={onOpenSideChat}
+          />
+          <SheetAction
+            icon={<Settings2 className="w-4 h-4 text-ink-soft" />}
+            label="Session settings"
+            onClick={onOpenSettings}
+          />
+          <SheetAction
+            icon={<Terminal className="w-4 h-4 text-ink-soft" />}
+            label="Open terminal"
+            onClick={onOpenTerminal}
+          />
+        </div>
+        <button
+          onClick={onClose}
+          className="mt-4 w-full h-11 rounded-[8px] border border-line text-[13px]"
+        >
+          Close
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function SheetAction({
+  icon,
+  label,
+  onClick,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="w-full flex items-center gap-3 px-3 h-11 rounded-[8px] border border-line bg-canvas text-[14px] hover:bg-paper"
+    >
+      {icon}
+      <span>{label}</span>
+    </button>
   );
 }
 
@@ -583,12 +903,18 @@ type Trigger =
 
 function Composer({
   project,
+  session,
   busy,
   onSend,
+  onStop,
+  onOpenSideChat,
 }: {
   project: Project | null;
+  session: Session | null;
   busy: boolean;
   onSend: (text: string) => void;
+  onStop: () => void;
+  onOpenSideChat: () => void;
 }) {
   const [text, setText] = useState("");
   const [trigger, setTrigger] = useState<Trigger | null>(null);
@@ -797,8 +1123,60 @@ function Composer({
 
   return (
     <>
-      <div className="border-t border-line bg-canvas px-3 pt-2 pb-3">
-        <div className="rounded-[12px] border border-line bg-paper/60 p-2 flex items-end gap-2">
+      {/* Chip rail — mockup 918-924. Horizontally scrolls; tap to pop a
+          picker or fire an action. On desktop the /btw link is in the
+          header but we keep it here too so the chip rail stays consistent
+          across breakpoints. */}
+      <div className="shrink-0 flex items-center gap-1.5 overflow-x-auto no-scrollbar px-3 pt-2">
+        <button
+          onClick={openSlashManually}
+          type="button"
+          className="h-7 px-2.5 rounded-full border border-line bg-canvas text-[12px] flex items-center gap-1 whitespace-nowrap text-ink-soft"
+        >
+          <span className="mono text-klein">/</span>
+          Slash
+        </button>
+        <button
+          onClick={openMentionManually}
+          type="button"
+          disabled={!project}
+          className="h-7 px-2.5 rounded-full border border-line bg-canvas text-[12px] flex items-center gap-1 whitespace-nowrap text-ink-soft disabled:opacity-40"
+        >
+          <span className="mono text-klein">@</span>
+          File
+        </button>
+        <button
+          type="button"
+          disabled
+          title="Attachments not implemented yet"
+          className="h-7 px-2.5 rounded-full border border-line bg-canvas text-[12px] flex items-center gap-1.5 whitespace-nowrap text-ink-soft opacity-50"
+        >
+          <Paperclip className="w-3 h-3" />
+          Attach
+        </button>
+        <button
+          type="button"
+          onClick={onOpenSideChat}
+          disabled={!session}
+          className="h-7 px-2.5 rounded-full border border-line bg-canvas text-[12px] flex items-center gap-1 whitespace-nowrap text-ink-soft disabled:opacity-40"
+        >
+          <MessageCircle className="w-3 h-3 text-klein" />
+          /btw
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            // /compact is a real slash command; insert it like any other.
+            insertCompact();
+          }}
+          className="h-7 px-2.5 rounded-full border border-line bg-canvas text-[12px] flex items-center gap-1 whitespace-nowrap text-ink-soft"
+        >
+          <span className="mono text-klein">/</span>compact
+        </button>
+      </div>
+
+      <div className="shrink-0 border-t border-line bg-canvas px-3 pt-2 pb-3 mt-2">
+        <div className="rounded-[12px] border border-line bg-paper/60 p-2">
           <textarea
             ref={textareaRef}
             value={text}
@@ -812,8 +1190,6 @@ function Composer({
                 return;
               }
               if (e.key === "Escape" && trigger) {
-                // Give the user a keyboard-level escape hatch from the picker
-                // without losing the typed text.
                 e.preventDefault();
                 dismissPicker();
               }
@@ -824,34 +1200,38 @@ function Composer({
                 ? "Type while claude thinks — will queue…"
                 : "Type a message…  try / or @"
             }
-            className="flex-1 bg-transparent outline-none text-[15px] resize-none min-h-[24px] max-h-40 py-1 px-2"
+            className="w-full bg-transparent outline-none text-[15px] resize-none min-h-[24px] max-h-40 py-1 px-2"
           />
-          <div className="flex items-center gap-1">
-            <button
-              onClick={openSlashManually}
-              title="Slash commands"
-              className="h-9 w-9 rounded-[8px] border border-line bg-canvas text-ink-soft flex items-center justify-center"
-              aria-label="Insert slash command"
-            >
-              <Slash className="w-4 h-4" />
-            </button>
-            <button
-              onClick={openMentionManually}
-              disabled={!project}
-              title={project ? "Mention a file" : "Project unavailable"}
-              className="h-9 w-9 rounded-[8px] border border-line bg-canvas text-ink-soft flex items-center justify-center disabled:opacity-40"
-              aria-label="Insert file mention"
-            >
-              <AtSign className="w-4 h-4" />
-            </button>
-            <button
-              onClick={send}
-              disabled={!text.trim()}
-              className="h-9 w-9 rounded-full bg-klein text-canvas flex items-center justify-center shadow-card disabled:opacity-40"
-              aria-label="Send message"
-            >
-              <Send className="w-4 h-4" />
-            </button>
+          <div className="flex items-center justify-between px-1 mt-1">
+            {/* Mobile: show model · mode here (mockup 929). Desktop already
+                has them as pills in the header, so on md+ we just reserve
+                the spacer. */}
+            <div className="mono text-[11px] text-ink-muted md:opacity-0">
+              {session
+                ? `${MODEL_LABEL[session.model] ?? session.model} · ${MODE_LABEL[session.mode] ?? session.mode}`
+                : "—"}
+            </div>
+            {busy ? (
+              <button
+                type="button"
+                onClick={onStop}
+                title="Stop claude"
+                aria-label="Stop claude"
+                className="h-8 w-8 rounded-full bg-danger text-canvas flex items-center justify-center shadow-card"
+              >
+                <StopCircle className="w-4 h-4" />
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={send}
+                disabled={!text.trim()}
+                className="h-8 w-8 rounded-full bg-klein text-canvas flex items-center justify-center shadow-card disabled:opacity-40"
+                aria-label="Send message"
+              >
+                <Send className="w-4 h-4" />
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -874,6 +1254,31 @@ function Composer({
       )}
     </>
   );
+
+  // Helper: inject `/compact` at the cursor (or at the start of the buffer
+  // if empty). Keeps the chip behaviour consistent with typing `/compact`
+  // manually.
+  function insertCompact() {
+    const el = textareaRef.current;
+    const cursor = el?.selectionEnd ?? text.length;
+    if (/^\s*$/.test(text)) {
+      const next = "/compact ";
+      setText(next);
+      requestAnimationFrame(() => {
+        const t = textareaRef.current;
+        if (!t) return;
+        t.focus();
+        try {
+          t.setSelectionRange(next.length, next.length);
+        } catch {
+          /* ignore */
+        }
+      });
+    } else {
+      const next = text.slice(0, cursor) + "/compact " + text.slice(cursor);
+      setText(next);
+    }
+  }
 }
 
 function summarizeInput(input: Record<string, unknown>): string {

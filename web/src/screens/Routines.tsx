@@ -16,10 +16,12 @@ import type {
   Routine,
 } from "@claudex/shared";
 import { api, ApiError } from "@/api/client";
+import { AppShell } from "@/components/AppShell";
 
-// Common cron presets so the user doesn't have to write cron for the 80%
-// case. `custom` drops into a free-text input. The labels are phrased in
-// the user's timezone — the server schedules in the host's local TZ too.
+// Inlined version of RoutinesSheet contents as a full-page screen. The old
+// sheet is kept around for the "Run now → navigate into session" flow but
+// the tab bar is now the primary entry point, not the Home header button.
+
 const PRESETS: Array<{ id: string; label: string; expr: string }> = [
   { id: "hourly", label: "Every hour", expr: "0 * * * *" },
   { id: "daily-9", label: "Every day at 9:00", expr: "0 9 * * *" },
@@ -28,14 +30,10 @@ const PRESETS: Array<{ id: string; label: string; expr: string }> = [
   { id: "every-30m", label: "Every 30 minutes", expr: "*/30 * * * *" },
 ];
 
-// Narrow, on-purpose humanizer for the presets we offer. Falls through to
-// the raw cron string for anything we don't recognise — good enough until we
-// want the weight of `cronstrue`.
 function humanCron(expr: string): string {
   const trimmed = expr.trim();
   const hit = PRESETS.find((p) => p.expr === trimmed);
   if (hit) return hit.label;
-  // Handle "0 H * * *" as "Every day at H:00"
   const m = trimmed.match(/^0 (\d{1,2}) \* \* \*$/);
   if (m) return `Every day at ${m[1]}:00`;
   return trimmed;
@@ -49,15 +47,14 @@ function formatRel(iso: string | null): string {
   const abs = Math.abs(diff);
   const mins = Math.round(abs / 60_000);
   if (mins < 1) return diff >= 0 ? "soon" : "just now";
-  if (mins < 60)
-    return diff >= 0 ? `in ${mins}m` : `${mins}m ago`;
+  if (mins < 60) return diff >= 0 ? `in ${mins}m` : `${mins}m ago`;
   const hrs = Math.round(mins / 60);
   if (hrs < 48) return diff >= 0 ? `in ${hrs}h` : `${hrs}h ago`;
   const days = Math.round(hrs / 24);
   return diff >= 0 ? `in ${days}d` : `${days}d ago`;
 }
 
-export function RoutinesSheet({ onClose }: { onClose: () => void }) {
+export function RoutinesScreen() {
   const [routines, setRoutines] = useState<Routine[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
@@ -88,7 +85,6 @@ export function RoutinesSheet({ onClose }: { onClose: () => void }) {
     setErr(null);
     try {
       const res = await api.runRoutine(r.id);
-      onClose();
       navigate(`/session/${res.sessionId}`);
     } catch (e) {
       setErr(e instanceof ApiError ? e.code : "run failed");
@@ -118,147 +114,133 @@ export function RoutinesSheet({ onClose }: { onClose: () => void }) {
     }
   }
 
-  if (editing || creating) {
-    return (
-      <RoutineEditor
-        initial={editing}
-        projects={projects}
-        onCancel={() => {
-          setEditing(null);
-          setCreating(false);
-        }}
-        onSaved={async () => {
-          setEditing(null);
-          setCreating(false);
-          await refresh();
-        }}
-      />
-    );
-  }
-
   return (
-    <div className="fixed inset-0 z-20 bg-ink/30 flex items-end sm:items-center justify-center">
-      <div className="w-full sm:max-w-lg bg-canvas border-t sm:border border-line rounded-t-[20px] sm:rounded-[14px] shadow-lift flex flex-col max-h-[90vh]">
-        <div className="flex items-center p-4 border-b border-line">
-          <div>
-            <div className="text-[11px] uppercase tracking-[0.14em] text-ink-muted">
-              Routines
-            </div>
-            <h2 className="display text-[1.25rem] leading-tight mt-0.5">
-              Scheduled sessions.
-            </h2>
+    <AppShell tab="routines">
+      <header className="sticky top-0 z-10 bg-canvas/90 backdrop-blur border-b border-line px-5 py-3 flex items-center gap-3">
+        <div>
+          <div className="caps text-ink-muted">Routines</div>
+          <h1 className="display text-[1.25rem] leading-tight mt-0.5">
+            Scheduled sessions
+          </h1>
+        </div>
+        <button
+          onClick={() => setCreating(true)}
+          className="ml-auto inline-flex items-center gap-1.5 h-9 px-3 rounded-[8px] bg-klein text-canvas text-[13px] font-medium shadow-card"
+        >
+          <Plus className="w-4 h-4" />
+          New routine
+        </button>
+      </header>
+
+      <section className="flex-1 min-h-0 overflow-y-auto px-4 py-4 space-y-3 max-w-[900px] mx-auto w-full">
+        {loading ? (
+          <div className="text-[13px] text-ink-muted text-center py-10 mono">
+            loading…
           </div>
-          <button
-            onClick={onClose}
-            className="ml-auto h-8 w-8 rounded-[8px] border border-line flex items-center justify-center"
-          >
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-        <div className="px-4 py-3 border-b border-line">
-          <button
-            onClick={() => setCreating(true)}
-            className="w-full inline-flex items-center justify-center gap-1.5 h-10 rounded-[8px] bg-ink text-canvas text-[13px] font-medium"
-          >
-            <Plus className="w-4 h-4" />
-            New routine
-          </button>
-        </div>
-        <div className="flex-1 overflow-y-auto">
-          {loading ? (
-            <div className="text-[13px] text-ink-muted text-center py-10 mono">
-              loading…
+        ) : routines.length === 0 ? (
+          <div className="rounded-[12px] border border-dashed border-line-strong p-8 text-center">
+            <Calendar className="w-6 h-6 mx-auto text-ink-muted mb-2" />
+            <div className="display text-[1.1rem] mb-1">No routines yet.</div>
+            <div className="text-[13px] text-ink-muted max-w-[40ch] mx-auto">
+              Routines start a fresh session on a cron schedule. Useful for
+              nightly audits, morning summaries, or periodic health checks.
             </div>
-          ) : routines.length === 0 ? (
-            <div className="px-6 py-10 text-center">
-              <Calendar className="w-6 h-6 mx-auto text-ink-muted mb-2" />
-              <div className="text-[14px] font-medium mb-1">No routines yet.</div>
-              <div className="text-[12px] text-ink-muted max-w-[36ch] mx-auto">
-                Routines start a fresh session on a cron schedule. Useful for
-                nightly audits, morning summaries, or periodic health checks.
-              </div>
-            </div>
-          ) : (
-            <ul className="divide-y divide-line">
-              {routines.map((r) => (
-                <li key={r.id} className="px-4 py-3">
-                  <div className="flex items-center gap-2">
-                    <span
-                      className={`h-2 w-2 rounded-full ${
-                        r.status === "active"
-                          ? "bg-success"
-                          : "bg-line-strong"
-                      }`}
-                    />
-                    <span className="text-[11px] uppercase tracking-[0.12em] text-ink-muted">
-                      {r.status}
-                    </span>
-                    <span className="ml-auto text-[11px] text-ink-muted">
-                      next {formatRel(r.nextRunAt)}
-                    </span>
-                  </div>
-                  <div className="text-[15px] font-medium leading-snug mt-1">
-                    {r.name}
-                  </div>
-                  <div className="text-[12px] text-ink-muted mt-0.5">
-                    {humanCron(r.cronExpr)}
-                  </div>
-                  <div className="text-[11px] text-ink-muted mt-0.5 mono truncate">
-                    {r.cronExpr}
-                  </div>
-                  <div className="flex gap-1.5 mt-2">
-                    <button
-                      onClick={() => runNow(r)}
-                      title="Run now"
-                      className="h-8 px-2.5 rounded-[6px] border border-line text-[12px] inline-flex items-center gap-1 hover:bg-paper"
-                    >
-                      <Play className="w-3 h-3" />
-                      Run now
-                    </button>
-                    <button
-                      onClick={() => togglePause(r)}
-                      title={r.status === "active" ? "Pause" : "Resume"}
-                      className="h-8 px-2.5 rounded-[6px] border border-line text-[12px] inline-flex items-center gap-1 hover:bg-paper"
-                    >
-                      {r.status === "active" ? (
-                        <>
-                          <Pause className="w-3 h-3" />
-                          Pause
-                        </>
-                      ) : (
-                        <>
-                          <Play className="w-3 h-3" />
-                          Resume
-                        </>
-                      )}
-                    </button>
-                    <button
-                      onClick={() => setEditing(r)}
-                      title="Edit"
-                      className="ml-auto h-8 w-8 rounded-[6px] border border-line flex items-center justify-center text-ink-soft hover:bg-paper"
-                    >
-                      <Pencil className="w-3.5 h-3.5" />
-                    </button>
-                    <button
-                      onClick={() => remove(r)}
-                      title="Delete"
-                      className="h-8 w-8 rounded-[6px] border border-line flex items-center justify-center text-danger hover:bg-danger-wash"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
+          </div>
+        ) : (
+          <ul className="space-y-2">
+            {routines.map((r) => (
+              <li
+                key={r.id}
+                className="rounded-[10px] border border-line bg-canvas px-4 py-3"
+              >
+                <div className="flex items-center gap-2">
+                  <span
+                    className={`h-2 w-2 rounded-full ${
+                      r.status === "active" ? "bg-success" : "bg-line-strong"
+                    }`}
+                  />
+                  <span className="text-[11px] uppercase tracking-[0.12em] text-ink-muted">
+                    {r.status}
+                  </span>
+                  <span className="ml-auto text-[11px] text-ink-muted">
+                    next {formatRel(r.nextRunAt)}
+                  </span>
+                </div>
+                <div className="text-[15px] font-medium leading-snug mt-1">
+                  {r.name}
+                </div>
+                <div className="text-[12px] text-ink-muted mt-0.5">
+                  {humanCron(r.cronExpr)}
+                </div>
+                <div className="text-[11px] text-ink-muted mt-0.5 mono truncate">
+                  {r.cronExpr}
+                </div>
+                <div className="flex gap-1.5 mt-2">
+                  <button
+                    onClick={() => runNow(r)}
+                    className="h-8 px-2.5 rounded-[6px] border border-line text-[12px] inline-flex items-center gap-1 hover:bg-paper"
+                  >
+                    <Play className="w-3 h-3" />
+                    Run now
+                  </button>
+                  <button
+                    onClick={() => togglePause(r)}
+                    className="h-8 px-2.5 rounded-[6px] border border-line text-[12px] inline-flex items-center gap-1 hover:bg-paper"
+                  >
+                    {r.status === "active" ? (
+                      <>
+                        <Pause className="w-3 h-3" />
+                        Pause
+                      </>
+                    ) : (
+                      <>
+                        <Play className="w-3 h-3" />
+                        Resume
+                      </>
+                    )}
+                  </button>
+                  <button
+                    onClick={() => setEditing(r)}
+                    className="ml-auto h-8 w-8 rounded-[6px] border border-line flex items-center justify-center text-ink-soft hover:bg-paper"
+                    title="Edit"
+                  >
+                    <Pencil className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    onClick={() => remove(r)}
+                    className="h-8 w-8 rounded-[6px] border border-line flex items-center justify-center text-danger hover:bg-danger-wash"
+                    title="Delete"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
         {err && (
-          <div className="m-3 text-[13px] text-danger bg-danger-wash rounded-[8px] px-3 py-2 border border-danger/30">
+          <div className="text-[13px] text-danger bg-danger-wash rounded-[8px] px-3 py-2 border border-danger/30">
             {err}
           </div>
         )}
-      </div>
-    </div>
+      </section>
+
+      {(editing || creating) && (
+        <RoutineEditor
+          initial={editing}
+          projects={projects}
+          onCancel={() => {
+            setEditing(null);
+            setCreating(false);
+          }}
+          onSaved={async () => {
+            setEditing(null);
+            setCreating(false);
+            await refresh();
+          }}
+        />
+      )}
+    </AppShell>
   );
 }
 
@@ -291,7 +273,6 @@ function RoutineEditor({
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  // Keep cronExpr in sync with preset selection.
   useEffect(() => {
     if (cronPreset === "custom") return;
     const hit = PRESETS.find((p) => p.id === cronPreset);
@@ -300,22 +281,10 @@ function RoutineEditor({
 
   async function save() {
     setErr(null);
-    if (!name.trim()) {
-      setErr("Name can't be empty.");
-      return;
-    }
-    if (!projectId) {
-      setErr("Pick a project first.");
-      return;
-    }
-    if (!prompt.trim()) {
-      setErr("Prompt can't be empty.");
-      return;
-    }
-    if (!cronExpr.trim()) {
-      setErr("Cron expression can't be empty.");
-      return;
-    }
+    if (!name.trim()) return setErr("Name can't be empty.");
+    if (!projectId) return setErr("Pick a project first.");
+    if (!prompt.trim()) return setErr("Prompt can't be empty.");
+    if (!cronExpr.trim()) return setErr("Cron expression can't be empty.");
     setBusy(true);
     try {
       if (initial) {
@@ -349,7 +318,7 @@ function RoutineEditor({
   }
 
   return (
-    <div className="fixed inset-0 z-20 bg-ink/30 flex items-end sm:items-center justify-center">
+    <div className="fixed inset-0 z-40 bg-ink/30 flex items-end sm:items-center justify-center">
       <div className="w-full sm:max-w-lg bg-canvas border-t sm:border border-line rounded-t-[20px] sm:rounded-[14px] shadow-lift flex flex-col max-h-[90vh]">
         <div className="flex items-center p-4 border-b border-line">
           <div>
@@ -457,10 +426,6 @@ function RoutineEditor({
               value={cronExpr}
               onChange={(e) => setCronExpr(e.target.value)}
             />
-            <div className="text-[11px] text-ink-muted mt-1">
-              Five fields: minute hour day-of-month month day-of-week. Evaluated
-              in the host's local timezone.
-            </div>
           </div>
           <div>
             <div className="text-[12px] uppercase tracking-[0.14em] text-ink-muted mb-2">

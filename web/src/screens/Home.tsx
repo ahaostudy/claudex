@@ -1,12 +1,12 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Calendar, Plus, GitBranch, Pencil, Trash2, FolderOpen, Settings2, Settings } from "lucide-react";
+import { Plus, GitBranch, Pencil, Trash2, FolderOpen, Settings2 } from "lucide-react";
 import { useAuth } from "@/state/auth";
 import { useSessions } from "@/state/sessions";
 import { api, ApiError } from "@/api/client";
 import type { Project, ModelId, PermissionMode } from "@claudex/shared";
 import { FolderPicker } from "@/components/FolderPicker";
-import { RoutinesSheet } from "@/components/RoutinesSheet";
+import { AppShell } from "@/components/AppShell";
 import { cn } from "@/lib/cn";
 
 const statusTone: Record<string, string> = {
@@ -18,7 +18,7 @@ const statusTone: Record<string, string> = {
 };
 
 export function HomeScreen() {
-  const { user, logout } = useAuth();
+  const { user } = useAuth();
   const {
     init,
     sessions,
@@ -30,7 +30,6 @@ export function HomeScreen() {
   const navigate = useNavigate();
   const [showNew, setShowNew] = useState(false);
   const [showProjects, setShowProjects] = useState(false);
-  const [showRoutines, setShowRoutines] = useState(false);
   const [showWsDiag, setShowWsDiag] = useState(false);
 
   useEffect(() => {
@@ -39,13 +38,14 @@ export function HomeScreen() {
   }, [init, refreshSessions]);
 
   return (
-    <main className="min-h-screen bg-canvas">
+    <AppShell tab="sessions">
       <header className="sticky top-0 z-10 bg-canvas/90 backdrop-blur border-b border-line px-5 py-3 flex items-center gap-3">
-        <svg viewBox="0 0 32 32" className="w-5 h-5">
-          <path d="M9 22 L16 8 L23 22 Z" fill="#cc785c" />
-          <circle cx="16" cy="18" r="2.2" fill="#faf9f5" />
-        </svg>
-        <span className="mono text-[13px]">claudex</span>
+        <div>
+          <div className="caps text-ink-muted">Sessions</div>
+          <h1 className="display text-[1.25rem] leading-tight mt-0.5">
+            All projects
+          </h1>
+        </div>
         <button
           type="button"
           onClick={() => setShowWsDiag((v) => !v)}
@@ -65,17 +65,10 @@ export function HomeScreen() {
           />
           {connected ? "live" : wsDiag.phase}
         </button>
+        <span className="hidden md:inline text-[12px] text-ink-muted ml-2">
+          signed in as <span className="mono">{user?.username}</span>
+        </span>
         <div className="ml-auto flex items-center gap-2">
-          <span className="text-[12px] text-ink-muted hidden sm:inline">
-            signed in as <span className="mono">{user?.username}</span>
-          </span>
-          <button
-            onClick={() => setShowRoutines(true)}
-            title="Routines"
-            className="h-8 w-8 rounded-[8px] border border-line bg-canvas flex items-center justify-center hover:bg-paper"
-          >
-            <Calendar className="w-4 h-4 text-ink-soft" />
-          </button>
           <button
             onClick={() => setShowProjects(true)}
             title="Manage projects"
@@ -84,34 +77,21 @@ export function HomeScreen() {
             <Settings2 className="w-4 h-4 text-ink-soft" />
           </button>
           <button
-            onClick={() => navigate("/settings")}
-            title="Global settings"
-            className="h-8 w-8 rounded-[8px] border border-line bg-canvas flex items-center justify-center hover:bg-paper"
+            onClick={() => setShowNew(true)}
+            className="inline-flex items-center gap-1.5 h-9 px-3 rounded-[8px] bg-klein text-canvas text-[13px] font-medium shadow-card"
           >
-            <Settings className="w-4 h-4 text-ink-soft" />
-          </button>
-          <button
-            onClick={() => logout()}
-            className="text-[12px] text-ink-muted hover:text-ink"
-          >
-            Sign out
+            <Plus className="w-4 h-4" />
+            <span className="hidden sm:inline">New session</span>
+            <span className="sm:hidden">New</span>
           </button>
         </div>
       </header>
 
-      <section className="px-5 pt-4 pb-24">
+      <section className="flex-1 min-h-0 overflow-y-auto px-5 pt-4 pb-6">
         <div className="flex items-baseline gap-3 mb-4">
-          <h1 className="display text-[1.75rem] leading-tight">Sessions</h1>
           <span className="mono text-[11px] text-ink-muted">
             {loadingSessions ? "loading…" : `${sessions.length} total`}
           </span>
-          <button
-            onClick={() => setShowNew(true)}
-            className="ml-auto inline-flex items-center gap-1.5 h-9 px-3 rounded-[8px] bg-klein text-canvas text-[13px] font-medium shadow-card"
-          >
-            <Plus className="w-4 h-4" />
-            New
-          </button>
         </div>
 
         {sessions.length === 0 && !loadingSessions ? (
@@ -165,13 +145,10 @@ export function HomeScreen() {
       {showProjects && (
         <ProjectsSheet onClose={() => setShowProjects(false)} />
       )}
-      {showRoutines && (
-        <RoutinesSheet onClose={() => setShowRoutines(false)} />
-      )}
       {showWsDiag && (
         <WsDiagPanel diag={wsDiag} onClose={() => setShowWsDiag(false)} />
       )}
-    </main>
+    </AppShell>
   );
 }
 
@@ -200,10 +177,6 @@ function NewSessionSheet({
   onClose: () => void;
   onCreated: (id: string) => void;
 }) {
-  // `selected` is either an existing project id, or the sentinel "__new__"
-  // meaning the user wants to add a new project. Keeping it as a single
-  // state rather than a boolean + id lets the existing-project list and the
-  // "new project" row share one radio-group semantics.
   const NEW_PROJECT = "__new__";
   const [projects, setProjects] = useState<Project[]>([]);
   const [selected, setSelected] = useState<string>(NEW_PROJECT);
@@ -219,9 +192,6 @@ function NewSessionSheet({
   useEffect(() => {
     api.listProjects().then((r) => {
       setProjects(r.projects);
-      // If there are existing projects, default to the most recent one —
-      // that's what "start a second session" usually means. If there are
-      // none, stay on the add-new row.
       if (r.projects.length > 0) setSelected(r.projects[0].id);
     });
   }, []);
@@ -238,8 +208,6 @@ function NewSessionSheet({
           setBusy(false);
           return;
         }
-        // If the user left the name blank, default to the last path segment.
-        // Matches how people usually label projects anyway.
         const trimmedName =
           projectName.trim() ||
           trimmedPath.split("/").filter(Boolean).pop() ||
@@ -249,8 +217,6 @@ function NewSessionSheet({
           path: trimmedPath,
         });
         projectId = p.project.id;
-        // Make the new project show up in the list if the user reopens
-        // the sheet later in this session.
         setProjects((prev) => [p.project, ...prev]);
       } else {
         projectId = selected;
@@ -271,7 +237,7 @@ function NewSessionSheet({
   }
 
   return (
-    <div className="fixed inset-0 z-20 bg-ink/30 flex items-end sm:items-center justify-center">
+    <div className="fixed inset-0 z-40 bg-ink/30 flex items-end sm:items-center justify-center">
       <div className="w-full max-w-lg bg-canvas border-t sm:border border-line rounded-t-[20px] sm:rounded-[14px] shadow-lift p-5">
         <div className="flex items-center mb-4">
           <div>
@@ -319,8 +285,6 @@ function NewSessionSheet({
                   </div>
                 </label>
               ))}
-              {/* Always-visible "new project" row. Expanding it reveals the
-                  name + path inputs without taking the list away. */}
               <label
                 className={`block border rounded-[8px] cursor-pointer ${
                   selected === NEW_PROJECT
@@ -481,10 +445,6 @@ function formatRel(iso: string): string {
   return `${Math.round(diff / 86400)}d ago`;
 }
 
-/**
- * Surfaces the WS client's internal state so we can debug "offline" on
- * phones without dev tools. Tap the status pill in the header to toggle.
- */
 function WsDiagPanel({
   diag,
   onClose,
@@ -517,7 +477,7 @@ function WsDiagPanel({
     ],
   ];
   return (
-    <div className="fixed inset-0 z-20 bg-ink/30 flex items-end sm:items-center justify-center">
+    <div className="fixed inset-0 z-40 bg-ink/30 flex items-end sm:items-center justify-center">
       <div className="w-full sm:max-w-md bg-canvas border-t sm:border border-line rounded-t-[20px] sm:rounded-[14px] shadow-lift p-4">
         <div className="flex items-center mb-3">
           <div>
@@ -587,8 +547,6 @@ function ProjectsSheet({ onClose }: { onClose: () => void }) {
 
   async function remove(p: Project) {
     setErr(null);
-    // Two-step confirm via window.confirm — intentionally native so it
-    // survives across mobile browsers without extra modal machinery.
     if (
       !confirm(
         `Delete project "${p.name}"? Sessions under it are not deleted, only the project reference.`,
@@ -611,7 +569,7 @@ function ProjectsSheet({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <div className="fixed inset-0 z-20 bg-ink/30 flex items-end sm:items-center justify-center">
+    <div className="fixed inset-0 z-40 bg-ink/30 flex items-end sm:items-center justify-center">
       <div className="w-full sm:max-w-lg bg-canvas border-t sm:border border-line rounded-t-[20px] sm:rounded-[14px] shadow-lift flex flex-col max-h-[90vh]">
         <div className="flex items-center p-4 border-b border-line">
           <div>
