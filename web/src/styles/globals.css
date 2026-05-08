@@ -35,24 +35,3 @@ body {
   font-feature-settings: "zero", "ss01";
 }
 
-/*
- * iOS Safari auto-zooms the page whenever a focused input/textarea/select
- * has a computed font-size below 16px. Tailwind classes on this app happily
- * assign 13–15px to compact inputs (the TOTP boxes, the chat composer, the
- * project path box, etc.), so we clamp to 16px globally on mobile-ish
- * widths. The visual size we *design* for is still set via the utility
- * class on each element; this rule only bumps the floor on screens where
- * the zoom behavior hurts, leaving desktop unaffected.
- *
- * 900px is deliberately generous: the Vite dev proxy at 5173 and the phone
- * at 390px should both hit this, but a 1280px laptop keeps the original
- * sizing so forms don't look oversized on a trackpad.
- */
-@media (max-width: 900px) {
-  input,
-  textarea,
-  select {
-    font-size: 16px;
-  }
-}
-
