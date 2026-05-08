@@ -454,4 +454,23 @@ export class SessionManager {
       }),
     );
   }
+
+  /**
+   * Tear down the live runner (if any) for a single session. Used by the
+   * DELETE route before dropping the session row so we don't keep a dangling
+   * SDK process around writing events for a session that no longer exists.
+   * No-op when no runner is attached.
+   */
+  async dispose(sessionId: string): Promise<void> {
+    const entry = this.runners.get(sessionId);
+    if (!entry) return;
+    this.runners.delete(sessionId);
+    entry.off();
+    try {
+      await entry.runner.dispose();
+    } catch {
+      // Best-effort: if the runner already exited we don't want the route
+      // to fail on a secondary cleanup error.
+    }
+  }
 }

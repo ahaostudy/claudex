@@ -132,6 +132,10 @@ export const api = {
       method: "POST",
     });
   },
+  deleteSession(id: string) {
+    // 204 No Content — `request` returns `undefined` for 204 by design.
+    return request<void>(`/api/sessions/${id}`, { method: "DELETE" });
+  },
   getSideSession(parentId: string) {
     return request<{ session: Session | null }>(
       `/api/sessions/${parentId}/side`,

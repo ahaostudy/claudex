@@ -256,6 +256,53 @@ export async function registerSessionRoutes(
     },
   );
 
+  // DELETE /api/sessions/:id
+  //
+  // Hard-delete a session. Unlike archive, this is irreversible: the session
+  // row + every `session_events` row (FK CASCADE) + any `/btw` side-chat
+  // children (also CASCADE via `parent_session_id` FK) disappear. Tool grants
+  // scoped to this session also cascade.
+  //
+  // Live runner is torn down first so the SDK subprocess doesn't keep writing
+  // events against a row that's about to vanish. Worktree cleanup is
+  // best-effort — archive logs & continues on failure, and delete must do the
+  // same: the user expects the session to be gone regardless of whether git
+  // cleaned up behind us.
+  app.delete(
+    "/api/sessions/:id",
+    { preHandler: app.requireAuth as any },
+    async (req, reply) => {
+      const { id } = req.params as { id: string };
+      const existing = sessions.findById(id);
+      if (!existing) return reply.code(404).send({ error: "not_found" });
+
+      // Tear down the runner first so no more events get appended to a row
+      // we're about to delete. Safe to call even when no runner is attached.
+      try {
+        await deps.manager.dispose(id);
+      } catch (err) {
+        req.log.warn(
+          { err, sessionId: id },
+          "runner dispose failed during session delete",
+        );
+      }
+
+      if (existing.worktreePath) {
+        try {
+          await removeWorktree(existing.worktreePath);
+        } catch (err) {
+          req.log.warn(
+            { err, sessionId: id, worktreePath: existing.worktreePath },
+            "worktree cleanup failed during delete",
+          );
+        }
+      }
+
+      sessions.deleteById(id);
+      return reply.code(204).send();
+    },
+  );
+
   // POST /api/sessions/:id/side
   //
   // Spawns a `/btw` side chat that branches off an existing session. Copies

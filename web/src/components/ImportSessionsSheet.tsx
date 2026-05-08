@@ -109,7 +109,13 @@ export function ImportSessionsSheet({
 
   return (
     <div
-      className="fixed inset-0 z-30 bg-ink/50 flex items-end sm:items-center justify-center"
+      // The AppShell's MobileTabBar is `fixed ... z-30` and is a later DOM
+      // sibling of the sheet's mount point. With equal z-index the tab bar
+      // paints on top, clipping the sheet's "Import selected" footer on
+      // mobile. Bump to z-40 so the sheet (and every sheet sibling at or
+      // below z-30) sits above the tab bar. Matches TerminalDrawer /
+      // Routines dialog patterns.
+      className="fixed inset-0 z-40 bg-ink/50 flex items-end sm:items-center justify-center"
       onClick={onClose}
     >
       <div

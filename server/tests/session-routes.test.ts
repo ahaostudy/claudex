@@ -417,6 +417,143 @@ describe("session HTTP routes", () => {
   });
 
   // ---------------------------------------------------------------------------
+  // DELETE /api/sessions/:id
+  //
+  // Hard delete: row gone, events gone (FK CASCADE), side-chat children gone
+  // (self-referential FK CASCADE). Worktree cleanup is best-effort; we don't
+  // exercise the worktree branch here because creating a real git repo per
+  // test is expensive and `worktree.test.ts` already covers removeWorktree.
+  // ---------------------------------------------------------------------------
+  describe("DELETE /api/sessions/:id", () => {
+    async function seedSession(ctx: {
+      app: FastifyInstance;
+      cookie: string;
+      tmpDir: string;
+    }) {
+      const proj = await ctx.app
+        .inject({
+          method: "POST",
+          url: "/api/projects",
+          headers: { cookie: ctx.cookie },
+          payload: { name: "demo", path: ctx.tmpDir },
+        })
+        .then((r) => r.json().project);
+      const s = await ctx.app
+        .inject({
+          method: "POST",
+          url: "/api/sessions",
+          headers: { cookie: ctx.cookie },
+          payload: {
+            projectId: proj.id,
+            title: "goner",
+            model: "claude-opus-4-7",
+            mode: "default",
+            worktree: false,
+          },
+        })
+        .then((r) => r.json().session as { id: string });
+      return { proj, s };
+    }
+
+    it("rejects unauthenticated", async () => {
+      const ctx = await bootstrap();
+      disposers.push(ctx.cleanup);
+      const { s } = await seedSession(ctx);
+      const res = await ctx.app.inject({
+        method: "DELETE",
+        url: `/api/sessions/${s.id}`,
+      });
+      expect(res.statusCode).toBe(401);
+    });
+
+    it("returns 404 for an unknown session id", async () => {
+      const ctx = await bootstrap();
+      disposers.push(ctx.cleanup);
+      const res = await ctx.app.inject({
+        method: "DELETE",
+        url: "/api/sessions/no-such-id",
+        headers: { cookie: ctx.cookie },
+      });
+      expect(res.statusCode).toBe(404);
+      expect(res.json().error).toBe("not_found");
+    });
+
+    it("hard-deletes the session row and cascades its events", async () => {
+      const ctx = await bootstrap();
+      disposers.push(ctx.cleanup);
+      const { s } = await seedSession(ctx);
+      // Seed an event so we can prove cascade.
+      const now = new Date().toISOString();
+      ctx.dbh.db
+        .prepare(
+          `INSERT INTO session_events (id, session_id, kind, seq, created_at, payload)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+        )
+        .run("ev-1", s.id, "user_message", 0, now, JSON.stringify({ text: "hi" }));
+
+      const res = await ctx.app.inject({
+        method: "DELETE",
+        url: `/api/sessions/${s.id}`,
+        headers: { cookie: ctx.cookie },
+      });
+      expect(res.statusCode).toBe(204);
+
+      // Row gone.
+      const rowAfter = ctx.dbh.db
+        .prepare("SELECT id FROM sessions WHERE id = ?")
+        .get(s.id);
+      expect(rowAfter).toBeUndefined();
+
+      // Events cascaded.
+      const eventsAfter = ctx.dbh.db
+        .prepare("SELECT id FROM session_events WHERE session_id = ?")
+        .all(s.id);
+      expect(eventsAfter).toHaveLength(0);
+
+      // And a follow-up GET 404s.
+      const fetched = await ctx.app.inject({
+        method: "GET",
+        url: `/api/sessions/${s.id}`,
+        headers: { cookie: ctx.cookie },
+      });
+      expect(fetched.statusCode).toBe(404);
+    });
+
+    it("cascades delete to side-chat children", async () => {
+      const ctx = await bootstrap();
+      disposers.push(ctx.cleanup);
+      const { s } = await seedSession(ctx);
+      // Spawn a /btw side chat off the parent.
+      const side = await ctx.app
+        .inject({
+          method: "POST",
+          url: `/api/sessions/${s.id}/side`,
+          headers: { cookie: ctx.cookie },
+          payload: {},
+        })
+        .then((r) => r.json().session as { id: string });
+      expect(side.id).toBeTruthy();
+
+      const res = await ctx.app.inject({
+        method: "DELETE",
+        url: `/api/sessions/${s.id}`,
+        headers: { cookie: ctx.cookie },
+      });
+      expect(res.statusCode).toBe(204);
+
+      // Parent gone, child gone too.
+      const parentRow = ctx.dbh.db
+        .prepare("SELECT id FROM sessions WHERE id = ?")
+        .get(s.id);
+      expect(parentRow).toBeUndefined();
+      const childRow = ctx.dbh.db
+        .prepare("SELECT id FROM sessions WHERE id = ?")
+        .get(side.id);
+      expect(childRow).toBeUndefined();
+    });
+  });
+
+  // ---------------------------------------------------------------------------
   // GET /api/sessions/:id/pending-diffs
   //
   // We seed events directly via the SessionStore so the test doesn't need to

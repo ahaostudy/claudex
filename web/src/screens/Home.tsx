@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { Plus, GitBranch, Pencil, Trash2, FolderOpen, Settings2, X, Download } from "lucide-react";
+import { Plus, GitBranch, Pencil, Trash2, FolderOpen, Settings2, X, Download, Search } from "lucide-react";
 import { useAuth } from "@/state/auth";
 import { useSessions } from "@/state/sessions";
 import { api, ApiError } from "@/api/client";
@@ -110,6 +110,24 @@ export function HomeScreen() {
   const [showImport, setShowImport] = useState(false);
   const [projects, setProjects] = useState<Project[]>([]);
   const [archivedSessions, setArchivedSessions] = useState<Session[]>([]);
+  const [searchQuery, setSearchQuery] = useState("");
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
+
+  // Cmd+K / Ctrl+K focuses the desktop search input from anywhere on the
+  // page. preventDefault so the browser's own "search bookmarks" binding
+  // doesn't fight us. Works even when another input is focused — users
+  // expect to jump into search without first clicking out of the composer.
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "k") {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+        searchInputRef.current?.select();
+      }
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, []);
 
   useEffect(() => {
     init();
@@ -168,18 +186,33 @@ export function HomeScreen() {
     activeFilter === "archived" ? archivedSessions : sessions;
   const groups = useMemo(() => {
     const byProject = new Map<string, Session[]>();
+    const projectLookup = new Map(projects.map((p) => [p.id, p] as const));
+    const q = searchQuery.trim().toLowerCase();
     for (const s of sourceSessions) {
       // Hide side-chat children from the Home list. They appear inline in
       // their parent chat's side drawer, not as top-level rows.
       if (s.parentSessionId) continue;
       if (!chipMatches(s, activeFilter)) continue;
+      if (q) {
+        // Substring match across title / project name / branch. Placeholder
+        // copy says "files" too, but we don't index file content — keep the
+        // copy aspirational and the matcher honest (title/project/branch only).
+        const project = projectLookup.get(s.projectId);
+        const haystack = [
+          s.title ?? "",
+          project?.name ?? "",
+          s.branch ?? "",
+        ]
+          .join(" ")
+          .toLowerCase();
+        if (!haystack.includes(q)) continue;
+      }
       const list = byProject.get(s.projectId);
       if (list) list.push(s);
       else byProject.set(s.projectId, [s]);
     }
     const sortKey = (s: Session) =>
       Date.parse(s.lastMessageAt ?? s.updatedAt) || 0;
-    const projectLookup = new Map(projects.map((p) => [p.id, p] as const));
     const out: Array<{ project: Project | null; projectId: string; sessions: Session[] }> = [];
     for (const [projectId, list] of byProject) {
       list.sort((a, b) => sortKey(b) - sortKey(a));
@@ -193,7 +226,7 @@ export function HomeScreen() {
       (a, b) => sortKey(b.sessions[0]) - sortKey(a.sessions[0]),
     );
     return out;
-  }, [sourceSessions, projects, activeFilter]);
+  }, [sourceSessions, projects, activeFilter, searchQuery]);
 
   const filteredGroups = useMemo(() => {
     if (!activeProjectId) return groups;
@@ -264,6 +297,35 @@ export function HomeScreen() {
         <span className="hidden md:inline text-[12px] text-ink-muted ml-2">
           signed in as <span className="mono">{user?.username}</span>
         </span>
+        {/* Desktop-only search (mockup s-02 lines 480-490). Mobile header is
+            too narrow to fit a usable input so it stays as-is. Cmd/Ctrl+K
+            jumps focus here from anywhere. */}
+        <div className="hidden md:flex flex-1 max-w-md mx-auto items-center gap-2 h-9 px-3 bg-paper border border-line rounded-[8px]">
+          <Search className="w-3.5 h-3.5 text-ink-muted shrink-0" />
+          <input
+            ref={searchInputRef}
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Search sessions, projects, files…"
+            className="flex-1 min-w-0 bg-transparent outline-none text-[13px] text-ink placeholder:text-ink-muted"
+          />
+          {searchQuery ? (
+            <button
+              type="button"
+              onClick={() => {
+                setSearchQuery("");
+                searchInputRef.current?.focus();
+              }}
+              title="Clear search"
+              className="shrink-0 h-4 w-4 rounded-full flex items-center justify-center text-ink-muted hover:text-ink hover:bg-line/60"
+            >
+              <X className="w-3 h-3" />
+            </button>
+          ) : (
+            <span className="ml-auto text-[11px] text-ink-faint mono shrink-0">⌘K</span>
+          )}
+        </div>
         <div className="ml-auto flex items-center gap-2">
           <button
             onClick={() => setShowImport(true)}
@@ -327,13 +389,15 @@ export function HomeScreen() {
           </div>
         ) : filteredGroups.length === 0 ? (
           <div className="px-4 md:px-6 pb-6 text-[13px] text-ink-muted">
-            {activeFilter === "all"
-              ? "No sessions in this project yet."
-              : activeFilter === "scheduled"
-                ? "No scheduled sessions yet — set up a routine and it'll surface here once routines link to sessions."
-                : activeFilter === "archived"
-                  ? "No archived sessions."
-                  : `No ${activeFilter} sessions right now.`}
+            {searchQuery.trim()
+              ? `No matches for "${searchQuery.trim()}". Try a different filter chip or clear the search.`
+              : activeFilter === "all"
+                ? "No sessions in this project yet."
+                : activeFilter === "scheduled"
+                  ? "No scheduled sessions yet — set up a routine and it'll surface here once routines link to sessions."
+                  : activeFilter === "archived"
+                    ? "No archived sessions."
+                    : `No ${activeFilter} sessions right now.`}
           </div>
         ) : (
           <div className="pb-6">
@@ -692,7 +756,7 @@ function FilterChipRail({
             </button>
           );
         })}
-        <span className="ml-auto mono text-[11px] text-ink-muted hidden sm:inline pl-2 shrink-0">
+        <span className="ml-auto caps text-ink-muted hidden sm:inline pl-2 shrink-0">
           Group by project
         </span>
       </div>

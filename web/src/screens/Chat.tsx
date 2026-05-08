@@ -262,9 +262,9 @@ export function ChatScreen() {
     // mockup s-04 kicks in: 220px sessions rail · fluid center · 300px
     // tasks rail. The center column keeps its own flex-col so messages
     // scroll internally and the composer stays pinned.
-    <div className="flex h-[100dvh] bg-canvas">
+    <div className="flex h-full bg-canvas overflow-hidden">
       <ChatSessionsRail currentId={id} />
-      <main className="flex flex-col flex-1 min-w-0 h-full">
+      <main className="flex flex-col flex-1 min-w-0 min-h-0">
       {/* Mobile header — shown below md breakpoint (mockup 860-868). */}
       <header className="md:hidden shrink-0 px-4 py-2.5 border-b border-line flex items-center gap-2 bg-canvas">
         <button

@@ -236,6 +236,17 @@ export class SessionStore {
       .run(now, now, id);
   }
 
+  /**
+   * Hard-delete the session row. `session_events` and any side-chat children
+   * (`parent_session_id = id`) are removed via FK CASCADE (see migration 1
+   * for events, migration 3 for the self-referential parent FK). `tool_grants`
+   * scoped to this session also cascade. Returns true if a row was deleted.
+   */
+  deleteById(id: string): boolean {
+    const res = this.db.prepare("DELETE FROM sessions WHERE id = ?").run(id);
+    return res.changes > 0;
+  }
+
   bumpStats(
     id: string,
     delta: Partial<Session["stats"]>,

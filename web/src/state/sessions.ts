@@ -98,6 +98,11 @@ interface SessionState {
     decision: "allow_once" | "allow_always" | "deny",
   ) => void;
   setViewMode: (mode: ViewMode) => void;
+  // Drop a session from both the sessions list and the transcripts cache.
+  // Called after a successful DELETE /api/sessions/:id so the UI doesn't
+  // briefly flash a stale row before the next list refresh. No server hit
+  // here — this is local-state bookkeeping only.
+  forgetSession: (id: string) => void;
 }
 
 function eventToPiece(ev: SessionEvent): UIPiece | null {
@@ -496,6 +501,18 @@ export const useSessions = create<SessionState>((set, get) => {
       },
     }));
     armStallTimer(sessionId, pendingId);
+  },
+
+  forgetSession(id) {
+    clearStallTimer(id);
+    set((s) => {
+      const { [id]: _gone, ...rest } = s.transcripts;
+      void _gone;
+      return {
+        sessions: s.sessions.filter((x) => x.id !== id),
+        transcripts: rest,
+      };
+    });
   },
   };
 });

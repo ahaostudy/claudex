@@ -1,6 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { GitBranch, X } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 import { api, ApiError } from "@/api/client";
+import { useSessions } from "@/state/sessions";
 import type {
   ModelId,
   PermissionMode,
@@ -42,6 +44,15 @@ export function SessionSettingsSheet({
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [archiving, setArchiving] = useState(false);
+  // Two-step confirm for destructive delete. First click flips the button
+  // to "Click again to confirm" and arms a 3s timeout that resets the
+  // prompt. Second click actually calls DELETE. Ref-stored timer so the
+  // timeout can be cleared on unmount or re-press.
+  const [deleteConfirming, setDeleteConfirming] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const deleteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const navigate = useNavigate();
+  const forgetSession = useSessions((s) => s.forgetSession);
 
   const [grants, setGrants] = useState<ToolGrant[] | null>(null);
   const [grantsErr, setGrantsErr] = useState<string | null>(null);
@@ -110,6 +121,49 @@ export function SessionSettingsSheet({
     } catch (e) {
       setErr(e instanceof ApiError ? e.code : "archive_failed");
       setArchiving(false);
+    }
+  }
+
+  // Clean up any dangling confirm timer on unmount so it can't fire after
+  // the sheet (or the whole session) is gone.
+  useEffect(() => {
+    return () => {
+      if (deleteTimerRef.current) {
+        clearTimeout(deleteTimerRef.current);
+        deleteTimerRef.current = null;
+      }
+    };
+  }, []);
+
+  async function handleDelete() {
+    if (deleting) return;
+    if (!deleteConfirming) {
+      setDeleteConfirming(true);
+      if (deleteTimerRef.current) clearTimeout(deleteTimerRef.current);
+      deleteTimerRef.current = setTimeout(() => {
+        setDeleteConfirming(false);
+        deleteTimerRef.current = null;
+      }, 3000);
+      return;
+    }
+    // Second click within 3s — do the thing.
+    if (deleteTimerRef.current) {
+      clearTimeout(deleteTimerRef.current);
+      deleteTimerRef.current = null;
+    }
+    setDeleting(true);
+    setErr(null);
+    try {
+      await api.deleteSession(session.id);
+      forgetSession(session.id);
+      // Close the sheet first so the parent route doesn't try to re-render
+      // a session that no longer exists before we navigate away.
+      onClose();
+      navigate("/sessions");
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.code : "delete_failed");
+      setDeleting(false);
+      setDeleteConfirming(false);
     }
   }
 
@@ -365,20 +419,37 @@ export function SessionSettingsSheet({
             </div>
           )}
 
-          {/* Archive row.
-              Mobile mockup places this inside the Worktree card's divided
-              list; desktop mockup places it as a bordered footer row. We
-              always render as a footer-style row — single affordance that
-              reads the same on both breakpoints and doesn't fake a
-              "Relocate…" row we don't ship. */}
+          {/* Archive + Delete row.
+              Archive is reversible (row flip + best-effort worktree cleanup).
+              Delete is irreversible — hard-drops the session row, every
+              session_event, and any /btw side-chat children via FK cascade.
+              The second button uses a two-step confirm (click → "Click again
+              to confirm" with a 3s timeout) to keep an accidental tap from
+              wiping the transcript. */}
           {!archived && (
-            <div className="pt-4 border-t border-line flex">
+            <div className="pt-4 border-t border-line flex flex-wrap gap-2">
               <button
                 onClick={archive}
-                disabled={archiving}
+                disabled={archiving || deleting}
                 className="h-9 px-3 rounded-[8px] border border-line text-[13px] text-danger hover:bg-danger-wash disabled:opacity-60"
               >
                 {archiving ? "Archiving…" : archiveLabel}
+              </button>
+              <button
+                onClick={handleDelete}
+                disabled={deleting || archiving}
+                title="Permanently delete this session. This cannot be undone."
+                className={`h-9 px-3 rounded-[8px] text-[13px] disabled:opacity-60 ${
+                  deleteConfirming
+                    ? "bg-danger text-canvas border border-danger"
+                    : "border border-danger/50 text-danger hover:bg-danger-wash"
+                }`}
+              >
+                {deleting
+                  ? "Deleting…"
+                  : deleteConfirming
+                    ? "Click again to confirm"
+                    : "Delete session"}
               </button>
             </div>
           )}
