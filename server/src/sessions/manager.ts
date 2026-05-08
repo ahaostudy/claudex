@@ -12,6 +12,21 @@ import { summarizePermission } from "./permission-summary.js";
 
 type Broadcaster = (sessionId: string, event: RunnerEvent) => void;
 
+/**
+ * Narrow surface the manager needs from the push module. Accepts the full
+ * payload shape used by `sendToAll` over in `push/routes.ts`. Kept as a
+ * separate interface so we don't have to import the routes module (which
+ * pulls in fastify) from the manager — and so tests can stub it with a plain
+ * spy.
+ */
+export interface ManagerPushSender {
+  sendToAll(payload: {
+    title: string;
+    body: string;
+    data: { sessionId: string; url: string };
+  }): Promise<{ sent: number; pruned: number }>;
+}
+
 export interface SessionManagerDeps {
   sessions: SessionStore;
   projects: ProjectStore;
@@ -91,6 +106,40 @@ function deriveTitleFromMessage(raw: string): string {
 // can be tested without spinning up a full SessionManager harness.
 export const __testables = { shouldAutoRetitle, deriveTitleFromMessage };
 
+/**
+ * Pick the "most relevant" field from a tool-use input to show on a push
+ * notification body. Covers every tool we currently summarize for
+ * permission requests — extend here when new tool shapes land. Returns
+ * null when nothing useful is present; caller falls back to the tool name.
+ */
+function pickPushSubject(input: Record<string, unknown>): string | null {
+  const order = [
+    "command", // Bash
+    "file_path", // Edit / Write / MultiEdit / Read
+    "path",
+    "pattern", // Glob / Grep
+    "url", // WebFetch
+    "query", // WebSearch
+  ];
+  for (const key of order) {
+    const v = input[key];
+    if (typeof v === "string" && v.trim().length > 0) return v;
+  }
+  return null;
+}
+
+/**
+ * Clip a string to `max` code units for push-notification body text, adding
+ * a single-char ellipsis when clipping. Kept intentionally simple — we
+ * don't try to respect word boundaries because many push subjects are paths
+ * or commands where a word boundary isn't well-defined.
+ */
+function truncateForPush(s: string, max: number): string {
+  const one = s.replace(/\s+/g, " ").trim();
+  if (one.length <= max) return one;
+  return one.slice(0, Math.max(1, max - 1)) + "…";
+}
+
 export class SessionManager {
   private runners = new Map<string, SessionEntry>();
   // Track pending permission requests by toolUseId so we can look up the tool
@@ -99,8 +148,20 @@ export class SessionManager {
     string,
     { sessionId: string; toolName: string; input: Record<string, unknown> }
   >();
+  // Optional: attached by the server on boot so every `permission_request`
+  // fires a Web Push to the user's paired phone. Null in tests and when VAPID
+  // keys aren't configured — the rest of the manager must keep working.
+  private pushSender: ManagerPushSender | null = null;
 
   constructor(private readonly deps: SessionManagerDeps) {}
+
+  /**
+   * Install (or clear, when `null`) the push sender. See the
+   * `permission_request` branch in `handleEvent` for the one call site.
+   */
+  setPushSender(sender: ManagerPushSender | null): void {
+    this.pushSender = sender;
+  }
 
   getOrCreate(sessionId: string): Runner {
     const existing = this.runners.get(sessionId);
@@ -266,6 +327,11 @@ export class SessionManager {
             ...event,
             title: summary,
           });
+          // Fire a web push so the user's phone lights up even when the
+          // tab is backgrounded / the PWA is closed. Fire-and-forget —
+          // any failure inside the sender is caught here so runtime is
+          // never held up on a flaky push service.
+          this.firePermissionPush(sessionId, event.toolName, event.input);
           return;
         }
         case "turn_end":
@@ -306,6 +372,46 @@ export class SessionManager {
     }
     this.deps.broadcast(sessionId, event);
   }
+
+  /**
+   * Fire-and-forget Web Push when a session starts awaiting user input.
+   * Skips cleanly when no push sender is attached (tests, no VAPID config).
+   *
+   * Body text mirrors what the Permission card shows inline: tool name +
+   * truncated primary argument (command / file_path / pattern / url) so the
+   * user sees "what's claude trying to do" without opening the app. 60 chars
+   * because iOS lock-screen notifications collapse at ~90 and we still want
+   * the tool name legible at the front.
+   */
+  private firePermissionPush(
+    sessionId: string,
+    toolName: string,
+    input: Record<string, unknown>,
+  ): void {
+    const sender = this.pushSender;
+    if (!sender) return;
+    const session = this.deps.sessions.findById(sessionId);
+    const title =
+      session && session.title.trim().length > 0
+        ? session.title
+        : "Claude wants permission";
+    const primary =
+      pickPushSubject(input) ?? `${toolName}`;
+    const body = `${toolName} · ${truncateForPush(primary, 60)}`;
+    sender
+      .sendToAll({
+        title,
+        body,
+        data: { sessionId, url: `/session/${sessionId}` },
+      })
+      .catch((err) => {
+        this.deps.logger?.warn?.(
+          { err, sessionId, toolName },
+          "firePermissionPush failed",
+        );
+      });
+  }
+
 
   async sendUserMessage(sessionId: string, content: string): Promise<void> {
     const runner = this.getOrCreate(sessionId);
@@ -387,6 +493,16 @@ export class SessionManager {
       if (ev.kind === "user_message") n += 1;
     }
     return n;
+  }
+
+  /**
+   * Broadcast a `refresh_transcript` signal to every WS subscriber for this
+   * session. Used by out-of-band appenders (e.g. CLI JSONL resync) that
+   * don't go through the live runner and therefore aren't on the runner
+   * event bus. The web client reacts by refetching `/events?limit=200`.
+   */
+  notifyTranscriptRefresh(sessionId: string): void {
+    this.deps.broadcast(sessionId, { type: "refresh_transcript" });
   }
 
   async interrupt(sessionId: string): Promise<void> {

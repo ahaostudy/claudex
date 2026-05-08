@@ -1,11 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
-import type { Session } from "@claudex/shared";
+import type { Session, UsageSummaryResponse } from "@claudex/shared";
 import { api } from "@/api/client";
-import {
-  computeSessionUsage,
-  contextWindowTokens,
-  type SessionUsage,
-} from "@/lib/usage";
+import { contextWindowTokens } from "@/lib/usage";
 import { cn } from "@/lib/cn";
 import type { UIPiece } from "@/state/sessions";
 
@@ -46,17 +42,18 @@ export function ChatTasksRail({
     tasks.filter((t) => t.state !== "done").length + pendingApprovalCount;
 
   // ----- Context window footer -----
-  // Mirrors the Usage panel: aggregate events server-side to get the last
-  // turn's input tokens, then divide by the static context-window table.
-  const [usage, setUsage] = useState<SessionUsage | null>(null);
+  // Mirrors the Usage panel: ask the server for a pre-aggregated summary so
+  // a 10k-event session doesn't cost us the full /events payload every time
+  // a piece lands.
+  const [usage, setUsage] = useState<UsageSummaryResponse | null>(null);
   useEffect(() => {
     if (!session) return;
     let cancelled = false;
     (async () => {
       try {
-        const res = await api.listEvents(session.id);
+        const res = await api.getUsageSummary(session.id);
         if (cancelled) return;
-        setUsage(computeSessionUsage(res.events, session.model));
+        setUsage(res);
       } catch {
         // Fall back to zeros — the ring will render as unknown.
       }
@@ -65,8 +62,8 @@ export function ChatTasksRail({
       cancelled = true;
     };
     // Re-fetch each time the transcript length changes meaningfully so the
-    // ring updates after a turn_end lands (we don't have an incremental
-    // event feed on the client). Cheap — the route is local.
+    // ring updates after a turn_end lands. Cheap — the summary payload is
+    // O(1) KB regardless of transcript size.
   }, [session?.id, session?.model, pieces.length]);
 
   const contextWindow = session ? contextWindowTokens(session.model) : 200_000;

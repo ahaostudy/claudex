@@ -144,6 +144,42 @@ const MIGRATIONS: { id: number; name: string; up: string }[] = [
       CREATE INDEX idx_routines_project ON routines(project_id);
     `,
   },
+  {
+    id: 5,
+    name: "session_cli_jsonl_seq",
+    // Tracks how many lines of the adopted CLI `<uuid>.jsonl` transcript we've
+    // already imported into `session_events` for this session. Used by the
+    // resync-on-open path (`cli-resync.ts`) to idempotently pick up new CLI
+    // turns without re-importing lines we've already mapped. Zero means
+    // either (a) never imported, or (b) pre-existing row from before this
+    // column existed — in that case the resync path falls back to diffing
+    // persisted-event count against JSONL line count.
+    up: `
+      ALTER TABLE sessions ADD COLUMN cli_jsonl_seq INTEGER NOT NULL DEFAULT 0;
+    `,
+  },
+  {
+    id: 6,
+    name: "push_subscriptions",
+    // Browser Web Push endpoints registered via the Settings "Enable
+    // notifications" flow. Keyed on endpoint URL (UNIQUE) so a re-subscribe
+    // from the same device upserts instead of duplicating. No user_id column
+    // because claudex is single-user — every subscription is implicitly the
+    // owner's. `user_agent` is stamped on create for the device list.
+    // `last_used_at` is bumped every time we successfully deliver a push so
+    // the UI can show "last notified 2m ago" honestly.
+    up: `
+      CREATE TABLE push_subscriptions (
+        id TEXT PRIMARY KEY,
+        endpoint TEXT NOT NULL UNIQUE,
+        p256dh TEXT NOT NULL,
+        auth TEXT NOT NULL,
+        user_agent TEXT,
+        created_at TEXT NOT NULL,
+        last_used_at TEXT
+      );
+    `,
+  },
 ];
 
 export function openDb(config: Config, log: Logger): ClaudexDb {

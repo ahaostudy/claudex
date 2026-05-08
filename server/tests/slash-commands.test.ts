@@ -22,6 +22,80 @@ describe("slash-commands scanner", () => {
     return dir;
   }
 
+  describe("BUILT_IN_SLASH_COMMANDS behavior triage", () => {
+    // Guardrail for the table in slash-commands.ts: every built-in must
+    // declare a behavior, and the load-bearing categorizations — the ones
+    // the UI keys off — must match what we shipped.
+    it("every built-in carries a behavior", () => {
+      for (const c of BUILT_IN_SLASH_COMMANDS) {
+        expect(c.behavior, `behavior missing for /${c.name}`).toBeDefined();
+        expect(
+          ["native", "claudex-action", "unsupported"].includes(c.behavior.kind),
+        ).toBe(true);
+      }
+    });
+
+    it("categorizes REPL-only commands as unsupported", () => {
+      const replOnly = [
+        "add-dir",
+        "bug",
+        "continue",
+        "doctor",
+        "init",
+        "login",
+        "logout",
+        "resume",
+      ];
+      for (const name of replOnly) {
+        const c = BUILT_IN_SLASH_COMMANDS.find((x) => x.name === name);
+        expect(c, `/${name} missing from built-ins`).toBeDefined();
+        expect(c!.behavior.kind).toBe("unsupported");
+        if (c!.behavior.kind === "unsupported") {
+          expect(c!.behavior.reason.length).toBeGreaterThan(0);
+        }
+      }
+    });
+
+    it("maps UI-backed commands to the right claudex-action", () => {
+      const expected: Record<string, string> = {
+        model: "open-model-picker",
+        config: "open-session-settings",
+        status: "open-session-settings",
+        cost: "open-usage",
+        mcp: "open-plugins-settings",
+        plugin: "open-plugins-settings",
+        help: "open-slash-help",
+        clear: "clear-transcript",
+      };
+      for (const [name, action] of Object.entries(expected)) {
+        const c = BUILT_IN_SLASH_COMMANDS.find((x) => x.name === name);
+        expect(c, `/${name} missing from built-ins`).toBeDefined();
+        expect(c!.behavior.kind).toBe("claudex-action");
+        if (c!.behavior.kind === "claudex-action") {
+          expect(c!.behavior.action).toBe(action);
+        }
+      }
+    });
+
+    it("flags /compact as native (SDK forwards it end-to-end)", () => {
+      const c = BUILT_IN_SLASH_COMMANDS.find((x) => x.name === "compact");
+      expect(c).toBeDefined();
+      expect(c!.behavior.kind).toBe("native");
+    });
+
+    it("listSlashCommands propagates behavior onto the response", async () => {
+      const home = mkTmp("claudex-slash-home-");
+      const out = await listSlashCommands({
+        userClaudeDir: path.join(home, ".claude"),
+      });
+      const model = out.find((c) => c.name === "model");
+      expect(model).toBeDefined();
+      expect(model!.behavior.kind).toBe("claudex-action");
+      const login = out.find((c) => c.name === "login");
+      expect(login!.behavior.kind).toBe("unsupported");
+    });
+  });
+
   describe("extractDescription", () => {
     it("prefers YAML frontmatter description", () => {
       const raw = [
@@ -107,6 +181,7 @@ describe("slash-commands scanner", () => {
       const deploy = userCmds.find((c) => c.name === "deploy")!;
       expect(deploy.description).toBe("Deploy the app");
       expect(deploy.source).toBe(path.join(cmdsDir, "deploy.md"));
+      expect(deploy.behavior.kind).toBe("native");
       const refactor = userCmds.find((c) => c.name === "refactor")!;
       expect(refactor.description).toBe("Refactor this module");
       const blank = userCmds.find((c) => c.name === "zzz-blank")!;

@@ -17,6 +17,7 @@ import { registerSlashCommandRoutes } from "../sessions/slash-commands.js";
 import { registerUserEnvRoutes } from "../sessions/user-env.js";
 import { registerCliRoutes } from "../sessions/cli-routes.js";
 import { registerUsageRoutes } from "../sessions/usage-routes.js";
+import { registerSessionExportRoutes } from "../sessions/export-routes.js";
 import { registerWsRoute } from "./ws.js";
 import { registerPtyRoutes } from "./pty.js";
 import { agentRunnerFactory } from "../sessions/agent-runner.js";
@@ -24,6 +25,12 @@ import type { RunnerFactory } from "../sessions/runner.js";
 import { RoutineStore } from "../routines/store.js";
 import { RoutineScheduler } from "../routines/scheduler.js";
 import { registerRoutineRoutes } from "../routines/routes.js";
+import {
+  createPushSender,
+  registerPushRoutes,
+  type PushSender,
+} from "../push/routes.js";
+import type { VapidKeys } from "../push/vapid.js";
 
 export interface AppDeps {
   db: Database.Database;
@@ -54,6 +61,14 @@ export interface AppDeps {
    * its /api + /ws proxy pointing here.
    */
   webDist?: string;
+  /**
+   * VAPID keys for the Web Push routes + SessionManager's permission-request
+   * push trigger. Injected by `server/src/index.ts` via
+   * `loadOrCreateVapidKeys(config, log)` in production; tests omit it and
+   * the push surface is disabled (routes still register, but send returns
+   * a no-op sender — see the nullish `vapid` branch below).
+   */
+  vapid?: VapidKeys;
 }
 
 export async function buildApp(
@@ -94,7 +109,39 @@ export async function buildApp(
     logger: deps.logger === false ? undefined : deps.logger,
   });
 
-  await registerSessionRoutes(app, { db: deps.db, manager });
+  // Push notifications. We only wire the real web-push sender when VAPID
+  // keys are configured — tests skip them to avoid the cost of ECC keygen
+  // and to keep the send path deterministic. Without keys we register the
+  // routes with a no-op sender so `GET /api/push/state` still works; the
+  // subscribe route still rejects because the browser can't subscribe
+  // without a valid applicationServerKey.
+  let pushSender: PushSender | null = null;
+  if (deps.vapid) {
+    pushSender = createPushSender({
+      db: deps.db,
+      vapid: deps.vapid,
+      logger: deps.logger === false ? undefined : deps.logger,
+    });
+    await registerPushRoutes(
+      app,
+      {
+        db: deps.db,
+        vapid: deps.vapid,
+        logger: deps.logger === false ? undefined : deps.logger,
+      },
+      pushSender,
+    );
+    // Fire a push every time a permission_request makes a session wait on a
+    // user decision. Fire-and-forget: the manager catches rejections so a
+    // push-delivery failure never crashes runtime.
+    manager.setPushSender(pushSender);
+  }
+
+  await registerSessionRoutes(app, {
+    db: deps.db,
+    manager,
+    cliProjectsRoot: deps.cliProjectsRoot,
+  });
   await registerBrowseRoutes(app);
   await registerSlashCommandRoutes(app, {
     db: deps.db,
@@ -109,6 +156,7 @@ export async function buildApp(
     cliProjectsRoot: deps.cliProjectsRoot,
   });
   await registerUsageRoutes(app, { db: deps.db });
+  await registerSessionExportRoutes(app, { db: deps.db });
 
   // Routines: periodic cron-driven session spawns. The scheduler owns a single
   // timer chained across all active routines and reloads itself on any CRUD.

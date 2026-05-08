@@ -25,6 +25,7 @@ import type {
   PermissionMode,
   Project,
   Session,
+  SlashClaudexAction,
 } from "@claudex/shared";
 import { cn } from "@/lib/cn";
 import { DiffView, toolCallToDiff } from "@/components/DiffView";
@@ -40,7 +41,7 @@ import { Markdown } from "@/components/Markdown";
 import type { SlashCommand } from "@/lib/slash-commands";
 import { BUILTIN_FALLBACK_SLASH_COMMANDS } from "@/lib/slash-commands";
 import type { UIPiece, ViewMode } from "@/state/sessions";
-import { computeSessionUsage, contextWindowTokens } from "@/lib/usage";
+import { contextWindowTokens } from "@/lib/usage";
 
 // ---------------------------------------------------------------------------
 // Model / mode label tables shared by the desktop header pills and the chat
@@ -112,8 +113,10 @@ export function ChatScreen() {
   }, [showTasks]);
   const {
     transcripts,
+    transcriptMeta,
     init,
     ensureTranscript,
+    loadOlderTranscript,
     subscribeSession,
     sendUserMessage,
     interruptSession,
@@ -156,6 +159,7 @@ export function ChatScreen() {
   }, [session?.projectId]);
 
   const pieces = id ? transcripts[id] ?? [] : [];
+  const meta = id ? transcriptMeta[id] : undefined;
 
   const { visiblePieces, changes } = useMemo(
     () => applyViewMode(pieces, viewMode),
@@ -178,12 +182,68 @@ export function ChatScreen() {
   }, [pieces]);
 
   const scroller = useRef<HTMLDivElement>(null);
+  // Autoscroll-to-bottom only when pieces are appended at the tail, not when
+  // older pages are prepended (lazy-load). We track the previous pieces
+  // length; a decrease in tail-delta means older pieces landed, so we
+  // explicitly skip the smooth-scroll. The loadOlder path anchors scroll
+  // position itself (see onScroll).
+  const prevTailLenRef = useRef(0);
   useEffect(() => {
-    scroller.current?.scrollTo({
-      top: scroller.current.scrollHeight,
-      behavior: "smooth",
+    const list = id ? transcripts[id] ?? [] : [];
+    const tail = list.length;
+    const grew = tail > prevTailLenRef.current;
+    prevTailLenRef.current = tail;
+    // Also skip autoscroll on the very first render after an initial load —
+    // we want to land at the bottom without a visible smooth animation.
+    if (grew) {
+      scroller.current?.scrollTo({
+        top: scroller.current.scrollHeight,
+        behavior: "smooth",
+      });
+    }
+  }, [visiblePieces.length, id, transcripts]);
+
+  // One-shot: after the initial transcript load finishes, jump to the
+  // bottom instantly so big imported sessions land at the tail.
+  const didInitialJumpRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!id || !meta || meta.initialLoading) return;
+    if (didInitialJumpRef.current === id) return;
+    if (pieces.length === 0) return;
+    didInitialJumpRef.current = id;
+    // rAF so the browser has painted the rows once; otherwise
+    // scrollHeight can be stale right after the state write.
+    requestAnimationFrame(() => {
+      const el = scroller.current;
+      if (!el) return;
+      el.scrollTop = el.scrollHeight;
     });
-  }, [visiblePieces.length]);
+  }, [id, meta?.initialLoading, pieces.length]);
+
+  /**
+   * Scroll-to-top trigger for lazy-loading older messages. We:
+   *   1. record scrollHeight BEFORE the fetch,
+   *   2. await the store action (which prepends pieces),
+   *   3. measure scrollHeight AFTER the new pieces paint, and
+   *   4. bump scrollTop by the delta so the user's visible window stays put.
+   * This keeps the reading position stable while more history drops in.
+   */
+  const onScrollerScroll = () => {
+    const el = scroller.current;
+    if (!el || !id) return;
+    if (!meta || !meta.hasMore || meta.loadingOlder) return;
+    if (el.scrollTop >= 80) return;
+    const beforeHeight = el.scrollHeight;
+    loadOlderTranscript(id).finally(() => {
+      // rAF so we measure after React commits the prepended pieces.
+      requestAnimationFrame(() => {
+        const cur = scroller.current;
+        if (!cur) return;
+        const delta = cur.scrollHeight - beforeHeight;
+        if (delta > 0) cur.scrollTop = el.scrollTop + delta;
+      });
+    });
+  };
 
   const [headerContext, setHeaderContext] = useState<{ pct: number; known: boolean }>({
     pct: 0,
@@ -194,9 +254,8 @@ export function ChatScreen() {
     let cancelled = false;
     (async () => {
       try {
-        const res = await api.listEvents(session.id);
+        const u = await api.getUsageSummary(session.id);
         if (cancelled) return;
-        const u = computeSessionUsage(res.events, session.model);
         const w = contextWindowTokens(session.model);
         const pct = w > 0 && u.lastTurnContextKnown
           ? Math.min(1, u.lastTurnInput / w)
@@ -415,13 +474,32 @@ export function ChatScreen() {
           scroll out. */}
       <div
         ref={scroller}
+        onScroll={onScrollerScroll}
         className="flex-1 min-h-0 overflow-y-auto px-4 py-4 space-y-4"
       >
-        {visiblePieces.length === 0 && viewMode !== "summary" && (
-          <div className="text-[13px] text-ink-muted text-center py-8">
-            Send your first message to wake claude up.
+        {meta?.loadingOlder && (
+          <div className="text-center text-[11px] text-ink-muted mono py-2">
+            Loading older messages…
           </div>
         )}
+        {meta?.initialLoading && pieces.length === 0 && (
+          <div className="flex flex-col items-center justify-center py-12 gap-2">
+            <div
+              className="h-5 w-5 rounded-full border-2 border-line border-t-klein animate-spin"
+              aria-hidden
+            />
+            <div className="text-[12px] text-ink-muted mono">
+              Loading transcript…
+            </div>
+          </div>
+        )}
+        {!meta?.initialLoading &&
+          visiblePieces.length === 0 &&
+          viewMode !== "summary" && (
+            <div className="text-[13px] text-ink-muted text-center py-8">
+              Send your first message to wake claude up.
+            </div>
+          )}
         {visiblePieces.map((p, i) => (
           <Piece
             key={i}
@@ -449,6 +527,45 @@ export function ChatScreen() {
         }}
         onStop={() => id && interruptSession(id)}
         onOpenSideChat={() => setShowSideChat(true)}
+        onClaudexAction={(action) => {
+          // Route a picked `claudex-action` slash command to the local UI
+          // instead of sending the token over the WS. Each case matches one
+          // of the built-ins re-mapped in slash-commands.ts — new actions
+          // need a case here or they'll silently no-op.
+          switch (action) {
+            case "open-session-settings":
+              setShowSettings(true);
+              return;
+            case "open-model-picker":
+              // No dedicated model picker yet; the session settings sheet
+              // has a Model section at the top, which is the closest thing.
+              setShowSettings(true);
+              return;
+            case "open-usage":
+              // Mobile keeps the bottom-sheet Usage panel; desktop jumps
+              // straight to the full `/usage` page scoped to this session.
+              if (
+                typeof window !== "undefined" &&
+                window.matchMedia("(min-width: 768px)").matches &&
+                session
+              ) {
+                navigate(`/usage?session=${encodeURIComponent(session.id)}`);
+              } else {
+                setShowUsage(true);
+              }
+              return;
+            case "open-plugins-settings":
+              navigate("/settings?tab=plugins");
+              return;
+            case "open-slash-help":
+            case "clear-transcript":
+              // Both are planned but not yet wired. Silent no-op — the
+              // picker has already closed so the user sees nothing wrong
+              // happen, which is better than an ad-hoc toast system we
+              // don't have infra for.
+              return;
+          }
+        }}
       />
 
       {showMore && session && (
@@ -1513,6 +1630,7 @@ function Composer({
   onSend,
   onStop,
   onOpenSideChat,
+  onClaudexAction,
 }: {
   project: Project | null;
   session: Session | null;
@@ -1520,6 +1638,12 @@ function Composer({
   onSend: (text: string) => void;
   onStop: () => void;
   onOpenSideChat: () => void;
+  /**
+   * Picker dispatched a claudex-action slash command. Chat maps these to
+   * local UI toggles (settings sheet, usage panel, etc.) instead of sending
+   * the `/x` token over the wire.
+   */
+  onClaudexAction?: (action: SlashClaudexAction) => void;
 }) {
   const [text, setText] = useState("");
   const [trigger, setTrigger] = useState<Trigger | null>(null);
@@ -1615,6 +1739,10 @@ function Composer({
     if (suppressedAt != null && nextText[suppressedAt] !== text[suppressedAt]) {
       setSuppressedAt(null);
     }
+    // Any edit clears the "this send was blocked" hint — the user's
+    // either fixing it or typing something else entirely, either way the
+    // hint is stale.
+    if (blockedSlash) setBlockedSlash(null);
     setText(nextText);
     setTrigger(detectTrigger(nextText, cursor));
   }
@@ -1674,6 +1802,31 @@ function Composer({
     insertToken("/" + cmd.name);
   }
 
+  // Set of slash commands the server flagged `unsupported`. Used to block
+  // sends that start with one of these tokens so the user doesn't send
+  // `/doctor` to the SDK and get "isn't available in this environment".
+  // We only match the top-of-message slash command: `foo /doctor` still
+  // sends (it's content), and so does `/doctor later` with whitespace —
+  // the send helper checks the very first token.
+  const unsupportedNames = useMemo(() => {
+    const s = new Set<string>();
+    for (const c of slashCommands) {
+      if (c.behavior.kind === "unsupported") s.add(c.name);
+    }
+    return s;
+  }, [slashCommands]);
+
+  // When a send is blocked, surface a one-line hint under the composer.
+  // Cleared on the next input/send attempt so it doesn't linger.
+  const [blockedSlash, setBlockedSlash] = useState<string | null>(null);
+
+  function leadingUnsupported(text: string): string | null {
+    const m = text.match(/^\s*\/([a-z][a-z0-9-]*)(?:\s|$)/i);
+    if (!m) return null;
+    const name = m[1];
+    return unsupportedNames.has(name) ? name : null;
+  }
+
   function openMentionManually() {
     // Manual "@" button when user taps the affordance rather than typing.
     // Insert `@` at the cursor so the trigger detection catches it.
@@ -1724,6 +1877,12 @@ function Composer({
 
   const send = () => {
     if (!text.trim()) return;
+    const blocked = leadingUnsupported(text);
+    if (blocked) {
+      setBlockedSlash(blocked);
+      return;
+    }
+    setBlockedSlash(null);
     onSend(text);
     setText("");
     setTrigger(null);
@@ -1863,12 +2022,37 @@ function Composer({
         </div>
       </div>
 
+      {/* Send-blocked hint — shown when the user tries to send a top-of-
+          message slash command we've marked REPL-only. Renders outside the
+          composer card so it doesn't steal the focus ring. Cleared by any
+          further edit or a successful send. */}
+      {blockedSlash && (
+        <div
+          className="shrink-0 px-4 pb-2 -mt-1 text-[11px] text-danger/80"
+          role="status"
+        >
+          <span className="mono">/{blockedSlash}</span> is CLI-only — can't
+          send from claudex.
+        </div>
+      )}
+
       {trigger?.kind === "slash" && (
         <SlashCommandSheet
           ref={pickerRef}
           commands={slashCommands}
           initialQuery={trigger.query}
           onPick={handlePickSlash}
+          onClaudexAction={(action) => {
+            // Close the picker + remove the half-typed `/` sigil so the
+            // composer isn't left with a stray "/" after the action runs.
+            const el = textareaRef.current;
+            const cursor = el?.selectionEnd ?? text.length;
+            const start = trigger?.start ?? cursor;
+            const next = text.slice(0, start) + text.slice(cursor);
+            setText(next);
+            setTrigger(null);
+            onClaudexAction?.(action);
+          }}
           onClose={dismissPicker}
         />
       )}

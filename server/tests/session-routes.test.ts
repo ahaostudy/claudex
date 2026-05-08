@@ -391,7 +391,122 @@ describe("session HTTP routes", () => {
         headers: { cookie: ctx.cookie },
       });
       expect(r.statusCode).toBe(200);
-      expect(r.json().events).toEqual([]);
+      const body = r.json();
+      expect(body.events).toEqual([]);
+      // Back-compat: no pagination params → hasMore:false, oldestSeq:null
+      expect(body.hasMore).toBe(false);
+      expect(body.oldestSeq).toBeNull();
+    });
+
+    it("paginates /events: empty session with limit returns hasMore=false", async () => {
+      const ctx = await bootstrap();
+      disposers.push(ctx.cleanup);
+      const { s } = await seed(ctx);
+      const r = await ctx.app.inject({
+        method: "GET",
+        url: `/api/sessions/${s.id}/events?limit=100`,
+        headers: { cookie: ctx.cookie },
+      });
+      expect(r.statusCode).toBe(200);
+      const body = r.json();
+      expect(body.events).toEqual([]);
+      expect(body.hasMore).toBe(false);
+      expect(body.oldestSeq).toBeNull();
+    });
+
+    it("paginates /events: limit returns tail ASC with hasMore + beforeSeq pages older", async () => {
+      const ctx = await bootstrap();
+      disposers.push(ctx.cleanup);
+      const { s } = await seed(ctx);
+      // Seed 300 events in-band via direct DB writes. Keeps the test focused
+      // on route shape — the store-level insert is already covered elsewhere.
+      const stmt = ctx.dbh.db.prepare(
+        `INSERT INTO session_events (id, session_id, kind, seq, created_at, payload)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+      );
+      const now = new Date().toISOString();
+      for (let i = 0; i < 300; i++) {
+        stmt.run(
+          `ev-${i}`,
+          s.id,
+          "user_message",
+          i,
+          now,
+          JSON.stringify({ text: `msg-${i}` }),
+        );
+      }
+
+      const page1 = await ctx.app
+        .inject({
+          method: "GET",
+          url: `/api/sessions/${s.id}/events?limit=100`,
+          headers: { cookie: ctx.cookie },
+        })
+        .then((r) => r.json() as {
+          events: Array<{ seq: number }>;
+          hasMore: boolean;
+          oldestSeq: number | null;
+        });
+      // Last 100, ASC: seq 200..299
+      expect(page1.events).toHaveLength(100);
+      expect(page1.events[0].seq).toBe(200);
+      expect(page1.events.at(-1)!.seq).toBe(299);
+      expect(page1.hasMore).toBe(true);
+      expect(page1.oldestSeq).toBe(200);
+
+      const page2 = await ctx.app
+        .inject({
+          method: "GET",
+          url: `/api/sessions/${s.id}/events?limit=100&beforeSeq=200`,
+          headers: { cookie: ctx.cookie },
+        })
+        .then((r) => r.json() as {
+          events: Array<{ seq: number }>;
+          hasMore: boolean;
+          oldestSeq: number | null;
+        });
+      expect(page2.events).toHaveLength(100);
+      expect(page2.events[0].seq).toBe(100);
+      expect(page2.events.at(-1)!.seq).toBe(199);
+      expect(page2.hasMore).toBe(true);
+      expect(page2.oldestSeq).toBe(100);
+
+      const page3 = await ctx.app
+        .inject({
+          method: "GET",
+          url: `/api/sessions/${s.id}/events?limit=100&beforeSeq=100`,
+          headers: { cookie: ctx.cookie },
+        })
+        .then((r) => r.json() as {
+          events: Array<{ seq: number }>;
+          hasMore: boolean;
+          oldestSeq: number | null;
+        });
+      expect(page3.events).toHaveLength(100);
+      expect(page3.events[0].seq).toBe(0);
+      expect(page3.events.at(-1)!.seq).toBe(99);
+      // Absolute oldest now reached — hasMore must be false.
+      expect(page3.hasMore).toBe(false);
+      expect(page3.oldestSeq).toBe(0);
+    });
+
+    it("returns usage-summary with zeros on an empty session", async () => {
+      const ctx = await bootstrap();
+      disposers.push(ctx.cleanup);
+      const { s } = await seed(ctx);
+      const r = await ctx.app.inject({
+        method: "GET",
+        url: `/api/sessions/${s.id}/usage-summary`,
+        headers: { cookie: ctx.cookie },
+      });
+      expect(r.statusCode).toBe(200);
+      const body = r.json();
+      expect(body.totalInput).toBe(0);
+      expect(body.totalOutput).toBe(0);
+      expect(body.lastTurnInput).toBe(0);
+      expect(body.lastTurnContextKnown).toBe(false);
+      expect(body.turnCount).toBe(0);
+      expect(body.perModel).toEqual([]);
     });
 
     it("archives a session", async () => {

@@ -15,6 +15,8 @@ import { SessionStore } from "./store.js";
 import { ToolGrantStore } from "./grants.js";
 import { aggregatePendingDiffs } from "./diffs.js";
 import type { SessionManager } from "./manager.js";
+import { computeUsageSummary } from "./usage-summary.js";
+import { triggerCliResync } from "./cli-resync.js";
 import {
   createWorktree,
   isGitRepo,
@@ -25,6 +27,13 @@ import {
 export interface SessionsRoutesDeps {
   db: Database.Database;
   manager: SessionManager;
+  /**
+   * Override the Claude CLI projects root for tests. Defaults to
+   * `~/.claude/projects`. When a session has `sdkSessionId` set we look for
+   * its JSONL under `<root>/<cwd-slug>/<uuid>.jsonl` for the resync-on-open
+   * path.
+   */
+  cliProjectsRoot?: string;
 }
 
 const AddProject = z.object({
@@ -130,6 +139,26 @@ export async function registerSessionRoutes(
       const { id } = req.params as { id: string };
       const row = sessions.findById(id);
       if (!row) return reply.code(404).send({ error: "not_found" });
+      // Fire-and-forget CLI resync: if this session was adopted from the
+      // `claude` CLI and its JSONL has grown since we last imported, pull the
+      // new lines in the background. We never block the HTTP response on it;
+      // the WS bridge will push the new events (or a `refresh_transcript`
+      // signal) when they land.
+      if (row.sdkSessionId) {
+        triggerCliResync({
+          sessions,
+          sessionRow: row,
+          manager: deps.manager,
+          cliProjectsRoot: deps.cliProjectsRoot,
+          logger:
+            req.log && typeof req.log.warn === "function"
+              ? {
+                  warn: (o, m) => req.log.warn(o, m),
+                  debug: (o, m) => req.log.debug?.(o, m),
+                }
+              : undefined,
+        });
+      }
       return { session: row };
     },
   );
@@ -139,11 +168,73 @@ export async function registerSessionRoutes(
     { preHandler: app.requireAuth as any },
     async (req, reply) => {
       const { id } = req.params as { id: string };
-      const q = req.query as { sinceSeq?: string };
+      const q = req.query as {
+        sinceSeq?: string;
+        beforeSeq?: string;
+        limit?: string;
+      };
       if (!sessions.findById(id))
         return reply.code(404).send({ error: "not_found" });
-      const sinceSeq = q?.sinceSeq ? Number(q.sinceSeq) : -1;
-      return { events: sessions.listEvents(id, sinceSeq) };
+
+      const parseNum = (v: string | undefined): number | undefined => {
+        if (v === undefined) return undefined;
+        const n = Number(v);
+        return Number.isFinite(n) ? n : undefined;
+      };
+      const sinceSeq = parseNum(q?.sinceSeq);
+      const beforeSeq = parseNum(q?.beforeSeq);
+      const rawLimit = parseNum(q?.limit);
+
+      // Back-compat: no pagination params at all → full history, matches
+      // every existing caller.
+      if (sinceSeq === undefined && beforeSeq === undefined && rawLimit === undefined) {
+        return {
+          events: sessions.listEvents(id),
+          hasMore: false,
+          oldestSeq: sessions.oldestEventSeq(id),
+        };
+      }
+
+      // sinceSeq without any of the newer params keeps the tail-fetch shape.
+      if (sinceSeq !== undefined && beforeSeq === undefined && rawLimit === undefined) {
+        return {
+          events: sessions.listEvents(id, sinceSeq),
+          hasMore: false,
+          oldestSeq: sessions.oldestEventSeq(id),
+        };
+      }
+
+      // New pagination path — `limit` is mandatory on this branch; cap at 1000.
+      const limit = Math.max(1, Math.min(rawLimit ?? 200, 1000));
+      const events = sessions.listEvents(id, { beforeSeq, limit });
+      const oldestSeqAll = sessions.oldestEventSeq(id);
+      const batchOldest = events.length > 0 ? events[0].seq : null;
+      // hasMore: there exists at least one event older than what we just
+      // returned. If the oldest in the batch matches the absolute oldest in
+      // the table, we've paged to the top.
+      const hasMore =
+        batchOldest !== null &&
+        oldestSeqAll !== null &&
+        batchOldest > oldestSeqAll;
+      return { events, hasMore, oldestSeq: batchOldest };
+    },
+  );
+
+  // GET /api/sessions/:id/usage-summary
+  //
+  // Small JSON payload (~1 KB) that lets the chat header ring, UsagePanel, and
+  // ChatTasksRail show context / token info without re-downloading the full
+  // event stream every time the transcript grows. Computed server-side via an
+  // indexed scan over `session_events WHERE kind = 'turn_end'`.
+  app.get(
+    "/api/sessions/:id/usage-summary",
+    { preHandler: app.requireAuth as any },
+    async (req, reply) => {
+      const { id } = req.params as { id: string };
+      const row = sessions.findById(id);
+      if (!row) return reply.code(404).send({ error: "not_found" });
+      const events = sessions.listEvents(id);
+      return reply.send(computeUsageSummary(events, row.model));
     },
   );
 

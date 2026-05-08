@@ -1,4 +1,6 @@
 import path from "node:path";
+import fs from "node:fs";
+import readline from "node:readline";
 import type { Session } from "@claudex/shared";
 import type { ProjectStore } from "./projects.js";
 import type { SessionStore } from "./store.js";
@@ -97,6 +99,18 @@ export async function importCliSession(
         { sessionEvents: deps.sessions, logger: deps.logger },
         { sessionId: session.id, filePath: input.filePath },
       );
+      // Record how many non-empty JSONL lines we've consumed so the
+      // resync-on-open path knows where to pick up when the CLI appends
+      // more turns later.
+      try {
+        const lines = await countNonEmptyLines(input.filePath);
+        deps.sessions.setCliJsonlSeq(session.id, lines);
+      } catch (err) {
+        deps.logger?.debug?.(
+          { err, sessionId: input.sessionId },
+          "cli-import: failed to count JSONL lines for seq stamp",
+        );
+      }
     } catch (err) {
       deps.logger?.warn?.(
         { err, sessionId: input.sessionId, filePath: input.filePath },
@@ -111,4 +125,19 @@ export async function importCliSession(
     wasNew: true,
     eventsImported,
   };
+}
+
+async function countNonEmptyLines(filePath: string): Promise<number> {
+  const stream = fs.createReadStream(filePath, { encoding: "utf-8" });
+  const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
+  let n = 0;
+  try {
+    for await (const line of rl) {
+      if (line.trim().length > 0) n += 1;
+    }
+  } finally {
+    rl.close();
+    stream.destroy();
+  }
+  return n;
 }

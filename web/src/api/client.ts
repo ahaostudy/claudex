@@ -16,6 +16,7 @@ import type {
   UpdateRoutineRequest,
   UpdateSessionRequest,
   UsageRangeResponse,
+  UsageSummaryResponse,
   UsageTodayResponse,
   UserEnvResponse,
 } from "@claudex/shared";
@@ -111,9 +112,25 @@ export const api = {
   getSession(id: string) {
     return request<{ session: Session }>(`/api/sessions/${id}`);
   },
-  listEvents(sessionId: string, sinceSeq = -1) {
-    return request<{ events: SessionEvent[] }>(
-      `/api/sessions/${sessionId}/events?sinceSeq=${sinceSeq}`,
+  listEvents(
+    sessionId: string,
+    opts?: { sinceSeq?: number; beforeSeq?: number; limit?: number },
+  ) {
+    const qs = new URLSearchParams();
+    if (opts?.sinceSeq !== undefined) qs.set("sinceSeq", String(opts.sinceSeq));
+    if (opts?.beforeSeq !== undefined)
+      qs.set("beforeSeq", String(opts.beforeSeq));
+    if (opts?.limit !== undefined) qs.set("limit", String(opts.limit));
+    const q = qs.toString();
+    return request<{
+      events: SessionEvent[];
+      hasMore: boolean;
+      oldestSeq: number | null;
+    }>(`/api/sessions/${sessionId}/events${q ? `?${q}` : ""}`);
+  },
+  getUsageSummary(sessionId: string) {
+    return request<UsageSummaryResponse>(
+      `/api/sessions/${sessionId}/usage-summary`,
     );
   },
   listPendingDiffs(sessionId: string) {
@@ -220,5 +237,28 @@ export const api = {
   },
   getUsageRange(days: number) {
     return request<UsageRangeResponse>(`/api/usage/range?days=${days}`);
+  },
+  /**
+   * Build a `GET /api/sessions/:id/export` URL for a plain anchor download.
+   * Returned as a URL rather than a fetch wrapper because the browser's
+   * native download flow (anchor click) is what we actually want — wrapping
+   * it in fetch would force us to build a Blob for a response we already
+   * have on the server with the right Content-Disposition headers.
+   */
+  exportSessionUrl(id: string, format: "md" | "json") {
+    return `/api/sessions/${encodeURIComponent(id)}/export?format=${format}`;
+  },
+  /**
+   * Trigger a browser download for a session's transcript by synthesizing
+   * an anchor click. No-ops in non-DOM environments.
+   */
+  exportSession(id: string, format: "md" | "json") {
+    if (typeof document === "undefined") return;
+    const a = document.createElement("a");
+    a.href = this.exportSessionUrl(id, format);
+    a.rel = "noopener";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
   },
 };

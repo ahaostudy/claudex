@@ -29,6 +29,7 @@ interface SessionRow {
   stats_lines_added: number;
   stats_lines_removed: number;
   stats_context_pct: number;
+  cli_jsonl_seq: number;
 }
 
 function toSession(row: SessionRow): Session {
@@ -47,6 +48,7 @@ function toSession(row: SessionRow): Session {
     archivedAt: row.archived_at,
     sdkSessionId: row.sdk_session_id,
     parentSessionId: row.parent_session_id,
+    cliJsonlSeq: row.cli_jsonl_seq ?? 0,
     stats: {
       messages: row.stats_messages,
       filesChanged: row.stats_files_changed,
@@ -156,6 +158,7 @@ export class SessionStore {
       stats_lines_added: 0,
       stats_lines_removed: 0,
       stats_context_pct: 0,
+      cli_jsonl_seq: 0,
     };
     this.db
       .prepare(
@@ -164,13 +167,15 @@ export class SessionStore {
            created_at, updated_at, last_message_at, archived_at, sdk_session_id,
            parent_session_id,
            stats_messages, stats_files_changed, stats_lines_added,
-           stats_lines_removed, stats_context_pct
+           stats_lines_removed, stats_context_pct,
+           cli_jsonl_seq
          ) VALUES (
            @id, @title, @project_id, @branch, @worktree_path, @status, @model, @mode,
            @created_at, @updated_at, @last_message_at, @archived_at, @sdk_session_id,
            @parent_session_id,
            @stats_messages, @stats_files_changed, @stats_lines_added,
-           @stats_lines_removed, @stats_context_pct
+           @stats_lines_removed, @stats_context_pct,
+           @cli_jsonl_seq
          )`,
       )
       .run(row);
@@ -314,14 +319,75 @@ export class SessionStore {
     return event;
   }
 
-  listEvents(sessionId: string, sinceSeq = -1): SessionEvent[] {
-    const rows = this.db
-      .prepare(
-        `SELECT id, session_id, kind, seq, created_at, payload
-         FROM session_events WHERE session_id = ? AND seq > ?
-         ORDER BY seq ASC`,
-      )
-      .all(sessionId, sinceSeq) as Array<{
+  listEvents(sessionId: string, sinceSeq?: number): SessionEvent[];
+  listEvents(
+    sessionId: string,
+    opts: { sinceSeq?: number; beforeSeq?: number; limit?: number },
+  ): SessionEvent[];
+  listEvents(
+    sessionId: string,
+    arg?:
+      | number
+      | { sinceSeq?: number; beforeSeq?: number; limit?: number },
+  ): SessionEvent[] {
+    // Back-compat: listEvents(id) / listEvents(id, sinceSeq) — old callers
+    // get the full history ASC (or the tail after sinceSeq).
+    if (arg === undefined || typeof arg === "number") {
+      const sinceSeq = typeof arg === "number" ? arg : -1;
+      const rows = this.db
+        .prepare(
+          `SELECT id, session_id, kind, seq, created_at, payload
+           FROM session_events WHERE session_id = ? AND seq > ?
+           ORDER BY seq ASC`,
+        )
+        .all(sessionId, sinceSeq) as Array<{
+        id: string;
+        session_id: string;
+        kind: string;
+        seq: number;
+        created_at: string;
+        payload: string;
+      }>;
+      return rows.map(rowToEvent);
+    }
+
+    const { sinceSeq, beforeSeq, limit } = arg;
+    // New paginated forms.
+    //   - sinceSeq (no limit/beforeSeq): tail-fetch semantics (preserved).
+    //   - beforeSeq + limit: `limit` rows with seq < beforeSeq, ASC.
+    //   - limit alone: last `limit` rows, ASC.
+    if (sinceSeq !== undefined && beforeSeq === undefined && limit === undefined) {
+      const rows = this.db
+        .prepare(
+          `SELECT id, session_id, kind, seq, created_at, payload
+           FROM session_events WHERE session_id = ? AND seq > ?
+           ORDER BY seq ASC`,
+        )
+        .all(sessionId, sinceSeq) as Array<{
+        id: string;
+        session_id: string;
+        kind: string;
+        seq: number;
+        created_at: string;
+        payload: string;
+      }>;
+      return rows.map(rowToEvent);
+    }
+
+    const cap = Math.max(1, Math.min(limit ?? 200, 1000));
+    // DESC scan over the indexed (session_id, seq) tail, then reverse to ASC
+    // on the way out — the client always expects ASC order.
+    const params: unknown[] = [sessionId];
+    let sql =
+      `SELECT id, session_id, kind, seq, created_at, payload
+       FROM session_events WHERE session_id = ?`;
+    if (beforeSeq !== undefined) {
+      sql += ` AND seq < ?`;
+      params.push(beforeSeq);
+    }
+    sql += ` ORDER BY seq DESC LIMIT ?`;
+    params.push(cap);
+    const rows = this.db.prepare(sql).all(...params) as Array<{
       id: string;
       session_id: string;
       kind: string;
@@ -329,13 +395,64 @@ export class SessionStore {
       created_at: string;
       payload: string;
     }>;
-    return rows.map((r) => ({
-      id: r.id,
-      sessionId: r.session_id,
-      kind: r.kind as EventKind,
-      seq: r.seq,
-      createdAt: r.created_at,
-      payload: JSON.parse(r.payload),
-    }));
+    rows.reverse();
+    return rows.map(rowToEvent);
   }
+
+  /**
+   * Count session_events for a session — cheap, indexed. Used by the CLI
+   * resync path to decide whether a JSONL has grown since last import.
+   */
+  countEvents(sessionId: string): number {
+    const row = this.db
+      .prepare("SELECT COUNT(*) AS c FROM session_events WHERE session_id = ?")
+      .get(sessionId) as { c: number };
+    return row.c;
+  }
+
+  /**
+   * Oldest (minimum) `seq` for a session, or null when the session has no
+   * events. Used by the lazy-load pagination to tell clients whether more
+   * history exists to page through.
+   */
+  oldestEventSeq(sessionId: string): number | null {
+    const row = this.db
+      .prepare(
+        "SELECT MIN(seq) AS s FROM session_events WHERE session_id = ?",
+      )
+      .get(sessionId) as { s: number | null };
+    return row.s;
+  }
+
+  /** Last JSONL line index imported for this session's adopted CLI transcript. */
+  getCliJsonlSeq(id: string): number {
+    const row = this.db
+      .prepare("SELECT cli_jsonl_seq FROM sessions WHERE id = ?")
+      .get(id) as { cli_jsonl_seq: number } | undefined;
+    return row?.cli_jsonl_seq ?? 0;
+  }
+
+  setCliJsonlSeq(id: string, seq: number): void {
+    this.db
+      .prepare("UPDATE sessions SET cli_jsonl_seq = ? WHERE id = ?")
+      .run(seq, id);
+  }
+}
+
+function rowToEvent(r: {
+  id: string;
+  session_id: string;
+  kind: string;
+  seq: number;
+  created_at: string;
+  payload: string;
+}): SessionEvent {
+  return {
+    id: r.id,
+    sessionId: r.session_id,
+    kind: r.kind as EventKind,
+    seq: r.seq,
+    createdAt: r.created_at,
+    payload: JSON.parse(r.payload),
+  };
 }

@@ -1,16 +1,14 @@
 import { useEffect, useState } from "react";
 import { X } from "lucide-react";
 import { Link } from "react-router-dom";
-import type { Session } from "@claudex/shared";
+import type { Session, UsageSummaryResponse } from "@claudex/shared";
 import { api } from "@/api/client";
 import {
-  computeSessionUsage,
   contextWindowTokens,
   formatTokens,
   formatUsd,
-  type SessionUsage,
 } from "@/lib/usage";
-import { MODEL_LABEL } from "@/lib/pricing";
+import { estimateCostUsd, MODEL_LABEL } from "@/lib/pricing";
 
 /**
  * Usage panel — the mockup s-08 "iPhone · usage sheet" translated into a
@@ -42,16 +40,16 @@ export function UsagePanel({
   session: Session;
   onClose: () => void;
 }) {
-  const [usage, setUsage] = useState<SessionUsage | null>(null);
+  const [usage, setUsage] = useState<UsageSummaryResponse | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const res = await api.listEvents(session.id);
+        const res = await api.getUsageSummary(session.id);
         if (cancelled) return;
-        setUsage(computeSessionUsage(res.events, session.model));
+        setUsage(res);
       } catch (e) {
         if (cancelled) return;
         setErr(e instanceof Error ? e.message : "load_failed");
@@ -175,31 +173,38 @@ export function UsagePanel({
 
           {/* Per-model breakdown when the session spanned >1 model.
               Today there's only ever one row because we attribute all turns
-              to the session's current model (see usage.ts note). We still
+              to the session's current model (see usage-summary.ts). We still
               render it so the layout is right when that changes. */}
           {usage && usage.perModel.length > 0 && (
             <div className="rounded-[10px] border border-line bg-canvas p-4">
               <div className="caps text-ink-muted mb-2">By model</div>
               <div className="space-y-2 text-[13px]">
-                {usage.perModel.map((row) => (
-                  <div
-                    key={String(row.model)}
-                    className="flex items-center gap-2"
-                  >
-                    <span className="h-2 w-2 rounded-full bg-klein" />
-                    <span>
-                      {(MODEL_LABEL as Record<string, string>)[
-                        String(row.model)
-                      ] ?? String(row.model)}
-                    </span>
-                    <span className="ml-auto mono text-ink-muted">
-                      {formatTokens(row.inputTokens + row.outputTokens)} tok
-                    </span>
-                    <span className="mono text-ink-muted shrink-0">
-                      {formatUsd(row.costUsd)}
-                    </span>
-                  </div>
-                ))}
+                {usage.perModel.map((row) => {
+                  const cost = estimateCostUsd(
+                    row.model,
+                    row.inputTokens,
+                    row.outputTokens,
+                  );
+                  return (
+                    <div
+                      key={String(row.model)}
+                      className="flex items-center gap-2"
+                    >
+                      <span className="h-2 w-2 rounded-full bg-klein" />
+                      <span>
+                        {(MODEL_LABEL as Record<string, string>)[
+                          String(row.model)
+                        ] ?? String(row.model)}
+                      </span>
+                      <span className="ml-auto mono text-ink-muted">
+                        {formatTokens(row.inputTokens + row.outputTokens)} tok
+                      </span>
+                      <span className="mono text-ink-muted shrink-0">
+                        {formatUsd(cost)}
+                      </span>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           )}
@@ -208,7 +213,15 @@ export function UsagePanel({
           <div className="rounded-[10px] border border-line bg-canvas p-4">
             <div className="caps text-ink-muted mb-1.5">Cost estimate</div>
             <div className="display text-[28px] leading-none">
-              {formatUsd(usage?.costUsd ?? 0)}
+              {formatUsd(
+                usage
+                  ? usage.perModel.reduce(
+                      (n, r) =>
+                        n + estimateCostUsd(r.model, r.inputTokens, r.outputTokens),
+                      0,
+                    )
+                  : 0,
+              )}
             </div>
             <div className="text-[11px] text-ink-muted mt-1.5 leading-snug">
               Front-end estimate from the model's published per-token rates.

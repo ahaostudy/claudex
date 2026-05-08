@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   Bell,
+  BellOff,
   ChevronLeft,
   KeyRound,
   Palette,
@@ -10,13 +11,24 @@ import {
   Shield,
   Sliders,
   Terminal as TerminalIcon,
+  Trash2,
   User as UserIcon,
 } from "lucide-react";
 import { useAuth } from "@/state/auth";
 import { api, ApiError } from "@/api/client";
-import type { UserEnvResponse } from "@claudex/shared";
+import type { PushDevice, UserEnvResponse } from "@claudex/shared";
 import { cn } from "@/lib/cn";
 import { AppShell } from "@/components/AppShell";
+import {
+  deviceLabel,
+  detectPushSupport,
+  getPushState,
+  isCurrentDeviceSubscribed,
+  revokeDevice,
+  sendTestPush,
+  subscribeToPush,
+  unsubscribeFromPush,
+} from "@/lib/push";
 
 // ---------------------------------------------------------------------------
 // Settings — mockup s-12 structure.
@@ -82,8 +94,8 @@ const TABS: TabSpec[] = [
     label: "Notifications",
     icon: Bell,
     caps: "notifications",
-    title: "Nothing to notify yet.",
-    lede: "When claudex adds permission queues, scheduled task results, and pairing alerts they'll appear here.",
+    title: "Know when Claude needs you.",
+    lede: "claudex can push a notification when a permission request arrives. Works best installed to your home screen.",
   },
   {
     id: "appearance",
@@ -534,17 +546,308 @@ function SecurityPanel() {
 }
 
 // ----------------------------------------------------------------------------
-// Notifications — empty state only.
+// Notifications — real enable/disable flow + device list.
+//
+// Three states the panel can be in, driven by local browser capability and
+// server-side subscription count:
+//   1. capability lost       — browser doesn't support SW/Push, OR page is
+//                              on insecure origin (frpc-over-HTTP). Render a
+//                              constraint card; no enable button.
+//   2. not enabled here yet  — browser supports push, but this device hasn't
+//                              subscribed. Render the "Enable on this device"
+//                              primary button; list any other subscribed
+//                              devices separately.
+//   3. enabled               — this browser has a live PushSubscription.
+//                              Render the "disable" button + Send test +
+//                              device list with per-device revoke.
+//
+// The server's `GET /api/push/state` gives us the device list; we pair it
+// with `navigator.serviceWorker.getRegistration().pushManager.getSubscription()`
+// to know whether *this* browser is one of those devices.
 // ----------------------------------------------------------------------------
 
 function NotificationsPanel() {
-  return (
-    <EmptyCard
-      icon={Bell}
-      title="No notifications stream yet."
-      body="Permission queues, routine outcomes, and new-device pairing alerts will land here once we wire up a notifications channel."
-    />
+  const [support] = useState(() => detectPushSupport());
+  const [permission, setPermission] = useState<NotificationPermission | "unknown">(
+    () =>
+      typeof window !== "undefined" && "Notification" in window
+        ? Notification.permission
+        : "unknown",
   );
+  const [currentSubscribed, setCurrentSubscribed] = useState<boolean | null>(
+    null,
+  );
+  const [devices, setDevices] = useState<PushDevice[] | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [testMsg, setTestMsg] = useState<string | null>(null);
+
+  async function refresh() {
+    try {
+      if (support === "ready") {
+        setCurrentSubscribed(await isCurrentDeviceSubscribed());
+      } else {
+        setCurrentSubscribed(false);
+      }
+      const state = await getPushState();
+      setDevices(state.devices);
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.code : "load failed");
+    }
+  }
+
+  useEffect(() => {
+    void refresh();
+    // We intentionally don't poll — push state only changes on user action.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function enable() {
+    setErr(null);
+    setTestMsg(null);
+    setBusy(true);
+    try {
+      await subscribeToPush();
+      setPermission(Notification.permission);
+      await refresh();
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg === "permission_denied") {
+        setErr(
+          "Notification permission was denied. You can re-enable it in your browser's site settings for this origin, then try again.",
+        );
+      } else {
+        setErr(msg);
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function disable() {
+    setErr(null);
+    setTestMsg(null);
+    setBusy(true);
+    try {
+      await unsubscribeFromPush();
+      await refresh();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function doRevoke(id: string) {
+    setErr(null);
+    setTestMsg(null);
+    setBusy(true);
+    try {
+      await revokeDevice(id);
+      await refresh();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function doTest() {
+    setErr(null);
+    setTestMsg(null);
+    setBusy(true);
+    try {
+      const res = await sendTestPush();
+      if (res.sent === 0) {
+        setTestMsg(
+          "No devices to notify. Enable notifications on at least one device first.",
+        );
+      } else {
+        setTestMsg(
+          `Sent to ${res.sent} device${res.sent === 1 ? "" : "s"}${
+            res.pruned > 0 ? ` · pruned ${res.pruned} stale` : ""
+          }.`,
+        );
+      }
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const canEnable = support === "ready" && currentSubscribed === false;
+
+  return (
+    <div className="space-y-5">
+      {support !== "ready" && (
+        <Card>
+          <div className="px-4 py-4 text-[13px] text-ink-soft">
+            {support === "insecure" ? (
+              <>
+                This browser considers the current origin insecure. Push
+                notifications require HTTPS — run claudex behind a TLS tunnel
+                such as Cloudflare Tunnel, Tailscale, or Caddy. Plain-HTTP
+                frpc will not deliver pushes, especially on iOS Safari.
+              </>
+            ) : (
+              <>
+                This browser doesn't support Web Push or Service Workers. On
+                iOS, install claudex to your Home Screen (Share → "Add to Home
+                Screen") and reopen from there — that path enables push
+                notifications on iOS 16.4+.
+              </>
+            )}
+          </div>
+        </Card>
+      )}
+
+      {support === "ready" && (
+        <Card>
+          <div className="px-4 sm:px-5 py-4 flex items-center gap-4">
+            <div
+              className={cn(
+                "h-9 w-9 rounded-[8px] border flex items-center justify-center shrink-0",
+                currentSubscribed
+                  ? "bg-klein-wash border-klein/20"
+                  : "bg-paper border-line",
+              )}
+            >
+              {currentSubscribed ? (
+                <Bell className="w-4 h-4 text-klein" />
+              ) : (
+                <BellOff className="w-4 h-4 text-ink-muted" />
+              )}
+            </div>
+            <div className="min-w-0">
+              <div className="display text-[16px] leading-tight">
+                {currentSubscribed
+                  ? "Notifications on for this device"
+                  : "Notifications off on this device"}
+              </div>
+              <div className="text-[12.5px] text-ink-muted mt-0.5">
+                {permission === "denied"
+                  ? "Browser permission denied. Flip it in site settings to re-enable."
+                  : currentSubscribed
+                    ? "Claude will ping you here when a permission request arrives."
+                    : "Enable to receive a push when Claude asks for permission."}
+              </div>
+            </div>
+            <div className="ml-auto shrink-0">
+              {currentSubscribed ? (
+                <button
+                  type="button"
+                  onClick={disable}
+                  disabled={busy}
+                  className="h-9 px-3 rounded-[8px] border border-line bg-canvas text-[13px] disabled:opacity-50"
+                >
+                  Disable
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={enable}
+                  disabled={busy || !canEnable || permission === "denied"}
+                  className="h-9 px-3 rounded-[8px] bg-klein text-canvas text-[13px] font-medium disabled:opacity-50"
+                >
+                  {busy ? "Enabling…" : "Enable on this device"}
+                </button>
+              )}
+            </div>
+          </div>
+          <div className="px-4 sm:px-5 py-3 border-t border-line bg-paper/40 flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              onClick={doTest}
+              disabled={busy || (devices?.length ?? 0) === 0}
+              className="h-8 px-3 rounded-[8px] border border-line bg-canvas text-[12.5px] disabled:opacity-50"
+            >
+              Send test
+            </button>
+            {testMsg && (
+              <span className="text-[12px] text-ink-muted">{testMsg}</span>
+            )}
+            {err && (
+              <span className="text-[12px] text-danger bg-danger-wash rounded-[6px] px-2 py-1 border border-danger/30">
+                {err}
+              </span>
+            )}
+          </div>
+        </Card>
+      )}
+
+      <Card header={`Registered devices · ${devices?.length ?? 0}`}>
+        {devices === null ? (
+          <div className="px-4 py-6 text-[13px] mono text-ink-muted">loading…</div>
+        ) : devices.length === 0 ? (
+          <div className="px-4 py-4 text-[13px] text-ink-muted">
+            No devices registered. Open this page on each phone / browser you
+            want to be notified on, and tap{" "}
+            <span className="mono">Enable on this device</span>.
+          </div>
+        ) : (
+          <ul className="divide-y divide-line">
+            {devices.map((d) => (
+              <li
+                key={d.id}
+                className="flex items-center gap-3 px-4 py-3 text-[13.5px]"
+              >
+                <div className="min-w-0 flex-1">
+                  <div className="font-medium truncate">{deviceLabel(d)}</div>
+                  <div className="mono text-[11px] text-ink-muted truncate">
+                    added {relativeTime(d.createdAt)}
+                    {d.lastUsedAt
+                      ? ` · last notified ${relativeTime(d.lastUsedAt)}`
+                      : " · never notified"}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => doRevoke(d.id)}
+                  disabled={busy}
+                  className="h-8 px-2 rounded-[6px] border border-line bg-canvas text-[12px] text-ink-soft inline-flex items-center gap-1.5 disabled:opacity-50"
+                  aria-label="Revoke device"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  Revoke
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Card>
+
+      <div className="text-[12px] text-ink-muted leading-relaxed">
+        Requires HTTPS on the URL you open claudex from. Plain-HTTP frpc
+        tunnels won't deliver push — the browser blocks service-worker
+        registration on insecure origins. On iOS (16.4+), you must install
+        claudex to the Home Screen via Safari's Share sheet and open from
+        there; desktop Safari / Chrome / Firefox work over any HTTPS origin.
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Loose "2m ago" / "3h ago" / "4d ago" formatter — matches the rest of the
+ * app's relative-time language without pulling in a date library. Returns
+ * the localized string on anything older than a week.
+ */
+function relativeTime(iso: string): string {
+  const t = new Date(iso).getTime();
+  if (Number.isNaN(t)) return iso;
+  const s = Math.max(0, Math.round((Date.now() - t) / 1000));
+  if (s < 45) return "just now";
+  if (s < 90) return "1m ago";
+  const m = Math.round(s / 60);
+  if (m < 45) return `${m}m ago`;
+  if (m < 90) return "1h ago";
+  const h = Math.round(m / 60);
+  if (h < 22) return `${h}h ago`;
+  if (h < 36) return "1d ago";
+  const d = Math.round(h / 24);
+  if (d < 7) return `${d}d ago`;
+  return new Date(iso).toLocaleDateString();
 }
 
 // ----------------------------------------------------------------------------

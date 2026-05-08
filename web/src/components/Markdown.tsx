@@ -24,7 +24,7 @@ import { cn } from "@/lib/cn";
 
 export function Markdown({ source }: { source: string }) {
   return (
-    <div className="markdown text-[14.5px] text-ink leading-[1.6]">
+    <div className="markdown text-[14.5px] text-ink leading-[1.6] min-w-0 break-words [overflow-wrap:anywhere]">
       <ReactMarkdown remarkPlugins={[remarkGfm]} components={COMPONENTS}>
         {source}
       </ReactMarkdown>
@@ -184,7 +184,7 @@ const COMPONENTS: Components = {
     }
     return (
       <code
-        className="mono text-[0.85em] bg-paper px-1 py-[1px] rounded-[3px] border border-line"
+        className="mono text-[0.85em] bg-paper px-1 py-[1px] rounded-[3px] border border-line break-all [overflow-wrap:anywhere]"
         {...rest}
       >
         {children}

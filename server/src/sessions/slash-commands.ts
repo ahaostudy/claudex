@@ -4,7 +4,7 @@ import fs from "node:fs";
 import fsp from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import type { SlashCommand } from "@claudex/shared";
+import type { SlashBehavior, SlashCommand } from "@claudex/shared";
 import { ProjectStore } from "./projects.js";
 
 /**
@@ -43,30 +43,209 @@ import { ProjectStore } from "./projects.js";
 //
 // Sources: `claude --help`, `claude` interactive `/help`, and the public
 // Claude Code docs as of May 2026. Review when upgrading the CLI version.
+//
+// Each entry carries a `behavior` — see `SlashBehavior` in @claudex/shared.
+// The honest categorization here is the critical bit: the `claude` CLI's
+// built-ins fall into three buckets when driven via @anthropic-ai/claude-agent-sdk:
+//
+//   1. "native" — the SDK has a first-class code path for it. Only `/compact`
+//      today. Evidence: the SDK emits a `compact_boundary` system message
+//      subtype (sdk.d.ts L2374) and an `SDKStatus = 'compacting'` (L3356) — so
+//      `/compact` actually runs inside the agent loop. Sending `/compact` over
+//      the wire works end-to-end.
+//
+//   2. "claudex-action" — the CLI's REPL surfaces a UI (model picker, usage
+//      panel, config editor, …) that has a direct claudex equivalent. Instead
+//      of forwarding the token to the SDK (which would return "isn't available
+//      in this environment"), the picker short-circuits on the client and
+//      opens the native UI. Intercepts do not hit the server at all.
+//
+//   3. "unsupported" — REPL-only commands whose behavior depends on the
+//      interactive TTY and/or local CLI state we can't reach (`/login`,
+//      `/logout`, `/doctor`, `/init`, `/continue`, `/resume`, `/bug`,
+//      `/add-dir`). The picker dims these and blocks sends; no action is
+//      taken. We also default `/review` and `/pr-comments` here: they might
+//      be forwarded natively, but we haven't verified they work under the
+//      Agent SDK — err on the side of "don't silently blow up".
+//
+// When in doubt, default to `unsupported`. A missing action is worse than a
+// disabled row.
+const BEHAVIORS: Record<string, SlashBehavior> = {
+  "add-dir": {
+    kind: "unsupported",
+    reason: "CLI REPL command — not available in the Agent SDK",
+  },
+  bug: {
+    kind: "unsupported",
+    reason: "CLI REPL command — not available in the Agent SDK",
+  },
+  clear: {
+    kind: "claudex-action",
+    action: "clear-transcript",
+  },
+  compact: { kind: "native" },
+  config: {
+    kind: "claudex-action",
+    action: "open-session-settings",
+  },
+  continue: {
+    kind: "unsupported",
+    reason: "CLI REPL command — use the sessions list in claudex",
+  },
+  cost: {
+    kind: "claudex-action",
+    action: "open-usage",
+  },
+  doctor: {
+    kind: "unsupported",
+    reason: "CLI REPL command — diagnose the CLI from a terminal",
+  },
+  help: {
+    kind: "claudex-action",
+    action: "open-slash-help",
+  },
+  init: {
+    kind: "unsupported",
+    reason: "CLI REPL command — run `claude` from a terminal to bootstrap",
+  },
+  login: {
+    kind: "unsupported",
+    reason: "CLI REPL command — run `claude login` from a terminal",
+  },
+  logout: {
+    kind: "unsupported",
+    reason: "CLI REPL command — run `claude logout` from a terminal",
+  },
+  mcp: {
+    kind: "claudex-action",
+    action: "open-plugins-settings",
+  },
+  model: {
+    kind: "claudex-action",
+    action: "open-model-picker",
+  },
+  plugin: {
+    kind: "claudex-action",
+    action: "open-plugins-settings",
+  },
+  "pr-comments": {
+    kind: "unsupported",
+    reason: "CLI REPL command — not verified under the Agent SDK",
+  },
+  resume: {
+    kind: "unsupported",
+    reason: "CLI REPL command — use the sessions list in claudex",
+  },
+  review: {
+    kind: "unsupported",
+    reason: "CLI REPL command — not verified under the Agent SDK",
+  },
+  status: {
+    kind: "claudex-action",
+    action: "open-session-settings",
+  },
+};
 
 export const BUILT_IN_SLASH_COMMANDS: ReadonlyArray<{
   name: string;
   description: string;
+  behavior: SlashBehavior;
 }> = [
-  { name: "add-dir", description: "Add a working directory to the session" },
-  { name: "bug", description: "Report a bug with current context" },
-  { name: "clear", description: "Clear the conversation history" },
-  { name: "compact", description: "Summarize and free context window" },
-  { name: "config", description: "Open the CLI configuration" },
-  { name: "continue", description: "Resume the most recent conversation" },
-  { name: "cost", description: "Show token usage and cost for this session" },
-  { name: "doctor", description: "Diagnose the local CLI installation" },
-  { name: "help", description: "List available slash commands" },
-  { name: "init", description: "Bootstrap a CLAUDE.md for this project" },
-  { name: "login", description: "Authenticate with Anthropic" },
-  { name: "logout", description: "Sign out of Anthropic" },
-  { name: "mcp", description: "Manage MCP servers" },
-  { name: "model", description: "Switch the active model" },
-  { name: "plugin", description: "Manage installed plugins" },
-  { name: "pr-comments", description: "Summarize comments on the current PR" },
-  { name: "review", description: "Review the current diff" },
-  { name: "resume", description: "Resume a previous session by id" },
-  { name: "status", description: "Show session, model, and project status" },
+  {
+    name: "add-dir",
+    description: "Add a working directory to the session",
+    behavior: BEHAVIORS["add-dir"],
+  },
+  {
+    name: "bug",
+    description: "Report a bug with current context",
+    behavior: BEHAVIORS.bug,
+  },
+  {
+    name: "clear",
+    description: "Clear the conversation history",
+    behavior: BEHAVIORS.clear,
+  },
+  {
+    name: "compact",
+    description: "Summarize and free context window",
+    behavior: BEHAVIORS.compact,
+  },
+  {
+    name: "config",
+    description: "Open the CLI configuration",
+    behavior: BEHAVIORS.config,
+  },
+  {
+    name: "continue",
+    description: "Resume the most recent conversation",
+    behavior: BEHAVIORS.continue,
+  },
+  {
+    name: "cost",
+    description: "Show token usage and cost for this session",
+    behavior: BEHAVIORS.cost,
+  },
+  {
+    name: "doctor",
+    description: "Diagnose the local CLI installation",
+    behavior: BEHAVIORS.doctor,
+  },
+  {
+    name: "help",
+    description: "List available slash commands",
+    behavior: BEHAVIORS.help,
+  },
+  {
+    name: "init",
+    description: "Bootstrap a CLAUDE.md for this project",
+    behavior: BEHAVIORS.init,
+  },
+  {
+    name: "login",
+    description: "Authenticate with Anthropic",
+    behavior: BEHAVIORS.login,
+  },
+  {
+    name: "logout",
+    description: "Sign out of Anthropic",
+    behavior: BEHAVIORS.logout,
+  },
+  {
+    name: "mcp",
+    description: "Manage MCP servers",
+    behavior: BEHAVIORS.mcp,
+  },
+  {
+    name: "model",
+    description: "Switch the active model",
+    behavior: BEHAVIORS.model,
+  },
+  {
+    name: "plugin",
+    description: "Manage installed plugins",
+    behavior: BEHAVIORS.plugin,
+  },
+  {
+    name: "pr-comments",
+    description: "Summarize comments on the current PR",
+    behavior: BEHAVIORS["pr-comments"],
+  },
+  {
+    name: "review",
+    description: "Review the current diff",
+    behavior: BEHAVIORS.review,
+  },
+  {
+    name: "resume",
+    description: "Resume a previous session by id",
+    behavior: BEHAVIORS.resume,
+  },
+  {
+    name: "status",
+    description: "Show session, model, and project status",
+    behavior: BEHAVIORS.status,
+  },
 ];
 
 // ---------------------------------------------------------------------------
@@ -169,7 +348,7 @@ async function scanCommandsDir(
     } catch {
       // EACCES / ENOENT / weird binary file — leave description null.
     }
-    out.push({ name, description, kind, source: abs });
+    out.push({ name, description, kind, source: abs, behavior: { kind: "native" } });
   }
   return out;
 }
@@ -286,6 +465,7 @@ export async function listSlashCommands(
     name: c.name,
     description: c.description,
     kind: "built-in",
+    behavior: c.behavior,
   }));
 
   const userCmds = await scanCommandsDir(

@@ -19,6 +19,7 @@ import {
 import type { RunnerFactory } from "../src/sessions/runner.js";
 import type { SessionManager } from "../src/sessions/manager.js";
 import type { RoutineScheduler } from "../src/routines/scheduler.js";
+import type { VapidKeys } from "../src/push/vapid.js";
 
 /**
  * Create a fully isolated Config pointing at a fresh tmp dir and a silent logger.
@@ -59,7 +60,11 @@ export function tempConfig(overrides?: Partial<Config>): {
  */
 export async function bootstrapAuthedApp(
   runnerFactory?: RunnerFactory,
-  opts?: { userClaudeDir?: string; cliProjectsRoot?: string },
+  opts?: {
+    userClaudeDir?: string;
+    cliProjectsRoot?: string;
+    vapid?: VapidKeys;
+  },
 ): Promise<{
   app: FastifyInstance;
   dbh: ClaudexDb;
@@ -80,6 +85,7 @@ export async function bootstrapAuthedApp(
     runnerFactory,
     userClaudeDir: opts?.userClaudeDir,
     cliProjectsRoot: opts?.cliProjectsRoot,
+    vapid: opts?.vapid,
   });
   const users = new UserStore(dbh.db);
   const totpSecret = generateTotpSecret();

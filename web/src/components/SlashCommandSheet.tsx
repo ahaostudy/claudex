@@ -5,6 +5,7 @@ import {
   filterSlashCommands,
   type SlashCommand,
 } from "@/lib/slash-commands";
+import type { SlashClaudexAction } from "@claudex/shared";
 
 /**
  * Slash-command picker. Mobile-first bottom sheet that mirrors the mockup's
@@ -97,15 +98,27 @@ export const SlashCommandSheet = forwardRef<
     initialQuery: string;
     /** Called with the bare command name (no leading slash). */
     onPick: (command: SlashCommand) => void;
+    /**
+     * Invoked when the user picks a `claudex-action` row. The picker still
+     * closes afterward but the token is NOT inserted into the composer —
+     * the parent is expected to open the mapped UI (model picker, usage
+     * panel, …). When omitted, `claudex-action` rows fall back to `onPick`
+     * so the picker stays usable while the parent wires the handler.
+     */
+    onClaudexAction?: (action: SlashClaudexAction, cmd: SlashCommand) => void;
     onClose: () => void;
   }
 >(function SlashCommandSheet(
-  { commands, initialQuery, onPick, onClose },
+  { commands, initialQuery, onPick, onClaudexAction, onClose },
   ref,
 ) {
   const [query, setQuery] = useState(initialQuery);
   const [selected, setSelected] = useState(0);
   const [recentNames, setRecentNames] = useState<string[]>(() => readRecents());
+  // One-line hint shown at the bottom of the sheet when the user taps an
+  // unsupported row. Cleared when they move the selection or change the
+  // query so it doesn't linger past relevance.
+  const [hint, setHint] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
@@ -158,6 +171,40 @@ export const SlashCommandSheet = forwardRef<
   }, [cmdIndices.length, selected]);
 
   function commitPick(cmd: SlashCommand) {
+    // Triage by behavior:
+    //
+    //   - unsupported → never insert, never close. Show a hint at the bottom
+    //     so the user knows why nothing happened. Clicking again (or
+    //     pressing Enter) is a no-op; they have to dismiss the picker.
+    //   - claudex-action → close without inserting; the parent dispatches
+    //     the UI action. Fall back to a plain insert if the parent hasn't
+    //     wired the handler (keeps the picker usable during rollouts).
+    //   - native → insert `/name` into the composer as before.
+    //
+    // Recents: only record native picks. Recording an unsupported pick
+    // would mean the first item a user sees on next open is the one that
+    // just silently failed for them, which is awful UX. Claudex-action
+    // picks also skip recents — they live in their own affordances
+    // (settings sheet, usage panel, …), so promoting them in the slash
+    // picker's Recent list is noise.
+    const behavior = cmd.behavior;
+    if (behavior.kind === "unsupported") {
+      setHint(`/${cmd.name} is ${behavior.reason.toLowerCase()}`);
+      return;
+    }
+    if (behavior.kind === "claudex-action") {
+      if (onClaudexAction) {
+        onClaudexAction(behavior.action, cmd);
+        return;
+      }
+      // Fallback: parent didn't wire the handler — insert like a regular
+      // command so nothing is silently lost.
+      pushRecent(cmd.name);
+      setRecentNames(readRecents());
+      onPick(cmd);
+      return;
+    }
+    // native
     pushRecent(cmd.name);
     setRecentNames(readRecents());
     onPick(cmd);
@@ -233,6 +280,7 @@ export const SlashCommandSheet = forwardRef<
               onChange={(e) => {
                 setQuery(e.target.value);
                 setSelected(0);
+                if (hint) setHint(null);
               }}
               onKeyDown={(e) => {
                 if (e.key === "Escape") {
@@ -291,18 +339,38 @@ export const SlashCommandSheet = forwardRef<
               const selIdx = cmdIndices.indexOf(i);
               const isSelected = selIdx === selected;
               const isSkill = cmd.kind === "plugin";
+              const unsupported = cmd.behavior.kind === "unsupported";
+              const isAction = cmd.behavior.kind === "claudex-action";
+              // Small trailing badge: REPL-only for unsupported, "ui" for
+              // claudex-action. Keep to 10px uppercase to match the kind
+              // badge rhythm; colored differently so it reads as metadata,
+              // not category.
+              const behaviorBadge = unsupported
+                ? "REPL only"
+                : isAction
+                ? "UI"
+                : null;
               return (
                 <button
                   key={`${cmd.kind}:${cmd.name}:${row.group}`}
                   data-picker-row={selIdx}
                   onClick={() => commitPick(cmd)}
-                  onMouseEnter={() => setSelected(selIdx)}
+                  onMouseEnter={() => {
+                    setSelected(selIdx);
+                    if (hint) setHint(null);
+                  }}
                   className={cn(
                     "w-full flex items-center gap-3 px-3 py-2.5 rounded-[8px] text-left",
                     isSelected
                       ? "bg-klein-wash/40 border border-klein/30"
                       : "border border-transparent hover:bg-paper/60",
+                    unsupported && "opacity-60",
                   )}
+                  title={
+                    cmd.behavior.kind === "unsupported"
+                      ? cmd.behavior.reason
+                      : undefined
+                  }
                 >
                   <span
                     className={cn(
@@ -331,6 +399,11 @@ export const SlashCommandSheet = forwardRef<
                       </div>
                     )}
                   </div>
+                  {behaviorBadge && (
+                    <span className="mono text-[10px] text-ink-faint uppercase tracking-[0.1em] shrink-0">
+                      {behaviorBadge}
+                    </span>
+                  )}
                   <span
                     className={cn(
                       "inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[4px] text-[10px] uppercase tracking-[0.1em] shrink-0 border",
@@ -347,10 +420,21 @@ export const SlashCommandSheet = forwardRef<
           )}
         </div>
 
-        {/* Footer hint — mockup: "Tap to insert · long-press for details" + "⏎ select" */}
+        {/* Footer hint — mockup: "Tap to insert · long-press for details" + "⏎ select".
+            When a user taps an unsupported row, the hint slot shows *why*
+            the row didn't insert. The hint replaces the default help text
+            so the message reads as the primary signal. */}
         <div className="px-4 py-3 border-t border-line flex items-center text-[11px] text-ink-muted">
-          <span>Tap to insert · ↑↓ navigate</span>
-          <span className="ml-auto mono">⏎ select</span>
+          {hint ? (
+            <span className="text-danger/80" role="status">
+              {hint}
+            </span>
+          ) : (
+            <>
+              <span>Tap to insert · ↑↓ navigate</span>
+              <span className="ml-auto mono">⏎ select</span>
+            </>
+          )}
         </div>
       </div>
     </div>

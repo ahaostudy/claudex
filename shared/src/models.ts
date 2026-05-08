@@ -65,6 +65,12 @@ export const Session = z.object({
   // top-level sessions. Enforced ON DELETE CASCADE so removing the parent
   // cleans up every child.
   parentSessionId: z.string().nullable(),
+  // Number of `claude` CLI JSONL transcript lines we've already imported into
+  // this session's `session_events`. Incremented by the resync-on-open path
+  // in `server/src/sessions/cli-resync.ts`. Zero when this session wasn't
+  // adopted from the CLI (or when the row predates the column). Internal to
+  // the server; clients can ignore it.
+  cliJsonlSeq: z.number().int().nonnegative().default(0),
   // aggregate counters, cheap to read
   stats: z.object({
     messages: z.number().int().nonnegative(),
@@ -128,6 +134,28 @@ export const TurnEndUsage = z.object({
   cacheCreationInputTokens: z.number().int().nonnegative().optional(),
 });
 export type TurnEndUsage = z.infer<typeof TurnEndUsage>;
+
+// Response for `GET /api/sessions/:id/usage-summary` — lightweight per-session
+// usage rollup that replaces places on the web that used to refetch the full
+// `/events` payload just to compute last-turn context. Computed server-side
+// by scanning `session_events WHERE kind='turn_end'`.
+export const UsageSummaryResponse = z.object({
+  totalInput: z.number().int().nonnegative(),
+  totalOutput: z.number().int().nonnegative(),
+  /** inp + cacheRead + cacheCreation from the most recent `turn_end`. */
+  lastTurnInput: z.number().int().nonnegative(),
+  /** Mirrors `computeSessionUsage.lastTurnContextKnown`. */
+  lastTurnContextKnown: z.boolean(),
+  turnCount: z.number().int().nonnegative(),
+  perModel: z.array(
+    z.object({
+      model: z.string(),
+      inputTokens: z.number().int().nonnegative(),
+      outputTokens: z.number().int().nonnegative(),
+    }),
+  ),
+});
+export type UsageSummaryResponse = z.infer<typeof UsageSummaryResponse>;
 
 // ============================================================================
 // Diff primitives — shared by server aggregation and web rendering.
@@ -420,6 +448,56 @@ export const SlashCommandKind = z.enum([
 ]);
 export type SlashCommandKind = z.infer<typeof SlashCommandKind>;
 
+// How the composer should treat a slash command when the user picks it.
+//
+// Motivated by a concrete bug: many of the `claude` CLI's `/` commands are
+// REPL-only (`/login`, `/doctor`, `/init`, …) and the Agent SDK rejects them
+// with "isn't available in this environment". Rather than let the user paste
+// one of those into the composer and get that error, the picker now knows
+// which entries are:
+//
+//   - `native`:         the SDK forwards the `/x` token through — just send
+//   - `claudex-action`: the token is intercepted client-side and mapped to a
+//                       claudex UI action (open model picker, open usage,
+//                       etc.) instead of going over the wire
+//   - `unsupported`:    REPL-only, no claudex equivalent — show a dimmed row
+//                       with a short reason, and block sends that start with
+//                       this exact token
+//
+// Custom `user`/`project`/`plugin` commands are always `native` — the SDK
+// resolves the prompt template from disk the same way the CLI does. Only
+// `built-in` entries vary.
+export const SlashBehaviorKind = z.enum([
+  "native",
+  "claudex-action",
+  "unsupported",
+]);
+export type SlashBehaviorKind = z.infer<typeof SlashBehaviorKind>;
+
+// The set of client-side actions the web composer knows how to dispatch when
+// the user picks a `claudex-action` command. Keeping this as a closed enum
+// (rather than a free-form string) lets TypeScript keep the Chat screen
+// exhaustive when we add a mapping later.
+export const SlashClaudexAction = z.enum([
+  "open-model-picker",
+  "open-session-settings",
+  "open-usage",
+  "open-plugins-settings",
+  "open-slash-help",
+  "clear-transcript",
+]);
+export type SlashClaudexAction = z.infer<typeof SlashClaudexAction>;
+
+export const SlashBehavior = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("native") }),
+  z.object({
+    kind: z.literal("claudex-action"),
+    action: SlashClaudexAction,
+  }),
+  z.object({ kind: z.literal("unsupported"), reason: z.string() }),
+]);
+export type SlashBehavior = z.infer<typeof SlashBehavior>;
+
 export const SlashCommand = z.object({
   // Bare command name, without the leading `/`.
   name: z.string(),
@@ -429,6 +507,9 @@ export const SlashCommand = z.object({
   // Absolute path to the source file for user/project/plugin entries; omitted
   // for built-ins.
   source: z.string().optional(),
+  // Composer triage — see SlashBehavior. Always set on built-ins; for
+  // user/project/plugin entries the server stamps `{ kind: "native" }`.
+  behavior: SlashBehavior,
 });
 export type SlashCommand = z.infer<typeof SlashCommand>;
 
@@ -568,3 +649,73 @@ export const UsageRangeResponse = z.object({
   byDay: z.array(UsageRangeDay),
 });
 export type UsageRangeResponse = z.infer<typeof UsageRangeResponse>;
+
+// ============================================================================
+// Push notifications
+//
+// claudex fires a Web Push notification every time a session enters the
+// `awaiting` state because the CLI asked for tool-use permission — that's the
+// whole reason this surface exists. The user reaches claudex from their phone
+// over frpc; without push they have to keep the tab open to see a request.
+//
+// Subscriptions are per device, not per user: claudex is single-user, and we
+// want every browser that's installed claudex as a PWA to get notified.
+// ============================================================================
+
+// Body of `POST /api/push/subscriptions` — the serialized browser
+// PushSubscription plus the user-agent string we stamp onto the stored row so
+// Settings can render an honest device list.
+export const PushSubscribeRequest = z.object({
+  endpoint: z.string().min(1),
+  keys: z.object({
+    p256dh: z.string().min(1),
+    auth: z.string().min(1),
+  }),
+  userAgent: z.string().optional(),
+});
+export type PushSubscribeRequest = z.infer<typeof PushSubscribeRequest>;
+
+export const PushSubscribeResponse = z.object({
+  id: z.string(),
+  enabled: z.literal(true),
+});
+export type PushSubscribeResponse = z.infer<typeof PushSubscribeResponse>;
+
+// One registered device. `userAgent` can be null on rows imported before we
+// captured it; the UI renders "Unknown device" then.
+export const PushDevice = z.object({
+  id: z.string(),
+  userAgent: z.string().nullable(),
+  createdAt: z.string(),
+  lastUsedAt: z.string().nullable(),
+});
+export type PushDevice = z.infer<typeof PushDevice>;
+
+// `GET /api/push/state` — snapshot for the Settings Notifications tab.
+// `enabled` is "does at least one subscription exist on this server"; it does
+// NOT imply the *current* browser is subscribed — the UI separately consults
+// `Notification.permission` and the in-memory `PushSubscription` from the
+// service worker registration for that.
+export const PushStateResponse = z.object({
+  enabled: z.boolean(),
+  devices: z.array(PushDevice),
+});
+export type PushStateResponse = z.infer<typeof PushStateResponse>;
+
+// `GET /api/push/vapid-public` — VAPID public key for
+// `PushManager.subscribe({ applicationServerKey })`. Generated on first boot
+// and persisted at `~/.claudex/vapid.json`.
+export const VapidPublicResponse = z.object({
+  publicKey: z.string(),
+});
+export type VapidPublicResponse = z.infer<typeof VapidPublicResponse>;
+
+// Response for `POST /api/push/test` — fires a test push to every stored
+// subscription. `sent` counts subscriptions we handed to web-push; `pruned`
+// counts subscriptions that came back 404/410 (browser unsubscribed) and were
+// deleted as a side-effect.
+export const PushTestResponse = z.object({
+  sent: z.number().int().nonnegative(),
+  pruned: z.number().int().nonnegative(),
+});
+export type PushTestResponse = z.infer<typeof PushTestResponse>;

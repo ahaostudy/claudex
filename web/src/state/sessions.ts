@@ -71,6 +71,28 @@ export type UIPiece =
 //                Edit/Write/MultiEdit tool calls.
 export type ViewMode = "normal" | "verbose" | "summary";
 
+/**
+ * Per-session pagination bookkeeping for the transcript. Kept in a parallel
+ * map so the main `transcripts[id]` UIPiece array stays the same shape.
+ *
+ *   - `hasMore`: true when there are older events on the server we haven't
+ *     loaded yet. Drives the "Loading older messages…" trigger at the top
+ *     of the scroller.
+ *   - `lowestSeq`: the smallest `seq` in the loaded tail; used as the
+ *     `beforeSeq` when requesting the next older page.
+ *   - `loadingOlder`: re-entrancy guard so a fast scrollTop doesn't fire
+ *     multiple overlapping requests.
+ *   - `initialLoading`: true between `ensureTranscript` start and the
+ *     first `/events?limit=200` resolving. The Chat screen shows a
+ *     skeleton while this is true, instead of a blank canvas.
+ */
+export interface TranscriptMeta {
+  hasMore: boolean;
+  lowestSeq: number | null;
+  loadingOlder: boolean;
+  initialLoading: boolean;
+}
+
 interface SessionState {
   ws: WsClient | null;
   connected: boolean;
@@ -78,6 +100,7 @@ interface SessionState {
   sessions: Session[];
   // sessionId → pieces in order
   transcripts: Record<string, UIPiece[]>;
+  transcriptMeta: Record<string, TranscriptMeta>;
   loadingSessions: boolean;
   // Current transcript view mode — session-scoped in spirit but not yet
   // persisted per-session or to localStorage (intentional for first pass).
@@ -85,12 +108,11 @@ interface SessionState {
   init: () => void;
   refreshSessions: () => Promise<void>;
   ensureTranscript: (sessionId: string) => Promise<void>;
+  loadOlderTranscript: (sessionId: string) => Promise<void>;
+  refetchTail: (sessionId: string) => Promise<void>;
   subscribeSession: (sessionId: string) => void;
   sendUserMessage: (sessionId: string, text: string) => void;
   interruptSession: (sessionId: string) => void;
-  // Push a pending piece onto a session's transcript if there isn't already one
-  // at the tail. Used when the Chat screen mounts with session.status==="running"
-  // so the user sees "claude is processing" even without a fresh user_message.
   ensurePendingFor: (sessionId: string) => void;
   resolvePermission: (
     sessionId: string,
@@ -98,10 +120,6 @@ interface SessionState {
     decision: "allow_once" | "allow_always" | "deny",
   ) => void;
   setViewMode: (mode: ViewMode) => void;
-  // Drop a session from both the sessions list and the transcripts cache.
-  // Called after a successful DELETE /api/sessions/:id so the UI doesn't
-  // briefly flash a stale row before the next list refresh. No server hit
-  // here — this is local-state bookkeeping only.
   forgetSession: (id: string) => void;
 }
 
@@ -249,6 +267,7 @@ export const useSessions = create<SessionState>((set, get) => {
   wsDiag: { phase: "connecting", attempts: 0 },
   sessions: [],
   transcripts: {},
+  transcriptMeta: {},
   loadingSessions: false,
   viewMode: "normal",
 
@@ -347,6 +366,17 @@ export const useSessions = create<SessionState>((set, get) => {
         });
         return;
       }
+      // Server appended events out-of-band (CLI resync). Refetch the tail
+      // so the transcript reflects whatever the CLI added. Only act on the
+      // currently-cached session to avoid surprise fetches for sessions the
+      // user isn't looking at.
+      if (frame.type === "refresh_transcript") {
+        const sid = frame.sessionId;
+        if (get().transcripts[sid]) {
+          void get().refetchTail(sid);
+        }
+        return;
+      }
       // Any substantive reply frame means the pending placeholder did its job.
       if (
         frame.type === "assistant_text_delta" ||
@@ -388,13 +418,147 @@ export const useSessions = create<SessionState>((set, get) => {
 
   async ensureTranscript(sessionId) {
     if (get().transcripts[sessionId]) return;
-    const res = await api.listEvents(sessionId);
-    const pieces = res.events
-      .map(eventToPiece)
-      .filter((p): p is UIPiece => p != null);
+    // Flag the session as "initial loading" so Chat can render a skeleton
+    // instead of a blank canvas while the first 200 events resolve. We set
+    // this synchronously so the first render already knows.
     set((s) => ({
-      transcripts: { ...s.transcripts, [sessionId]: pieces },
+      transcriptMeta: {
+        ...s.transcriptMeta,
+        [sessionId]: {
+          hasMore: false,
+          lowestSeq: null,
+          loadingOlder: false,
+          initialLoading: true,
+        },
+      },
     }));
+    try {
+      const res = await api.listEvents(sessionId, { limit: 200 });
+      const pieces = res.events
+        .map(eventToPiece)
+        .filter((p): p is UIPiece => p != null);
+      set((s) => ({
+        transcripts: { ...s.transcripts, [sessionId]: pieces },
+        transcriptMeta: {
+          ...s.transcriptMeta,
+          [sessionId]: {
+            hasMore: res.hasMore,
+            lowestSeq: res.events.length > 0 ? res.events[0].seq : null,
+            loadingOlder: false,
+            initialLoading: false,
+          },
+        },
+      }));
+    } catch (err) {
+      // Leave transcripts[id] empty so a retry (e.g. on nav back) fires a
+      // fresh ensureTranscript. Clear the loading flag so the skeleton
+      // doesn't stick.
+      set((s) => ({
+        transcriptMeta: {
+          ...s.transcriptMeta,
+          [sessionId]: {
+            ...(s.transcriptMeta[sessionId] ?? {
+              hasMore: false,
+              lowestSeq: null,
+              loadingOlder: false,
+              initialLoading: false,
+            }),
+            initialLoading: false,
+          },
+        },
+      }));
+      throw err;
+    }
+  },
+
+  async loadOlderTranscript(sessionId) {
+    const meta = get().transcriptMeta[sessionId];
+    if (!meta || !meta.hasMore || meta.loadingOlder) return;
+    const lowest = meta.lowestSeq;
+    if (lowest === null) return;
+    set((s) => ({
+      transcriptMeta: {
+        ...s.transcriptMeta,
+        [sessionId]: { ...meta, loadingOlder: true },
+      },
+    }));
+    try {
+      const res = await api.listEvents(sessionId, {
+        beforeSeq: lowest,
+        limit: 200,
+      });
+      const older = res.events
+        .map(eventToPiece)
+        .filter((p): p is UIPiece => p != null);
+      set((s) => ({
+        transcripts: {
+          ...s.transcripts,
+          [sessionId]: [...older, ...(s.transcripts[sessionId] ?? [])],
+        },
+        transcriptMeta: {
+          ...s.transcriptMeta,
+          [sessionId]: {
+            hasMore: res.hasMore,
+            lowestSeq:
+              res.events.length > 0 ? res.events[0].seq : lowest,
+            loadingOlder: false,
+            initialLoading: false,
+          },
+        },
+      }));
+    } catch {
+      set((s) => ({
+        transcriptMeta: {
+          ...s.transcriptMeta,
+          [sessionId]: { ...meta, loadingOlder: false },
+        },
+      }));
+    }
+  },
+
+  async refetchTail(sessionId) {
+    // Server appended events out-of-band (CLI resync). Re-fetch the last 200
+    // and merge with what we already have. Any lazily-loaded older pages
+    // stay intact — we only touch the tail.
+    try {
+      const res = await api.listEvents(sessionId, { limit: 200 });
+      const freshTail = res.events
+        .map(eventToPiece)
+        .filter((p): p is UIPiece => p != null);
+      const oldestInTail =
+        res.events.length > 0 ? res.events[0].seq : null;
+      set((s) => {
+        const existing = s.transcripts[sessionId] ?? [];
+        // Keep any loaded pieces from BEFORE the refetched tail window —
+        // we determine that by matching piece-level identity from
+        // `eventToPiece`, but we don't store `seq` on UIPiece. Fallback:
+        // if there's nothing older loaded locally than the tail's oldest
+        // seq, just replace the whole transcript. Otherwise, keep the
+        // leading slice and replace the trailing portion.
+        // Heuristic: existing length > freshTail length and tail hasMore
+        // was false for "first page" → the existing array has a prefix of
+        // older-loaded pages we want to keep. We append freshTail after
+        // the prefix (approximated as everything up to existing.length -
+        // freshTail.length).
+        const prefixLen = Math.max(0, existing.length - freshTail.length);
+        const merged = [...existing.slice(0, prefixLen), ...freshTail];
+        const prevMeta = s.transcriptMeta[sessionId];
+        return {
+          transcripts: { ...s.transcripts, [sessionId]: merged },
+          transcriptMeta: {
+            ...s.transcriptMeta,
+            [sessionId]: {
+              hasMore: prevMeta?.hasMore ?? res.hasMore,
+              lowestSeq: prevMeta?.lowestSeq ?? oldestInTail,
+              loadingOlder: false,
+              initialLoading: false,
+            },
+          },
+        };
+      });
+    } catch {
+      /* ignore — a live WS event will catch us up eventually */
+    }
   },
 
   subscribeSession(sessionId) {
@@ -507,10 +671,13 @@ export const useSessions = create<SessionState>((set, get) => {
     clearStallTimer(id);
     set((s) => {
       const { [id]: _gone, ...rest } = s.transcripts;
+      const { [id]: _meta, ...restMeta } = s.transcriptMeta;
       void _gone;
+      void _meta;
       return {
         sessions: s.sessions.filter((x) => x.id !== id),
         transcripts: rest,
+        transcriptMeta: restMeta,
       };
     });
   },

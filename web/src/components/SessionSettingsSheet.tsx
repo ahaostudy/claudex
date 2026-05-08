@@ -56,6 +56,8 @@ export function SessionSettingsSheet({
 
   const [grants, setGrants] = useState<ToolGrant[] | null>(null);
   const [grantsErr, setGrantsErr] = useState<string | null>(null);
+  const [exportOpen, setExportOpen] = useState(false);
+  const exportMenuRef = useRef<HTMLDivElement | null>(null);
 
   // Re-hydrate editable state when the parent swaps a fresh session in.
   useEffect(() => {
@@ -165,6 +167,27 @@ export function SessionSettingsSheet({
       setDeleting(false);
       setDeleteConfirming(false);
     }
+  }
+
+  // Close the export menu on outside-click. Kept local to the sheet — a full
+  // menu primitive is overkill for a 2-item popover.
+  useEffect(() => {
+    if (!exportOpen) return;
+    function onDocClick(e: MouseEvent) {
+      if (
+        exportMenuRef.current &&
+        !exportMenuRef.current.contains(e.target as Node)
+      ) {
+        setExportOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, [exportOpen]);
+
+  function runExport(format: "md" | "json") {
+    setExportOpen(false);
+    api.exportSession(session.id, format);
   }
 
   const archived = session.status === "archived";
@@ -419,40 +442,76 @@ export function SessionSettingsSheet({
             </div>
           )}
 
-          {/* Archive + Delete row.
-              Archive is reversible (row flip + best-effort worktree cleanup).
-              Delete is irreversible — hard-drops the session row, every
-              session_event, and any /btw side-chat children via FK cascade.
-              The second button uses a two-step confirm (click → "Click again
-              to confirm" with a 3s timeout) to keep an accidental tap from
-              wiping the transcript. */}
-          {!archived && (
-            <div className="pt-4 border-t border-line flex flex-wrap gap-2">
+          {/* Export + Archive + Delete row.
+              Export is always available (even on archived sessions — you'd
+              still want the transcript). Archive is reversible (row flip +
+              best-effort worktree cleanup). Delete is irreversible —
+              hard-drops the session row, every session_event, and any /btw
+              side-chat children via FK cascade. The Delete button uses a
+              two-step confirm (click → "Click again to confirm" with a 3s
+              timeout) to keep an accidental tap from wiping the transcript.
+              Export sits to the left as the only non-destructive action. */}
+          <div className="pt-4 border-t border-line flex flex-wrap gap-2">
+            <div className="relative" ref={exportMenuRef}>
               <button
-                onClick={archive}
+                onClick={() => setExportOpen((v) => !v)}
                 disabled={archiving || deleting}
-                className="h-9 px-3 rounded-[8px] border border-line text-[13px] text-danger hover:bg-danger-wash disabled:opacity-60"
+                className="h-9 px-3 rounded-[8px] border border-line text-[13px] text-ink-soft hover:bg-paper disabled:opacity-60"
+                aria-haspopup="menu"
+                aria-expanded={exportOpen}
               >
-                {archiving ? "Archiving…" : archiveLabel}
+                Export ⌄
               </button>
-              <button
-                onClick={handleDelete}
-                disabled={deleting || archiving}
-                title="Permanently delete this session. This cannot be undone."
-                className={`h-9 px-3 rounded-[8px] text-[13px] disabled:opacity-60 ${
-                  deleteConfirming
-                    ? "bg-danger text-canvas border border-danger"
-                    : "border border-danger/50 text-danger hover:bg-danger-wash"
-                }`}
-              >
-                {deleting
-                  ? "Deleting…"
-                  : deleteConfirming
-                    ? "Click again to confirm"
-                    : "Delete session"}
-              </button>
+              {exportOpen && (
+                <div
+                  role="menu"
+                  className="absolute left-0 bottom-full mb-1 min-w-[160px] rounded-[8px] border border-line bg-canvas shadow-lift py-1 z-10"
+                >
+                  <button
+                    role="menuitem"
+                    onClick={() => runExport("md")}
+                    className="w-full text-left px-3 py-1.5 text-[13px] hover:bg-paper"
+                  >
+                    As Markdown
+                  </button>
+                  <button
+                    role="menuitem"
+                    onClick={() => runExport("json")}
+                    className="w-full text-left px-3 py-1.5 text-[13px] hover:bg-paper"
+                  >
+                    As JSON
+                  </button>
+                </div>
+              )}
             </div>
-          )}
+            {!archived && (
+              <>
+                <button
+                  onClick={archive}
+                  disabled={archiving || deleting}
+                  className="h-9 px-3 rounded-[8px] border border-line text-[13px] text-danger hover:bg-danger-wash disabled:opacity-60"
+                >
+                  {archiving ? "Archiving…" : archiveLabel}
+                </button>
+                <button
+                  onClick={handleDelete}
+                  disabled={deleting || archiving}
+                  title="Permanently delete this session. This cannot be undone."
+                  className={`h-9 px-3 rounded-[8px] text-[13px] disabled:opacity-60 ${
+                    deleteConfirming
+                      ? "bg-danger text-canvas border border-danger"
+                      : "border border-danger/50 text-danger hover:bg-danger-wash"
+                  }`}
+                >
+                  {deleting
+                    ? "Deleting…"
+                    : deleteConfirming
+                      ? "Click again to confirm"
+                      : "Delete session"}
+                </button>
+              </>
+            )}
+          </div>
         </div>
       </div>
     </div>

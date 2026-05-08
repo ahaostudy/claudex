@@ -141,6 +141,18 @@ export const ServerUserMessage = z.object({
   createdAt: z.string(),
 });
 
+// Broadcast when the server has appended events to a session out-of-band —
+// notably the CLI-JSONL resync-on-open path, which discovers new CLI turns
+// and streams them into `session_events` without going through the live
+// runner. The web client handles this by refetching the tail
+// (`/events?limit=200`) and merging with any lazily-loaded older pages.
+// Intentionally payload-free beyond the session id — the client's existing
+// fetch path is simpler to drive than a per-event replay channel.
+export const ServerRefreshTranscript = z.object({
+  type: z.literal("refresh_transcript"),
+  sessionId: z.string(),
+});
+
 export const ServerError = z.object({
   type: z.literal("error"),
   sessionId: z.string().nullable(),
@@ -159,6 +171,7 @@ export const ServerFrame = z.discriminatedUnion("type", [
   ServerPermissionRequest,
   ServerTurnEnd,
   ServerUserMessage,
+  ServerRefreshTranscript,
   ServerError,
 ]);
 export type ServerFrame = z.infer<typeof ServerFrame>;

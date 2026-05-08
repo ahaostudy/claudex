@@ -50,6 +50,7 @@ export async function registerWsRoute(
   const GLOBAL_FRAME_TYPES = new Set<ServerFrame["type"]>([
     "session_update",
     "user_message",
+    "refresh_transcript",
   ]);
 
   // Wire the runner-event broadcast into the ws layer. This is a one-time
@@ -312,6 +313,11 @@ function runnerEventToFrame(
         sessionId,
         content: event.text,
         createdAt: event.at,
+      };
+    case "refresh_transcript":
+      return {
+        type: "refresh_transcript",
+        sessionId,
       };
     case "error":
       return {

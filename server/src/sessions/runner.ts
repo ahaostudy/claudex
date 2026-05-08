@@ -76,6 +76,10 @@ export type RunnerEvent =
   // right away. The originating tab gets it too and reconciles it
   // against its local optimistic echo.
   | { type: "user_message"; text: string; at: string }
+  // Manager-synthesized. Fired when the server has appended events to a
+  // session out-of-band (e.g. the CLI JSONL resync path) — the client
+  // refetches the transcript tail rather than us re-streaming each event.
+  | { type: "refresh_transcript" }
   | { type: "error"; code: string; message: string };
 
 export type RunnerListener = (event: RunnerEvent) => void;

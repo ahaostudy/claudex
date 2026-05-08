@@ -20,12 +20,40 @@ export type SlashCommand = SharedSlashCommand;
 /**
  * Offline fallback — shown only when `/api/slash-commands` fails. Keep tiny
  * and uncontroversial; the server has the real list.
+ *
+ * Behaviors mirror the server-side triage: `/help` has no SDK-backed impl
+ * yet so we point it at a claudex action (no-op hint today), and `/clear`,
+ * `/compact`, `/review` get their true categorization so the picker doesn't
+ * briefly lie before the real list arrives.
  */
 export const BUILTIN_FALLBACK_SLASH_COMMANDS: SlashCommand[] = [
-  { name: "help", description: "List available slash commands", kind: "built-in" },
-  { name: "clear", description: "Clear the conversation history", kind: "built-in" },
-  { name: "compact", description: "Summarize and free context window", kind: "built-in" },
-  { name: "review", description: "Review the current diff", kind: "built-in" },
+  {
+    name: "help",
+    description: "List available slash commands",
+    kind: "built-in",
+    behavior: { kind: "claudex-action", action: "open-slash-help" },
+  },
+  {
+    name: "clear",
+    description: "Clear the conversation history",
+    kind: "built-in",
+    behavior: { kind: "claudex-action", action: "clear-transcript" },
+  },
+  {
+    name: "compact",
+    description: "Summarize and free context window",
+    kind: "built-in",
+    behavior: { kind: "native" },
+  },
+  {
+    name: "review",
+    description: "Review the current diff",
+    kind: "built-in",
+    behavior: {
+      kind: "unsupported",
+      reason: "CLI REPL command — not verified under the Agent SDK",
+    },
+  },
 ];
 
 /**

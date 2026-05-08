@@ -5,6 +5,7 @@ import { loadOrCreateJwtSecret } from "./auth/index.js";
 import { buildApp, defaultWebDist } from "./transport/app.js";
 import { SessionStore } from "./sessions/store.js";
 import { backfillSessionTitles } from "./sessions/backfill-titles.js";
+import { loadOrCreateVapidKeys } from "./push/vapid.js";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -14,6 +15,7 @@ async function main() {
   const log = createLogger(config);
   const { db, close: closeDb } = openDb(config, log);
   const jwtSecret = loadOrCreateJwtSecret(config);
+  const vapid = loadOrCreateVapidKeys(config, log);
 
   // Resolve the web bundle location. Override with CLAUDEX_WEB_DIST; set
   // CLAUDEX_WEB_DIST=none to explicitly disable (i.e. you're running Vite
@@ -35,6 +37,7 @@ async function main() {
     logger: log as any,
     isProduction: config.nodeEnv === "production",
     webDist,
+    vapid,
   });
 
   const shutdown = async (signal: string) => {

@@ -9,6 +9,7 @@ import { SettingsScreen } from "@/screens/Settings";
 import { RoutinesScreen } from "@/screens/Routines";
 import { AlertsScreen } from "@/screens/Alerts";
 import { UsagePage } from "@/screens/UsagePage";
+import { KeyboardHelp } from "@/components/KeyboardHelp";
 
 function Guard({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
@@ -30,6 +31,7 @@ export default function App() {
     checkSession();
   }, [checkSession]);
   return (
+    <>
     <Routes>
       <Route path="/login" element={<LoginScreen />} />
       <Route path="/" element={<Navigate to="/sessions" replace />} />
@@ -91,5 +93,7 @@ export default function App() {
       />
       <Route path="*" element={<Navigate to="/sessions" replace />} />
     </Routes>
+    <KeyboardHelp />
+    </>
   );
 }
