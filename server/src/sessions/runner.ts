@@ -88,8 +88,11 @@ export type RunnerEvent =
   // Manager-synthesized (not emitted by the Agent SDK). Broadcast when a
   // user message lands in the session so every subscribed tab sees it
   // right away. The originating tab gets it too and reconciles it
-  // against its local optimistic echo.
-  | { type: "user_message"; text: string; at: string }
+  // against its local optimistic echo. `echoId` is an opaque nonce the
+  // originating tab attached to its `ClientUserMessage` — relayed
+  // verbatim so the sender can match its optimistic piece without the
+  // legacy text+3s heuristic. Undefined for messages from legacy clients.
+  | { type: "user_message"; text: string; at: string; echoId?: string }
   // Manager-synthesized. Fired when the server has appended events to a
   // session out-of-band (e.g. the CLI JSONL resync path) — the client
   // refetches the transcript tail rather than us re-streaming each event.

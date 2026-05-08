@@ -457,6 +457,7 @@ export class SessionManager {
     sessionId: string,
     content: string,
     attachmentIds: string[] = [],
+    echoId?: string,
   ): Promise<void> {
     const runner = this.getOrCreate(sessionId);
     // If this is a side chat whose runner has a pending context seed,
@@ -547,12 +548,16 @@ export class SessionManager {
 
     // Broadcast the user message to every subscriber — including the tab
     // that sent it. Multi-tab sees the message show up instantly; the
-    // sending tab reconciles against its local optimistic echo using
-    // content + createdAt proximity (see web/src/state/sessions.ts).
+    // sending tab reconciles against its local optimistic echo using the
+    // per-send `echoId` nonce it attached to the original frame (see
+    // web/src/state/sessions.ts). `echoId` is undefined for legacy
+    // clients, in which case the web store falls back to a text+3s
+    // heuristic.
     this.deps.broadcast(sessionId, {
       type: "user_message",
       text: content,
       at: new Date().toISOString(),
+      ...(echoId !== undefined ? { echoId } : {}),
     });
 
     // Build the outgoing SDK prompt by prefixing `@<absolute-path>` tokens

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   ChevronDown,
@@ -60,6 +60,20 @@ export function QueueScreen() {
   const [dropTarget, setDropTarget] = useState<
     { id: string; position: "above" | "below" } | null
   >(null);
+  // Desktop keyboard reorder: when the user presses Space/Enter on a queued
+  // row, we arm "reorder mode" for that row. While armed, Arrow Up/Down
+  // call the same move API the chevron buttons use; Escape or Space/Enter
+  // toggles back out. Mouse drag is unaffected.
+  const [kbdReorderId, setKbdReorderId] = useState<string | null>(null);
+  // Two-step cancel confirm state keyed by row id. First click swaps the
+  // button label to "Click again to cancel" and arms a 3s reset; second
+  // click within the window fires the actual cancel. Matches the
+  // Session Settings Delete / Trust-revoke pattern so the vocabulary is
+  // consistent across the app.
+  const [cancelConfirmingId, setCancelConfirmingId] = useState<string | null>(
+    null,
+  );
+  const cancelTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   async function refresh() {
     try {
@@ -93,15 +107,34 @@ export function QueueScreen() {
     return m;
   }, [projects]);
 
+  // Clean up the dangling cancel-confirm timer on unmount.
+  useEffect(() => {
+    return () => {
+      if (cancelTimerRef.current) {
+        clearTimeout(cancelTimerRef.current);
+        cancelTimerRef.current = null;
+      }
+    };
+  }, []);
+
   async function cancel(row: QueuedPrompt) {
-    if (
-      !confirm(
-        row.status === "running"
-          ? "Cancel the running prompt? The session will be interrupted."
-          : "Remove this queued prompt?",
-      )
-    )
+    // Two-step confirm inline (replaces the native window.confirm() which
+    // broke focus on mobile + was un-styleable). First press arms, second
+    // press within 3s fires. Any other row's press or a 3s tick resets.
+    if (cancelConfirmingId !== row.id) {
+      setCancelConfirmingId(row.id);
+      if (cancelTimerRef.current) clearTimeout(cancelTimerRef.current);
+      cancelTimerRef.current = setTimeout(() => {
+        setCancelConfirmingId(null);
+        cancelTimerRef.current = null;
+      }, 3000);
       return;
+    }
+    if (cancelTimerRef.current) {
+      clearTimeout(cancelTimerRef.current);
+      cancelTimerRef.current = null;
+    }
+    setCancelConfirmingId(null);
     setErr(null);
     try {
       await api.deleteQueued(row.id);
@@ -120,6 +153,25 @@ export function QueueScreen() {
       setErr(e instanceof ApiError ? e.code : "reorder failed");
     }
   }
+
+  // Escape at the screen level: exit keyboard reorder mode (if armed) or
+  // dismiss the cancel-confirm pulse. Editor modal owns its own Escape.
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key !== "Escape") return;
+      if (kbdReorderId) {
+        setKbdReorderId(null);
+      } else if (cancelConfirmingId) {
+        if (cancelTimerRef.current) {
+          clearTimeout(cancelTimerRef.current);
+          cancelTimerRef.current = null;
+        }
+        setCancelConfirmingId(null);
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [kbdReorderId, cancelConfirmingId]);
 
   /**
    * Move `sourceId` to the position of `targetId` in the queued sub-list.
@@ -217,81 +269,102 @@ export function QueueScreen() {
           </div>
         ) : (
           <ul>
-            {queue.map((row, idx) => {
-              const project = projectsById.get(row.projectId);
-              return (
-                <QueueRow
-                  key={row.id}
-                  row={row}
-                  project={project}
-                  canMoveUp={
-                    row.status === "queued" &&
-                    queue
-                      .slice(0, idx)
-                      .some((r) => r.status === "queued")
-                  }
-                  canMoveDown={
-                    row.status === "queued" &&
-                    queue
-                      .slice(idx + 1)
-                      .some((r) => r.status === "queued")
-                  }
-                  draggingId={draggingId}
-                  dropTarget={dropTarget}
-                  onDragStart={(e) => {
-                    if (row.status !== "queued") return;
-                    setDraggingId(row.id);
-                    e.dataTransfer.effectAllowed = "move";
-                    try {
-                      e.dataTransfer.setData("text/plain", row.id);
-                    } catch {
-                      // Firefox requires a setData call; some browsers throw
-                      // if the dataTransfer is in a protected state. Ignore.
+            {(() => {
+              const queuedTotal = queue.filter(
+                (r) => r.status === "queued",
+              ).length;
+              let queuedIdx = 0;
+              return queue.map((row, idx) => {
+                const project = projectsById.get(row.projectId);
+                const queuedPos =
+                  row.status === "queued" ? ++queuedIdx : null;
+                return (
+                  <QueueRow
+                    key={row.id}
+                    row={row}
+                    project={project}
+                    queuedPos={queuedPos}
+                    queuedTotal={queuedTotal}
+                    canMoveUp={
+                      row.status === "queued" &&
+                      queue
+                        .slice(0, idx)
+                        .some((r) => r.status === "queued")
                     }
-                  }}
-                  onDragOver={(e) => {
-                    if (!draggingId || row.status !== "queued") return;
-                    if (draggingId === row.id) return;
-                    e.preventDefault();
-                    e.dataTransfer.dropEffect = "move";
-                    const rect = (
-                      e.currentTarget as HTMLLIElement
-                    ).getBoundingClientRect();
-                    const above =
-                      e.clientY - rect.top < rect.height / 2;
-                    setDropTarget({
-                      id: row.id,
-                      position: above ? "above" : "below",
-                    });
-                  }}
-                  onDragLeave={() => {
-                    // Only clear if the current target matches — otherwise a
-                    // sibling's onDragOver has already set the new target.
-                    setDropTarget((prev) =>
-                      prev && prev.id === row.id ? null : prev,
-                    );
-                  }}
-                  onDrop={(e) => {
-                    if (!draggingId) return;
-                    e.preventDefault();
-                    const position =
-                      dropTarget && dropTarget.id === row.id
-                        ? dropTarget.position
-                        : "above";
-                    void moveByDrop(draggingId, row.id, position);
-                    setDraggingId(null);
-                    setDropTarget(null);
-                  }}
-                  onDragEnd={() => {
-                    setDraggingId(null);
-                    setDropTarget(null);
-                  }}
-                  onEdit={() => setEditing(row)}
-                  onCancel={() => cancel(row)}
-                  onReorder={(dir) => reorder(row, dir)}
-                />
-              );
-            })}
+                    canMoveDown={
+                      row.status === "queued" &&
+                      queue
+                        .slice(idx + 1)
+                        .some((r) => r.status === "queued")
+                    }
+                    draggingId={draggingId}
+                    dropTarget={dropTarget}
+                    kbdReorderActive={kbdReorderId === row.id}
+                    cancelConfirming={cancelConfirmingId === row.id}
+                    onToggleKbdReorder={() => {
+                      if (row.status !== "queued") return;
+                      setKbdReorderId((prev) =>
+                        prev === row.id ? null : row.id,
+                      );
+                    }}
+                    onExitKbdReorder={() => setKbdReorderId(null)}
+                    onDragStart={(e) => {
+                      if (row.status !== "queued") return;
+                      setDraggingId(row.id);
+                      e.dataTransfer.effectAllowed = "move";
+                      try {
+                        e.dataTransfer.setData("text/plain", row.id);
+                      } catch {
+                        // Firefox requires a setData call; some browsers throw
+                        // if the dataTransfer is in a protected state. Ignore.
+                      }
+                    }}
+                    onDragOver={(e) => {
+                      if (!draggingId || row.status !== "queued") return;
+                      if (draggingId === row.id) return;
+                      e.preventDefault();
+                      e.dataTransfer.dropEffect = "move";
+                      const rect = (
+                        e.currentTarget as HTMLLIElement
+                      ).getBoundingClientRect();
+                      const above =
+                        e.clientY - rect.top < rect.height / 2;
+                      setDropTarget({
+                        id: row.id,
+                        position: above ? "above" : "below",
+                      });
+                    }}
+                    onDragLeave={() => {
+                      // Only clear if the current target matches — otherwise a
+                      // sibling's onDragOver has already set the new target.
+                      setDropTarget((prev) =>
+                        prev && prev.id === row.id ? null : prev,
+                      );
+                    }}
+                    onDrop={(e) => {
+                      if (!draggingId) return;
+                      e.preventDefault();
+                      const position =
+                        dropTarget && dropTarget.id === row.id
+                          ? dropTarget.position
+                          : "above";
+                      void moveByDrop(draggingId, row.id, position);
+                      setDraggingId(null);
+                      setDropTarget(null);
+                    }}
+                    onDragEnd={() => {
+                      setDraggingId(null);
+                      setDropTarget(null);
+                    }}
+                    onEdit={() => setEditing(row)}
+                    onCancel={() => cancel(row)}
+                    onReorder={async (dir) => {
+                      await reorder(row, dir);
+                    }}
+                  />
+                );
+              });
+            })()}
           </ul>
         )}
         {err && (
@@ -323,10 +396,16 @@ export function QueueScreen() {
 function QueueRow({
   row,
   project,
+  queuedPos,
+  queuedTotal,
   canMoveUp,
   canMoveDown,
   draggingId,
   dropTarget,
+  kbdReorderActive,
+  cancelConfirming,
+  onToggleKbdReorder,
+  onExitKbdReorder,
   onDragStart,
   onDragOver,
   onDragLeave,
@@ -338,10 +417,16 @@ function QueueRow({
 }: {
   row: QueuedPrompt;
   project: Project | undefined;
+  queuedPos: number | null;
+  queuedTotal: number;
   canMoveUp: boolean;
   canMoveDown: boolean;
   draggingId: string | null;
   dropTarget: { id: string; position: "above" | "below" } | null;
+  kbdReorderActive: boolean;
+  cancelConfirming: boolean;
+  onToggleKbdReorder: () => void;
+  onExitKbdReorder: () => void;
   onDragStart: (e: React.DragEvent<HTMLLIElement>) => void;
   onDragOver: (e: React.DragEvent<HTMLLIElement>) => void;
   onDragLeave: (e: React.DragEvent<HTMLLIElement>) => void;
@@ -349,9 +434,10 @@ function QueueRow({
   onDragEnd: (e: React.DragEvent<HTMLLIElement>) => void;
   onEdit: () => void;
   onCancel: () => void;
-  onReorder: (direction: "up" | "down") => void;
+  onReorder: (direction: "up" | "down") => void | Promise<void>;
 }) {
   const navigate = useNavigate();
+  const liRef = useRef<HTMLLIElement | null>(null);
   const title =
     row.title && row.title.trim().length > 0
       ? row.title
@@ -364,22 +450,80 @@ function QueueRow({
   const indicatorBelow =
     dropTarget?.id === row.id && dropTarget.position === "below";
 
-  // Desktop uses native HTML5 drag; mobile keeps the up/down chevrons. We
-  // wire the draggable attribute + handlers only when the row is queued so
-  // finished rows can't be grabbed. The `hidden md:flex` grip handle makes
-  // the affordance visible on desktop without cluttering mobile.
+  // Keep focus on the moved row across reorders. The parent refetches the
+  // queue and the row re-mounts under the same id, so we re-focus on every
+  // render where reorder mode is armed and the element isn't already the
+  // active element. Cheap and avoids the usual "list moved, focus fell back
+  // to body" papercut that makes keyboard reorder unusable.
+  useEffect(() => {
+    if (!kbdReorderActive) return;
+    const el = liRef.current;
+    if (!el) return;
+    if (document.activeElement !== el) el.focus();
+  });
+
+  async function handleKbdReorder(direction: "up" | "down") {
+    if (!isDraggable) return;
+    if (direction === "up" && !canMoveUp) return;
+    if (direction === "down" && !canMoveDown) return;
+    await onReorder(direction);
+    // Re-assert focus after the list reshuffles. React reuses the li via
+    // the stable key, but blurs on some browsers during the reorder API
+    // round-trip — pull focus back.
+    requestAnimationFrame(() => {
+      liRef.current?.focus();
+    });
+  }
+
+  function onKeyDown(e: React.KeyboardEvent<HTMLLIElement>) {
+    // Only the row itself — not bubbled keystrokes from inner buttons.
+    if (e.target !== e.currentTarget) return;
+    if (!isDraggable) return;
+    if (e.key === " " || e.key === "Enter") {
+      e.preventDefault();
+      onToggleKbdReorder();
+      return;
+    }
+    if (e.key === "Escape" && kbdReorderActive) {
+      e.preventDefault();
+      onExitKbdReorder();
+      return;
+    }
+    if (kbdReorderActive && (e.key === "ArrowUp" || e.key === "ArrowDown")) {
+      e.preventDefault();
+      void handleKbdReorder(e.key === "ArrowUp" ? "up" : "down");
+    }
+  }
+
+  // Desktop uses native HTML5 drag for mouse users and Space/Arrow-key
+  // reorder for keyboard users. Mobile keeps the up/down chevron buttons
+  // as the accessible alternative for thumb reach. `role="button"` +
+  // `tabIndex={0}` on queued rows makes the row itself a reorder handle
+  // when focused; inner buttons still keep their own tab stops.
 
   return (
     <li
+      ref={liRef}
       draggable={isDraggable}
       onDragStart={onDragStart}
       onDragOver={onDragOver}
       onDragLeave={onDragLeave}
       onDrop={onDrop}
       onDragEnd={onDragEnd}
-      className={`relative px-4 md:px-6 py-3 border-b border-line hover:bg-paper/40 ${
-        isBeingDragged ? "opacity-40" : ""
-      }`}
+      onKeyDown={isDraggable ? onKeyDown : undefined}
+      tabIndex={isDraggable ? 0 : undefined}
+      role={isDraggable ? "button" : undefined}
+      aria-grabbed={isDraggable ? kbdReorderActive : undefined}
+      aria-label={
+        isDraggable && queuedPos != null
+          ? `Queue item ${queuedPos} of ${queuedTotal} — press space then arrow keys to reorder`
+          : undefined
+      }
+      className={`relative px-4 md:px-6 py-3 border-b border-line hover:bg-paper/40 focus:outline-none ${
+        kbdReorderActive
+          ? "ring-2 ring-klein ring-inset bg-klein/5"
+          : "focus-visible:ring-2 focus-visible:ring-klein/60 focus-visible:ring-inset"
+      } ${isBeingDragged ? "opacity-40" : ""}`}
     >
       {indicatorAbove && (
         <span
@@ -421,6 +565,14 @@ function QueueRow({
                 <span className="mono">worktree</span>
               </>
             )}
+            {kbdReorderActive && (
+              <>
+                <span>·</span>
+                <span className="mono text-klein">
+                  reorder mode — ↑/↓ to move, Esc to exit
+                </span>
+              </>
+            )}
           </div>
         </div>
         <div className="flex items-center gap-1.5 shrink-0">
@@ -448,15 +600,29 @@ function QueueRow({
                 onClick={onEdit}
                 className="h-8 w-8 rounded-[6px] border border-line flex items-center justify-center text-ink-soft hover:bg-canvas"
                 title="Edit"
+                aria-label="Edit queued item"
               >
                 <Pencil className="w-3.5 h-3.5" />
               </button>
               <button
                 onClick={onCancel}
-                className="h-8 w-8 rounded-[6px] border border-line flex items-center justify-center text-danger hover:bg-danger-wash"
-                title="Remove"
+                title={cancelConfirming ? "Click again to cancel" : "Remove"}
+                aria-label={
+                  cancelConfirming
+                    ? "Click again to cancel"
+                    : "Remove queued item"
+                }
+                className={`h-8 rounded-[6px] flex items-center justify-center text-[12px] ${
+                  cancelConfirming
+                    ? "px-2.5 bg-danger text-canvas border border-danger"
+                    : "w-8 border border-line text-danger hover:bg-danger-wash"
+                }`}
               >
-                <Trash2 className="w-3.5 h-3.5" />
+                {cancelConfirming ? (
+                  "Click again"
+                ) : (
+                  <Trash2 className="w-3.5 h-3.5" />
+                )}
               </button>
             </>
           ) : row.status === "running" ? (
@@ -471,9 +637,18 @@ function QueueRow({
               )}
               <button
                 onClick={onCancel}
-                className="h-8 px-2.5 rounded-[6px] border border-line text-danger text-[12px] hover:bg-danger-wash"
+                aria-label={
+                  cancelConfirming
+                    ? "Click again to cancel"
+                    : "Stop running prompt"
+                }
+                className={`h-8 px-2.5 rounded-[6px] text-[12px] ${
+                  cancelConfirming
+                    ? "bg-danger text-canvas border border-danger"
+                    : "border border-line text-danger hover:bg-danger-wash"
+                }`}
               >
-                Stop
+                {cancelConfirming ? "Click again to cancel" : "Stop"}
               </button>
             </>
           ) : (
@@ -535,6 +710,55 @@ function QueueEditor({
   const [worktree, setWorktree] = useState<boolean>(initial?.worktree ?? false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  // Autofocus target: the first editable input on mount. On new items that's
+  // the project select (or the title field if there's only one project).
+  // On edit that's the title input — the project select is frozen and the
+  // prompt is the primary action but a screen-reader user lands on the
+  // title so they can orient via "Edit queued item: <title>".
+  const cardRef = useRef<HTMLDivElement | null>(null);
+  const firstInputRef = useRef<
+    HTMLSelectElement | HTMLInputElement | null
+  >(null);
+
+  // Autofocus the first input once on mount. Running in an effect (rather
+  // than `autoFocus`) so it also works when the modal is re-used across
+  // create → edit transitions without an unmount.
+  useEffect(() => {
+    const t = setTimeout(() => firstInputRef.current?.focus(), 0);
+    return () => clearTimeout(t);
+  }, []);
+
+  // Escape closes. Focus trap: Tab cycles within the modal card so the
+  // user can't accidentally land on a background control (which is also
+  // inert visually under the z-40 scrim but still in the tab order).
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        onCancel();
+        return;
+      }
+      if (e.key !== "Tab") return;
+      const card = cardRef.current;
+      if (!card) return;
+      const focusables = card.querySelectorAll<HTMLElement>(
+        'a[href],button:not([disabled]),textarea:not([disabled]),input:not([disabled]):not([type="hidden"]),select:not([disabled]),[tabindex]:not([tabindex="-1"])',
+      );
+      if (focusables.length === 0) return;
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+      const active = document.activeElement as HTMLElement | null;
+      if (e.shiftKey && active === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && active === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onCancel]);
 
   async function save() {
     setErr(null);
@@ -569,19 +793,37 @@ function QueueEditor({
   }
 
   return (
-    <div className="fixed inset-0 z-40 bg-ink/30 flex items-end sm:items-center justify-center">
-      <div className="w-full sm:max-w-lg bg-canvas border-t sm:border border-line rounded-t-[20px] sm:rounded-[14px] shadow-lift flex flex-col max-h-[90vh]">
+    <div
+      className="fixed inset-0 z-40 bg-ink/30 flex items-end sm:items-center justify-center"
+      onMouseDown={(e) => {
+        // Click-outside-to-close: only when the mousedown originated on the
+        // scrim itself, not on a child (prevents a drag that ends outside
+        // the card from dismissing the editor).
+        if (e.target === e.currentTarget) onCancel();
+      }}
+    >
+      <div
+        ref={cardRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="queue-editor-title"
+        className="w-full sm:max-w-lg bg-canvas border-t sm:border border-line rounded-t-[20px] sm:rounded-[14px] shadow-lift flex flex-col max-h-[90vh]"
+      >
         <div className="flex items-center p-4 border-b border-line">
           <div>
             <div className="text-[11px] uppercase tracking-[0.14em] text-ink-muted">
               {initial ? "Edit queued item" : "New queued item"}
             </div>
-            <h2 className="display text-[1.25rem] leading-tight mt-0.5">
+            <h2
+              id="queue-editor-title"
+              className="display text-[1.25rem] leading-tight mt-0.5"
+            >
               {initial ? "Tweak before it runs." : "Compose a batch item."}
             </h2>
           </div>
           <button
             onClick={onCancel}
+            aria-label="Close editor"
             className="ml-auto h-8 w-8 rounded-[8px] border border-line flex items-center justify-center"
           >
             <X className="w-4 h-4" />
@@ -606,6 +848,12 @@ function QueueEditor({
               </div>
             ) : (
               <select
+                ref={(el) => {
+                  // Autofocus target on the create flow (no `initial`). On
+                  // edit, the project select isn't rendered so the ref
+                  // falls through to the title input below.
+                  if (!initial) firstInputRef.current = el;
+                }}
                 value={projectId}
                 onChange={(e) => setProjectId(e.target.value)}
                 className="w-full h-10 px-3 bg-canvas border border-line rounded-[8px] text-[14px]"
@@ -623,6 +871,11 @@ function QueueEditor({
               Title (optional)
             </div>
             <input
+              ref={(el) => {
+                // On the edit flow the project select is frozen, so the
+                // title input becomes the autofocus target.
+                if (initial) firstInputRef.current = el;
+              }}
               className="w-full h-10 px-3 bg-canvas border border-line rounded-[8px] text-[14px]"
               placeholder="Fix failing CI test"
               value={title}

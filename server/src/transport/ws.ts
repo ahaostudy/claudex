@@ -16,6 +16,23 @@ export interface WsDeps {
   jwtSecret: Uint8Array;
 }
 
+// ---- Outbound-path hardening knobs -------------------------------------------
+// Hard ceiling on tool_result `content` going over the wire. Large frames
+// (multi-MB grep output, file reads, image b64) are the #1 way a misbehaving
+// tool can OOM the Node process: every subscriber holds its own copy in
+// `ws.bufferedAmount` until the kernel drains it. We clip at 512KB chars
+// here — the full event still lands in `session_events`, so the client can
+// refetch via `/api/sessions/:id/events` to see the rest.
+export const TOOL_RESULT_WS_LIMIT = 512_000;
+// Per-connection backpressure budget. Above this, we skip frames for that
+// socket instead of queueing them in Node's internal ws send buffer.
+const BUFFERED_AMOUNT_LIMIT = 2 * 1024 * 1024;
+// Consecutive-skip threshold before we give up and eject the client. A
+// healthy phone/browser drains the buffer between every frame; ten frames
+// in a row blocked on a full buffer means the client is either gone or
+// fatally slow, and keeping the connection around just pins memory.
+const SLOW_CLIENT_EJECT_THRESHOLD = 10;
+
 /**
  * Registers /ws. One WebSocket per authenticated browser tab, multiplexed
  * across any number of sessions the client subscribes to.
@@ -31,6 +48,14 @@ export async function registerWsRoute(
     userId: string;
     subs: Set<string>;
     send: (frame: ServerFrame) => void;
+    // Consecutive frames we've skipped because `socket.bufferedAmount` was
+    // over `BUFFERED_AMOUNT_LIMIT`. Reset on any successful send; when it
+    // crosses `SLOW_CLIENT_EJECT_THRESHOLD` we close with 1013 Try Again
+    // Later and let the client reconnect from scratch.
+    slowCount: number;
+    ua: string;
+    remote: string;
+    closed: boolean;
   }
   // Map of sessionId → set of connections, so per-session broadcasts are
   // O(subscribers).
@@ -109,12 +134,53 @@ export async function registerWsRoute(
       }
 
       const subs = new Set<string>();
+      const remote = String(req.ip ?? "");
       const state: ConnState = {
         userId,
         subs,
+        slowCount: 0,
+        ua,
+        remote,
+        closed: false,
         send: (frame) => {
+          if (state.closed) return;
+          // Backpressure: a slow mobile client (weak cell signal, background
+          // tab) can't drain faster than we produce. Check Node's internal
+          // ws send buffer before enqueueing; if it's already over the per-
+          // connection budget, drop the frame for *this* socket (others on
+          // the same broadcast still get it) and count the skip. When we
+          // cross SLOW_CLIENT_EJECT_THRESHOLD consecutive skips the socket
+          // is effectively dead — close with 1013 so we stop pinning memory
+          // on its behalf and let it reconnect from scratch.
+          const buffered =
+            typeof (socket as { bufferedAmount?: number }).bufferedAmount ===
+            "number"
+              ? (socket as { bufferedAmount: number }).bufferedAmount
+              : 0;
+          if (buffered > BUFFERED_AMOUNT_LIMIT) {
+            state.slowCount += 1;
+            if (state.slowCount > SLOW_CLIENT_EJECT_THRESHOLD) {
+              state.closed = true;
+              req.log?.warn(
+                {
+                  ua: state.ua,
+                  remote: state.remote,
+                  buffered,
+                  slowCount: state.slowCount,
+                },
+                "ws ejecting slow client (bufferedAmount over budget)",
+              );
+              try {
+                socket.close(1013, "try again later");
+              } catch {
+                // already closing / torn down
+              }
+            }
+            return;
+          }
           try {
             socket.send(JSON.stringify(frame));
+            state.slowCount = 0;
           } catch {
             // socket torn down; ignore
           }
@@ -221,6 +287,7 @@ async function handleClientFrame(
         frame.sessionId,
         frame.content,
         frame.attachmentIds ?? [],
+        frame.echoId,
       );
       return;
     }
@@ -294,15 +361,38 @@ function runnerEventToFrame(
         name: event.name,
         input: event.input,
       };
-    case "tool_result":
+    case "tool_result": {
+      // Clip tool_result `content` to a per-frame size budget so a single
+      // multi-MB grep / file read / image b64 can't pin memory across every
+      // subscriber's send buffer. The DB row stays intact (manager persists
+      // the full payload before this mapper runs) — clients that see
+      // `truncated: true` can call `GET /api/sessions/:id/events` to fetch
+      // the full content. `content` is a string; we count chars, not bytes.
+      const full = event.content;
+      if (full.length > TOOL_RESULT_WS_LIMIT) {
+        const dropped = full.length - TOOL_RESULT_WS_LIMIT;
+        const clipped =
+          full.slice(0, TOOL_RESULT_WS_LIMIT) +
+          `\n\n… [truncated — ${dropped} chars dropped. Refetch transcript to see full content.]`;
+        return {
+          type: "tool_result",
+          sessionId,
+          seq: 0,
+          toolUseId: event.toolUseId,
+          content: clipped,
+          isError: event.isError,
+          truncated: true,
+        };
+      }
       return {
         type: "tool_result",
         sessionId,
         seq: 0,
         toolUseId: event.toolUseId,
-        content: event.content,
+        content: full,
         isError: event.isError,
       };
+    }
     case "permission_request":
       return {
         type: "permission_request",
@@ -335,6 +425,7 @@ function runnerEventToFrame(
         sessionId,
         content: event.text,
         createdAt: event.at,
+        ...(event.echoId !== undefined ? { echoId: event.echoId } : {}),
       };
     case "refresh_transcript":
       return {

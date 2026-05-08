@@ -42,6 +42,14 @@ export const ClientUserMessage = z.object({
   // event it just appended, and prefixes the outgoing SDK prompt with
   // `@<absolute-path>` tokens so the SDK's Read tool can pick the files up.
   attachmentIds: z.array(z.string()).optional(),
+  // Opaque nonce the client generates per-send so the originating tab can
+  // match the server's echoed `user_message` broadcast back to its local
+  // optimistic piece without relying on the fragile text+3s-timestamp
+  // heuristic. The server relays this value back verbatim; other tabs have
+  // no local piece with this echoId and simply insert the broadcast as a
+  // fresh piece (their match falls back to the legacy heuristic or nothing).
+  // Omitted by legacy clients; server tolerates absence.
+  echoId: z.string().optional(),
 });
 
 export const ClientInterrupt = z.object({
@@ -133,6 +141,11 @@ export const ServerToolResult = z.object({
   toolUseId: z.string(),
   content: z.string(),
   isError: z.boolean().default(false),
+  // Set when the WS mapper clipped `content` to the per-frame size budget
+  // (see `TOOL_RESULT_WS_LIMIT` in `server/src/transport/ws.ts`). The full
+  // payload is still persisted in `session_events` — clients can refetch
+  // via `GET /api/sessions/:id/events` to see the untruncated content.
+  truncated: z.boolean().optional(),
 });
 
 export const ServerPermissionRequest = z.object({
@@ -175,6 +188,12 @@ export const ServerUserMessage = z.object({
   sessionId: z.string(),
   content: z.string(),
   createdAt: z.string(),
+  // Relayed verbatim from the originating `ClientUserMessage.echoId`. The
+  // originating tab matches its optimistic piece against this nonce instead
+  // of the legacy text+3s heuristic. Other tabs won't have a local piece
+  // with a matching echoId and insert a fresh piece. Undefined for messages
+  // sent by legacy clients that didn't supply an echoId.
+  echoId: z.string().optional(),
 });
 
 // Broadcast when the queued_prompts table changes in any way (create, patch,

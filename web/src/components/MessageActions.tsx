@@ -12,7 +12,7 @@
 // awkward (a tool_use chip is a summary, not a message; permission_request is
 // interactive).
 // ---------------------------------------------------------------------------
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Copy, FileCode, GitFork, Link as LinkIcon } from "lucide-react";
 import { cn } from "@/lib/cn";
@@ -113,6 +113,17 @@ export function MessageActions({
 }: MessageActionsProps): JSX.Element {
   const [forking, setForking] = useState(false);
   const navigate = useNavigate();
+  // Track mount so an in-flight fork request can't setState after unmount
+  // (e.g. user navigates away mid-request). React will warn, and more
+  // importantly, a stale `forking=true` could leak into the next instance
+  // if this component were ever kept alive across session switches.
+  const mounted = useRef(true);
+  useEffect(
+    () => () => {
+      mounted.current = false;
+    },
+    [],
+  );
 
   const done = () => {
     onActionComplete?.();
@@ -155,7 +166,7 @@ export function MessageActions({
       );
       done();
     } finally {
-      setForking(false);
+      if (mounted.current) setForking(false);
     }
   };
 

@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { Navigate, Routes, Route, useLocation } from "react-router-dom";
+import { Navigate, Routes, Route, useLocation, useParams } from "react-router-dom";
 import { useAuth } from "@/state/auth";
 import { LoginScreen } from "@/screens/Login";
 import { HomeScreen } from "@/screens/Home";
@@ -12,6 +12,16 @@ import { AgentsScreen } from "@/screens/Agents";
 import { AlertsScreen } from "@/screens/Alerts";
 import { UsagePage } from "@/screens/UsagePage";
 import { KeyboardHelp } from "@/components/KeyboardHelp";
+
+// Force a full remount of <ChatScreen /> whenever the route :id changes.
+// Without this, React reuses the component instance across
+// `/session/:idA` → `/session/:idB` and every piece of local state
+// (revealedSeq, editingSeq, ToolCallBlock expansion, forking, etc.)
+// leaks into the next session. Keying on `id` guarantees a clean slate.
+function ChatScreenWithKey() {
+  const { id } = useParams();
+  return <ChatScreen key={id} />;
+}
 
 function Guard({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
@@ -89,7 +99,7 @@ export default function App() {
         path="/session/:id"
         element={
           <Guard>
-            <ChatScreen />
+            <ChatScreenWithKey />
           </Guard>
         }
       />

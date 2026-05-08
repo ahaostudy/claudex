@@ -31,6 +31,13 @@ export type UIPiece =
       // the matching broadcast, at which point we flip the flag rather
       // than push a second copy.
       serverAcked?: boolean;
+      // Opaque nonce generated per-send. Stamped onto the optimistic piece
+      // AND the outgoing WS `user_message` frame, and relayed back on the
+      // server's echoed broadcast. The reconciliation handler matches on
+      // echoId first (stable, collision-free) and only falls back to the
+      // legacy text+3s heuristic for echoes that don't carry one (e.g.
+      // messages sent by another tab / legacy client).
+      echoId?: string;
       // Shallow list of attachment metadata from the original user_message
       // payload. Populated from persisted events only — optimistic echoes
       // skip it. Drives the "edit disabled because attachments" hint in
@@ -138,12 +145,21 @@ interface SessionState {
   // Current transcript view mode — session-scoped in spirit but not yet
   // persisted per-session or to localStorage (intentional for first pass).
   viewMode: ViewMode;
+  // The session the user is currently looking at (Chat screen). Set by
+  // `subscribeSession` (called from Chat.tsx on mount) and cleared by
+  // `clearActiveSession` (called on unmount). Used by the WS `acked`
+  // handler so, on reconnect, we can re-`subscribe` to the active
+  // session AND pull any events that landed during the downtime via
+  // `refetchTail`. Nullable — screens that don't own a single session
+  // (Home, Settings) leave it null.
+  activeSessionId: string | null;
   init: () => void;
   refreshSessions: () => Promise<void>;
   ensureTranscript: (sessionId: string) => Promise<void>;
   loadOlderTranscript: (sessionId: string) => Promise<void>;
   refetchTail: (sessionId: string) => Promise<void>;
   subscribeSession: (sessionId: string) => void;
+  clearActiveSession: (sessionId: string) => void;
   sendUserMessage: (
     sessionId: string,
     text: string,
@@ -388,6 +404,7 @@ export const useSessions = create<SessionState>((set, get) => {
   transcriptMeta: {},
   loadingSessions: false,
   viewMode: "normal",
+  activeSessionId: null,
 
   setViewMode(mode) {
     set({ viewMode: mode });
@@ -400,6 +417,20 @@ export const useSessions = create<SessionState>((set, get) => {
     const client = createWsClient(url);
     client.onState((diag) => {
       set({ wsDiag: diag, connected: diag.phase === "acked" });
+    });
+    // Recovery hook: every time the socket reaches `acked` (initial connect
+    // AND every reconnect), re-subscribe the active session and refetch its
+    // event tail. This is how we recover frames dropped while the socket
+    // was down — the server paginates `/events` cheaply, so pulling the
+    // last 200 on every ack is fine. Testing deterministically would need
+    // vi fake timers + a mock socket; skipped intentionally.
+    client.onAcked(() => {
+      const sid = get().activeSessionId;
+      if (!sid) return;
+      // Resubscribe first so any frames arriving mid-refetch still land in
+      // the store; refetchTail's merge handles the overlap.
+      client.send({ type: "subscribe", sessionId: sid } satisfies ClientFrame);
+      void get().refetchTail(sid);
     });
     client.subscribe((frame) => {
       // Connection liveness tracked via hello_ack
@@ -423,33 +454,56 @@ export const useSessions = create<SessionState>((set, get) => {
         }
       }
       // Multi-tab: a user_message broadcast can land in any subscribed tab —
-      // including the one that sent it. De-dupe rule: if an existing user
-      // piece with the same text and a close-enough `at` is already in the
-      // transcript (either a local optimistic echo or a prior persisted copy
-      // we loaded from /events), upgrade it to `serverAcked=true` rather than
-      // push a duplicate. Otherwise append a fresh piece.
+      // including the one that sent it. De-dupe rule (in order):
+      //   1. If the broadcast carries an `echoId`, try to find a local user
+      //      piece with the same `echoId` in this session — that's the
+      //      originating tab's own optimistic echo. Upgrade it to
+      //      `serverAcked=true` and stamp the authoritative `createdAt`.
+      //   2. Otherwise fall back to the legacy heuristic — match on content
+      //      and a 3s timestamp window. This covers broadcasts from OTHER
+      //      tabs (which carry an echoId this tab didn't generate, so the
+      //      nonce match misses) and legacy clients that didn't stamp one
+      //      at all — those are simply inserted as fresh pieces.
+      //   3. Insert a fresh piece otherwise.
       if (frame.type === "user_message") {
         const sid = frame.sessionId;
         const ts = Date.parse(frame.createdAt) || Date.now();
+        const frameEchoId = frame.echoId;
         set((s) => {
           const list = s.transcripts[sid] ?? [];
-          // Scan newest → oldest; match on content first, then ensure the
-          // timestamps are within 3s (covers optimistic echoes whose `at` is
-          // generated client-side and won't be identical to the server's).
           let matchIdx = -1;
-          for (let i = list.length - 1; i >= 0; i--) {
-            const piece = list[i];
-            if (piece.kind !== "user") continue;
-            if (piece.text !== frame.content) continue;
-            if (piece.serverAcked) {
-              // Already reconciled for an earlier broadcast; don't flip again.
-              matchIdx = i;
-              break;
+          // 1. Stable echoId match — only if the frame and a local piece
+          //    both carry the same nonce. Other tabs have no such piece,
+          //    so this deliberately fails for their broadcasts.
+          if (frameEchoId) {
+            for (let i = list.length - 1; i >= 0; i--) {
+              const piece = list[i];
+              if (piece.kind !== "user") continue;
+              if (piece.echoId && piece.echoId === frameEchoId) {
+                matchIdx = i;
+                break;
+              }
             }
-            const pTs = Date.parse(piece.at) || 0;
-            if (Math.abs(ts - pTs) <= 3000) {
-              matchIdx = i;
-              break;
+          }
+          // 2. Legacy text+3s heuristic — only consulted when the echoId
+          //    match failed. Handles broadcasts from legacy clients.
+          if (matchIdx === -1) {
+            for (let i = list.length - 1; i >= 0; i--) {
+              const piece = list[i];
+              if (piece.kind !== "user") continue;
+              if (piece.text !== frame.content) continue;
+              // Skip pieces that already carry a different echoId — they
+              // belong to a distinct local send, not this broadcast.
+              if (piece.echoId && piece.echoId !== frameEchoId) continue;
+              if (piece.serverAcked) {
+                matchIdx = i;
+                break;
+              }
+              const pTs = Date.parse(piece.at) || 0;
+              if (Math.abs(ts - pTs) <= 3000) {
+                matchIdx = i;
+                break;
+              }
             }
           }
           if (matchIdx !== -1) {
@@ -701,11 +755,31 @@ export const useSessions = create<SessionState>((set, get) => {
   },
 
   subscribeSession(sessionId) {
+    // Chat.tsx calls this on mount. Treat it as a declaration of "this is the
+    // session the user is looking at" — so on WS reconnect we can resubscribe
+    // and refetch its tail automatically. If the user navigates from one
+    // chat to another, the newer subscribe wins. `clearActiveSession` resets
+    // to null on Chat unmount.
+    set({ activeSessionId: sessionId });
     get().ws?.send({ type: "subscribe", sessionId } satisfies ClientFrame);
+  },
+
+  clearActiveSession(sessionId) {
+    // Only clear if we still think this session is active — guards against a
+    // stale unmount racing a fast nav (A mount → B mount → A unmount) from
+    // wiping B's activeSessionId.
+    if (get().activeSessionId === sessionId) {
+      set({ activeSessionId: null });
+    }
   },
 
   sendUserMessage(sessionId, text, attachmentIds) {
     const pendingId = `pending-${Date.now()}`;
+    // Per-send nonce for stable de-dupe against the server's echoed
+    // `user_message` broadcast. `crypto.randomUUID` is available in every
+    // browser we target (Safari 15.4+, Chrome 92+) and already shipped in
+    // the rest of the codebase — no extra dep.
+    const echoId = crypto.randomUUID();
     // Optimistic local echo + a pending placeholder so the user sees that
     // claude received the message and is thinking. We intentionally do NOT
     // wait for the first WS frame before showing this — the goal is to fill
@@ -721,6 +795,7 @@ export const useSessions = create<SessionState>((set, get) => {
             text,
             at: new Date().toISOString(),
             serverAcked: false,
+            echoId,
           },
           {
             kind: "pending",
@@ -736,6 +811,7 @@ export const useSessions = create<SessionState>((set, get) => {
       type: "user_message",
       sessionId,
       content: text,
+      echoId,
       ...(attachmentIds && attachmentIds.length > 0
         ? { attachmentIds }
         : {}),

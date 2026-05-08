@@ -458,6 +458,31 @@ describe("WebSocket transport", () => {
     expect(Number.isNaN(Date.parse((fromA as any).createdAt))).toBe(false);
   });
 
+  it("relays echoId verbatim on the user_message broadcast", async () => {
+    // Clients attach a per-send nonce so the originating tab can match the
+    // echoed broadcast to its local optimistic piece without relying on the
+    // fragile text+3s heuristic. The server is required to round-trip the
+    // value unchanged.
+    const ctx = await harness();
+    disposers.push(ctx.cleanup);
+    const ws = await openSocket(ctx.url, ctx.cookie);
+    disposers.push(() => ws.close());
+    await ws.waitFor((f) => f.type === "hello_ack");
+
+    ws.send({ type: "subscribe", sessionId: ctx.sessionId });
+    const echoId = "echo-abc-123";
+    ws.send({
+      type: "user_message",
+      sessionId: ctx.sessionId,
+      content: "ping with nonce",
+      echoId,
+    });
+
+    const broadcast = await ws.waitFor((f) => f.type === "user_message");
+    expect((broadcast as any).echoId).toBe(echoId);
+    expect((broadcast as any).content).toBe("ping with nonce");
+  });
+
   it("delivers cross-session frames (session_update, user_message) to tabs that never subscribed", async () => {
     // Home/list screens need live status dots without pinning a specific
     // sessionId. Every authed socket lands in the global sessions channel
@@ -533,5 +558,205 @@ describe("WebSocket transport", () => {
     });
     await new Promise((r) => setTimeout(r, 100));
     expect(ctx.hub.runners[0].sent).toContain("still here");
+  });
+
+  it("truncates large tool_result frames on the wire but keeps the DB row intact", async () => {
+    const ctx = await harness();
+    disposers.push(ctx.cleanup);
+    const ws = await openSocket(ctx.url, ctx.cookie);
+    disposers.push(() => ws.close());
+    await ws.waitFor((f) => f.type === "hello_ack");
+
+    ws.send({ type: "subscribe", sessionId: ctx.sessionId });
+    ws.send({
+      type: "user_message",
+      sessionId: ctx.sessionId,
+      content: "run a big tool",
+    });
+    await new Promise((r) => setTimeout(r, 100));
+
+    const runner = ctx.hub.runners[0];
+    // 600KB payload — well above the 512KB (512_000 char) WS limit.
+    const big = "x".repeat(600_000);
+    runner.emit({
+      type: "tool_result",
+      toolUseId: "tu-big",
+      content: big,
+      isError: false,
+    });
+
+    const frame = (await ws.waitFor(
+      (f) => f.type === "tool_result",
+    )) as Extract<ServerFrame, { type: "tool_result" }>;
+    expect(frame.truncated).toBe(true);
+    // Exactly the first 512_000 chars of original content, plus the suffix.
+    expect(frame.content.startsWith("x".repeat(512_000))).toBe(true);
+    expect(frame.content.length).toBeGreaterThan(512_000);
+    expect(frame.content).toContain("truncated");
+    expect(frame.content).toContain(`${600_000 - 512_000} chars dropped`);
+
+    // DB persistence is NOT truncated. The manager persists the full payload
+    // before the WS mapper sees it, so `GET /events` returns the untouched
+    // 600KB content for refetch.
+    const res = await ctx.app.inject({
+      method: "GET",
+      url: `/api/sessions/${ctx.sessionId}/events`,
+      headers: { cookie: ctx.cookie },
+    });
+    expect(res.statusCode).toBe(200);
+    const events = res.json().events as Array<{
+      kind: string;
+      payload: { content?: string; toolUseId?: string };
+    }>;
+    const tr = events.find(
+      (e) => e.kind === "tool_result" && e.payload.toolUseId === "tu-big",
+    );
+    expect(tr).toBeDefined();
+    expect(tr!.payload.content).toBe(big);
+    expect(tr!.payload.content!.length).toBe(600_000);
+  });
+
+  it("small tool_result frames are not flagged truncated", async () => {
+    const ctx = await harness();
+    disposers.push(ctx.cleanup);
+    const ws = await openSocket(ctx.url, ctx.cookie);
+    disposers.push(() => ws.close());
+    await ws.waitFor((f) => f.type === "hello_ack");
+
+    ws.send({ type: "subscribe", sessionId: ctx.sessionId });
+    ws.send({
+      type: "user_message",
+      sessionId: ctx.sessionId,
+      content: "small tool",
+    });
+    await new Promise((r) => setTimeout(r, 100));
+
+    const runner = ctx.hub.runners[0];
+    const small = "hello world";
+    runner.emit({
+      type: "tool_result",
+      toolUseId: "tu-small",
+      content: small,
+      isError: false,
+    });
+
+    const frame = (await ws.waitFor(
+      (f) => f.type === "tool_result",
+    )) as Extract<ServerFrame, { type: "tool_result" }>;
+    expect(frame.content).toBe(small);
+    expect(frame.truncated).toBeUndefined();
+  });
+
+  it("skips frames for a slow socket with bufferedAmount over budget", async () => {
+    const ctx = await harness();
+    disposers.push(ctx.cleanup);
+    const ws = await openSocket(ctx.url, ctx.cookie);
+    disposers.push(() => ws.close());
+    await ws.waitFor((f) => f.type === "hello_ack");
+
+    ws.send({ type: "subscribe", sessionId: ctx.sessionId });
+    ws.send({
+      type: "user_message",
+      sessionId: ctx.sessionId,
+      content: "start",
+    });
+    await new Promise((r) => setTimeout(r, 100));
+
+    // Find this socket on the server side and pin its bufferedAmount above
+    // the 2MB budget. Every authed socket lives on the @fastify/websocket
+    // registry via `app.websocketServer.clients`. We stub the getter on the
+    // single active socket (there's only one from `openSocket`).
+    const clients = (ctx.app as any).websocketServer?.clients as
+      | Set<any>
+      | undefined;
+    expect(clients?.size ?? 0).toBe(1);
+    const [serverSock] = [...(clients ?? [])];
+    Object.defineProperty(serverSock, "bufferedAmount", {
+      configurable: true,
+      get: () => 3 * 1024 * 1024,
+    });
+
+    // Count frames already received; the next emit should NOT deliver an
+    // assistant_text_delta because the socket looks slow.
+    const beforeLen = ws.frames.length;
+    const runner = ctx.hub.runners[0];
+    runner.emit({
+      type: "assistant_text",
+      messageId: "m1",
+      text: "should be skipped",
+      done: true,
+    });
+    await new Promise((r) => setTimeout(r, 50));
+    // No new frame should have arrived for this socket.
+    const delta = ws.frames
+      .slice(beforeLen)
+      .find((f) => f.type === "assistant_text_delta");
+    expect(delta).toBeUndefined();
+  });
+
+  it("ejects a persistently-slow socket after too many skipped frames", async () => {
+    const ctx = await harness();
+    disposers.push(ctx.cleanup);
+    const ws = await openSocket(ctx.url, ctx.cookie);
+    // NOTE: we intentionally do not push ws.close() as a disposer — the
+    // server ejects the socket during the test, so by the time the disposer
+    // would run the client socket is already CLOSED and `ws.close()`'s
+    // internal `once("close", res)` would never fire.
+    await ws.waitFor((f) => f.type === "hello_ack");
+
+    ws.send({ type: "subscribe", sessionId: ctx.sessionId });
+    ws.send({
+      type: "user_message",
+      sessionId: ctx.sessionId,
+      content: "start",
+    });
+    await new Promise((r) => setTimeout(r, 100));
+
+    const clients = (ctx.app as any).websocketServer?.clients as
+      | Set<any>
+      | undefined;
+    const [serverSock] = [...(clients ?? [])];
+    // Keep the stub lifted after eject so cleanup (app.close → terminate)
+    // doesn't stall waiting for a permanently-stuck buffer to drain.
+    let stubOn = true;
+    Object.defineProperty(serverSock, "bufferedAmount", {
+      configurable: true,
+      get: () => (stubOn ? 3 * 1024 * 1024 : 0),
+    });
+
+    // Wait for the close event on the client socket.
+    const closed = new Promise<{ code: number; reason: string }>((resolve) => {
+      ws.socket.once("close", (code: number, reason: Buffer) =>
+        resolve({ code, reason: reason.toString() }),
+      );
+    });
+
+    // Push 12 frames — more than SLOW_CLIENT_EJECT_THRESHOLD (10).
+    const runner = ctx.hub.runners[0];
+    for (let i = 0; i < 12; i++) {
+      runner.emit({
+        type: "assistant_text",
+        messageId: `m-${i}`,
+        text: `t-${i}`,
+        done: true,
+      });
+    }
+
+    const { code } = await Promise.race([
+      closed,
+      new Promise<{ code: number; reason: string }>((_, rej) =>
+        setTimeout(() => rej(new Error("eject timeout")), 2000),
+      ),
+    ]);
+    expect(code).toBe(1013);
+    // Release the stub + hard-terminate the lingering server socket so
+    // app.close() doesn't stall waiting for a permanently-stuffed buffer
+    // to drain during the afterEach disposer unwinding.
+    stubOn = false;
+    try {
+      serverSock.terminate?.();
+    } catch {
+      // already torn down
+    }
   });
 });
