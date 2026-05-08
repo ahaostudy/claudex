@@ -9,6 +9,7 @@ import {
   Send,
   Settings2,
   Slash,
+  Square,
 } from "lucide-react";
 import { useSessions } from "@/state/sessions";
 import { api } from "@/api/client";
@@ -43,6 +44,8 @@ export function ChatScreen() {
     ensureTranscript,
     subscribeSession,
     sendUserMessage,
+    interruptSession,
+    ensurePendingFor,
     resolvePermission,
     viewMode,
     setViewMode,
@@ -54,10 +57,20 @@ export function ChatScreen() {
 
   useEffect(() => {
     if (!id) return;
-    api.getSession(id).then((r) => setSession(r.session));
+    api.getSession(id).then((r) => {
+      setSession(r.session);
+      // Refresh-time: if the server says this session is currently running,
+      // drop an inline "claude is processing" marker into the transcript so
+      // the user sees something's in flight. First real WS frame (or a
+      // session_update back to idle) will clear it. See state/sessions.ts
+      // for the lifecycle.
+      if (r.session.status === "running" || r.session.status === "awaiting") {
+        ensurePendingFor(id);
+      }
+    });
     ensureTranscript(id);
     subscribeSession(id);
-  }, [id, ensureTranscript, subscribeSession]);
+  }, [id, ensureTranscript, subscribeSession, ensurePendingFor]);
 
   // Resolve the session's project so the @-mention sheet can default to its
   // root and we can insert relative paths. Best-effort — if it fails the
@@ -140,6 +153,16 @@ export function ChatScreen() {
           disabled={!session}
           onClick={() => setShowUsage(true)}
         />
+        {(session?.status === "running" || session?.status === "awaiting") && (
+          <button
+            onClick={() => id && interruptSession(id)}
+            title="Stop claude"
+            aria-label="Stop claude"
+            className="h-8 w-8 rounded-[8px] border border-danger/40 bg-danger-wash text-danger flex items-center justify-center hover:bg-danger-wash/80"
+          >
+            <Square className="w-4 h-4" fill="currentColor" />
+          </button>
+        )}
         <button
           onClick={() => setShowSideChat(true)}
           disabled={!session}
@@ -182,6 +205,9 @@ export function ChatScreen() {
 
       <Composer
         project={project}
+        busy={
+          session?.status === "running" || session?.status === "awaiting"
+        }
         onSend={(text) => {
           if (!text.trim() || !id) return;
           sendUserMessage(id, text);
@@ -285,7 +311,63 @@ function Piece({
           onDecide={onDecide}
         />
       );
+    case "pending":
+      return <PendingBlock stalled={p.stalled} />;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Pending placeholder — the "claude is thinking" inline marker.
+//
+// The Agent SDK doesn't surface partial message text: a reply lands all-at-once
+// after `message_stop`. This block fills the gap between user send and the
+// first substantive frame so the user can tell the request is alive.
+// Mentions the limitation in a second line so power users understand why
+// the reply doesn't stream word-by-word. See memory/project_streaming_deferred.md.
+// ---------------------------------------------------------------------------
+function PendingBlock({ stalled }: { stalled: boolean }) {
+  return (
+    <div className="max-w-[72ch]">
+      <div className="flex items-center gap-2 mb-1.5">
+        <svg viewBox="0 0 32 32" className="w-3.5 h-3.5">
+          <path d="M9 22 L16 8 L23 22 Z" fill="#cc785c" />
+          <circle cx="16" cy="18" r="2.2" fill="#faf9f5" />
+        </svg>
+        <span className="mono text-[11px] text-ink-muted">claude</span>
+      </div>
+      {stalled ? (
+        <div
+          className={cn(
+            "mono text-[12.5px] text-danger pl-3 border-l-2 border-danger/60",
+          )}
+          role="status"
+        >
+          no response in 30s — the request may be stuck. you can keep typing
+          or hit Stop above to cancel.
+        </div>
+      ) : (
+        <div className="pl-3 border-l-2 border-line">
+          <div
+            className={cn(
+              "mono text-[12.5px] text-ink-muted flex items-center gap-1.5",
+            )}
+            aria-live="polite"
+          >
+            <span>Thinking</span>
+            <span className="inline-flex gap-0.5">
+              <span className="pending-dot" />
+              <span className="pending-dot" style={{ animationDelay: "0.15s" }} />
+              <span className="pending-dot" style={{ animationDelay: "0.3s" }} />
+            </span>
+          </div>
+          <div className="text-[11px] text-ink-faint mt-1 italic">
+            (claude won't stream this reply — the SDK ships each message whole,
+            so expect it to land all at once.)
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -480,9 +562,11 @@ type Trigger =
 
 function Composer({
   project,
+  busy,
   onSend,
 }: {
   project: Project | null;
+  busy: boolean;
   onSend: (text: string) => void;
 }) {
   const [text, setText] = useState("");
@@ -714,7 +798,11 @@ function Composer({
               }
             }}
             rows={1}
-            placeholder="Type a message…  try / or @"
+            placeholder={
+              busy
+                ? "Type while claude thinks — will queue…"
+                : "Type a message…  try / or @"
+            }
             className="flex-1 bg-transparent outline-none text-[15px] resize-none min-h-[24px] max-h-40 py-1 px-2"
           />
           <div className="flex items-center gap-1">

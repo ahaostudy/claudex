@@ -12,7 +12,7 @@ Three status tiers:
 - ⬜ **Planned** — listed so nobody re-plans it from scratch, but not started.
 
 Last updated: see the git log of this file. Current revision lists **78 shipped
-behaviors** and **192 backend tests**.
+behaviors** and **193 backend tests**.
 
 ---
 
@@ -164,6 +164,9 @@ behaviors** and **192 backend tests**.
 | ✅ | Chat screen: user messages as ink bubbles, assistant as flowing prose, thinking in an italic left-rule block, tool_use chip with truncated input summary, tool_result in a mono block (error-tinted when `isError`) | `web/src/screens/Chat.tsx` |
 | ✅ | Permission card in-thread with Allow-once / Always / Deny buttons, diff preview for Edit/Write/MultiEdit | same |
 | ✅ | Optimistic echo of user messages (shown before the WS ack) | `web/src/state/sessions.ts` |
+| ✅ | **Inline "claude is thinking" placeholder** — after each user send the transcript gets a `pending` UI piece with three bouncing dots so the user can tell the request is alive. Cleared by the first substantive WS frame (`assistant_text_delta` / `thinking` / `tool_use` / `tool_result` / `permission_request` / `turn_end` / `error`) or a `session_update` back to `idle` / `error` / `archived`. Flips to a red "no response in 30s" notice if nothing arrives in 30s — but doesn't block the user from typing or hitting Stop. Refresh-resilient: entering a Chat page whose `session.status` is `running` or `awaiting` seeds the same placeholder without waiting for a user send. Paired with a second-line note that the reply won't stream word-by-word (SDK limitation, see `memory/project_streaming_deferred.md`) | `web/src/screens/Chat.tsx` (`PendingBlock`), `web/src/state/sessions.ts` |
+| ✅ | **Stop button in the Chat header** — a red square icon appears whenever `session.status` is `running` or `awaiting`. Sends a `ClientInterrupt` WS frame which the server already routes to `SessionManager.interrupt` → `AgentRunner.interrupt` → `Query.interrupt` on the SDK | `web/src/screens/Chat.tsx`, `server/src/transport/ws.ts`, `server/src/sessions/agent-runner.ts` |
+| ✅ | **Queue-while-busy composer** — the send button only requires non-empty text (never gated on session state). Messages typed while claude is still processing are handed to the SDK's async-iterable input queue and processed after the current turn; the placeholder in the textarea reads "Type while claude thinks — will queue…" to set expectations | `web/src/screens/Chat.tsx`, `server/src/sessions/agent-runner.ts` |
 | ✅ | Transcript is reconstructed from both persisted events (initial load via `/api/sessions/:id/events`) and live WS frames, unified into a single UI piece list | same |
 | ✅ | Sign out clears the session cookie and returns to the login screen | `web/src/screens/Home.tsx` |
 | ✅ | **Composer pickers** — typing `@` after whitespace pops a file-mention sheet (reuses `/api/browse`, defaults to the session's project root, inserts `@<relative>` or `@<abs>` fallback outside the root); typing `/` at the start of a line pops a slash-command sheet populated at mount from `GET /api/slash-commands?projectId=<id>` — merges the CLI built-ins, the user's `~/.claude/commands/*.md`, and the active project's `.claude/commands/*.md`, each entry tagged with its `kind` shown as a badge. Network/auth failure falls back to a tiny built-in list (`help / clear / compact / review`) so the picker is never empty. Both sheets share the s-09 bottom-sheet language. Side-rail icons also open the pickers explicitly | `web/src/screens/Chat.tsx`, `web/src/components/SlashCommandSheet.tsx`, `web/src/components/FileMentionSheet.tsx`, `web/src/lib/slash-commands.ts`, `web/src/api/client.ts` |
@@ -178,7 +181,7 @@ behaviors** and **192 backend tests**.
 
 | Status | Feature | Where |
 |---|---|---|
-| ✅ | 192 backend tests, vitest, all green | `server/tests/` |
+| ✅ | 193 backend tests, vitest, all green | `server/tests/` |
 | ✅ | Bind-safety, DB migration + FK cascade | `tests/config.test.ts`, `tests/db.test.ts` |
 | ✅ | Password/TOTP/JWT edge cases (tampering, cross-secret, wrong audience, expiry, file-mode 0600) | `tests/auth.test.ts` |
 | ✅ | Auth HTTP routes including peek-retry TOTP, replay rejection, cookie attributes, user enumeration parity | `tests/auth-routes.test.ts` |
@@ -188,7 +191,7 @@ behaviors** and **192 backend tests**.
 | ✅ | Session REST routes (path validation, duplicate path 409, archive, events, project rename + delete with sessions-FK guard, PATCH session title/model/mode with live-runner mode propagation, archived 409, empty-body 400, running-model warning, grants list + revoke with scope + 404) | `tests/session-routes.test.ts` |
 | ✅ | Filesystem browse routes: auth gate, abs-path validation, 404 / 403 error paths, sort + flags, parent-null at root, symlinks are not followed | `tests/browse.test.ts` |
 | ✅ | Slash-commands scanner + route: auth gate, built-ins-only when `~/.claude/commands` missing, user-command parsing (frontmatter / heading / plain line / null), project-command opt-in via `projectId`, unknown `projectId` soft-ignored. Uses an injected `userClaudeDir` tmp to avoid touching the host user's real `~/.claude/` | `tests/slash-commands.test.ts` |
-| ✅ | WebSocket end-to-end over a real port (auth gate, hello_ack, broadcast isolation, permission decision round-trip, bad-frame recovery) | `tests/ws.test.ts` |
+| ✅ | WebSocket end-to-end over a real port (auth gate, hello_ack, broadcast isolation, permission decision round-trip, interrupt round-trip, bad-frame recovery) | `tests/ws.test.ts` |
 | ✅ | Tool grants: signature conventions, session-vs-global scope, idempotent insert, revoke, FK cascade | `tests/grants.test.ts` |
 | ✅ | Permission summary content for every supported tool + missing-field edge cases | `tests/permission-summary.test.ts` |
 | ✅ | Static web serving: index at /, immutable asset cache, SPA fallback for GET, /api 404s stay JSON, non-GET doesn't fall back, /api/health works alongside static | `tests/static.test.ts` |

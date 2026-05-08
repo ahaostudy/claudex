@@ -392,6 +392,29 @@ describe("WebSocket transport", () => {
     expect(runner.permissions).toEqual([{ id: "tu-1", behavior: "allow" }]);
   });
 
+  it("interrupt frame propagates to the runner", async () => {
+    const ctx = await harness();
+    disposers.push(ctx.cleanup);
+    const ws = await openSocket(ctx.url, ctx.cookie);
+    disposers.push(() => ws.close());
+    await ws.waitFor((f) => f.type === "hello_ack");
+
+    ws.send({ type: "subscribe", sessionId: ctx.sessionId });
+    // Kick the manager so a runner actually gets spawned — interrupt() on a
+    // manager with no attached runner is a no-op.
+    ws.send({
+      type: "user_message",
+      sessionId: ctx.sessionId,
+      content: "start working",
+    });
+    await new Promise((r) => setTimeout(r, 100));
+    expect(ctx.hub.runners).toHaveLength(1);
+
+    ws.send({ type: "interrupt", sessionId: ctx.sessionId });
+    await new Promise((r) => setTimeout(r, 100));
+    expect(ctx.hub.runners[0].interrupted).toBeGreaterThanOrEqual(1);
+  });
+
   it("rejects malformed frames with an error response, socket stays open", async () => {
     const ctx = await harness();
     disposers.push(ctx.cleanup);

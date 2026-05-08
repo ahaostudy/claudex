@@ -34,7 +34,20 @@ export type UIPiece =
       toolName: string;
       input: Record<string, unknown>;
       summary: string;
-    };
+    }
+  // `pending` is a UI-only piece (never persisted, never comes off the wire).
+  // Inserted right after a user_message echo to give the user immediate
+  // feedback that claude is processing. Removed as soon as any substantive
+  // runner event lands (assistant_text, thinking, tool_use, tool_result,
+  // permission_request, turn_end, error). If nothing arrives within ~30s the
+  // piece flips into a "stalled" red state but stays on screen so the user
+  // knows something's off without blocking further input.
+  //
+  // NB: we explicitly do NOT try to synthesize partial assistant text here.
+  // The Agent SDK doesn't surface content_block_delta — the first thing the
+  // UI sees for a reply is the *whole* message after message_stop. See
+  // memory/project_streaming_deferred.md.
+  | { kind: "pending"; id: string; startedAt: number; stalled: boolean };
 
 // Transcript view mode — controls how much detail the Chat screen shows.
 // Mirrors mockup s-07:
@@ -62,6 +75,11 @@ interface SessionState {
   ensureTranscript: (sessionId: string) => Promise<void>;
   subscribeSession: (sessionId: string) => void;
   sendUserMessage: (sessionId: string, text: string) => void;
+  interruptSession: (sessionId: string) => void;
+  // Push a pending piece onto a session's transcript if there isn't already one
+  // at the tail. Used when the Chat screen mounts with session.status==="running"
+  // so the user sees "claude is processing" even without a fresh user_message.
+  ensurePendingFor: (sessionId: string) => void;
   resolvePermission: (
     sessionId: string,
     approvalId: string,
@@ -152,7 +170,62 @@ function frameToPiece(frame: ServerFrame): UIPiece | null {
   }
 }
 
-export const useSessions = create<SessionState>((set, get) => ({
+export const useSessions = create<SessionState>((set, get) => {
+  // Per-session "stall watchdog" timers. The *first* substantive WS frame
+  // clears the timer; if nothing arrives in STALL_MS we flip the pending
+  // piece to `stalled: true` (renders red) but we DON'T remove it — the
+  // user still needs to know claude never replied so they can retry / stop.
+  const STALL_MS = 30_000;
+  const stallTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+  function clearStallTimer(sessionId: string) {
+    const t = stallTimers.get(sessionId);
+    if (t) {
+      clearTimeout(t);
+      stallTimers.delete(sessionId);
+    }
+  }
+
+  function armStallTimer(sessionId: string, pendingId: string) {
+    clearStallTimer(sessionId);
+    const t = setTimeout(() => {
+      stallTimers.delete(sessionId);
+      set((s) => ({
+        transcripts: {
+          ...s.transcripts,
+          [sessionId]: (s.transcripts[sessionId] ?? []).map((p) =>
+            p.kind === "pending" && p.id === pendingId
+              ? { ...p, stalled: true }
+              : p,
+          ),
+        },
+      }));
+    }, STALL_MS);
+    stallTimers.set(sessionId, t);
+  }
+
+  // Remove the *first* pending piece for a session. Called when a meaningful
+  // runner frame arrives — thinking / assistant_text / tool_use / tool_result /
+  // permission_request / turn_end / error — meaning claude has started
+  // producing output (or hit a terminal state) and the placeholder has done
+  // its job.
+  function dropFirstPending(sessionId: string) {
+    clearStallTimer(sessionId);
+    set((s) => {
+      const list = s.transcripts[sessionId];
+      if (!list) return s;
+      const idx = list.findIndex((p) => p.kind === "pending");
+      if (idx === -1) return s;
+      return {
+        transcripts: {
+          ...s.transcripts,
+          [sessionId]: [...list.slice(0, idx), ...list.slice(idx + 1)],
+        },
+      };
+    });
+  }
+
+  return {
   ws: null,
   connected: false,
   wsDiag: { phase: "connecting", attempts: 0 },
@@ -177,13 +250,35 @@ export const useSessions = create<SessionState>((set, get) => ({
       // Connection liveness tracked via hello_ack
       if (frame.type === "hello_ack") set({ connected: true });
       if (frame.type === "session_update") {
+        const sid = frame.sessionId;
         set((s) => ({
           sessions: s.sessions.map((x) =>
-            x.id === frame.sessionId
-              ? { ...x, status: frame.status }
-              : x,
+            x.id === sid ? { ...x, status: frame.status } : x,
           ),
         }));
+        // When a session drops back to idle/error without having produced any
+        // assistant output (e.g. user interrupted immediately), still clear
+        // the placeholder so it doesn't linger.
+        if (
+          frame.status === "idle" ||
+          frame.status === "error" ||
+          frame.status === "archived"
+        ) {
+          dropFirstPending(sid);
+        }
+      }
+      // Any substantive reply frame means the pending placeholder did its job.
+      if (
+        frame.type === "assistant_text_delta" ||
+        frame.type === "thinking" ||
+        frame.type === "tool_use" ||
+        frame.type === "tool_result" ||
+        frame.type === "permission_request" ||
+        frame.type === "turn_end" ||
+        frame.type === "error"
+      ) {
+        const sid = (frame as any).sessionId as string | undefined;
+        if (sid) dropFirstPending(sid);
       }
       const piece = frameToPiece(frame);
       if (piece) {
@@ -227,7 +322,11 @@ export const useSessions = create<SessionState>((set, get) => ({
   },
 
   sendUserMessage(sessionId, text) {
-    // Optimistic local echo
+    const pendingId = `pending-${Date.now()}`;
+    // Optimistic local echo + a pending placeholder so the user sees that
+    // claude received the message and is thinking. We intentionally do NOT
+    // wait for the first WS frame before showing this — the goal is to fill
+    // the "what's happening?" gap between send and first assistant chunk.
     set((s) => ({
       transcripts: {
         ...s.transcripts,
@@ -239,14 +338,49 @@ export const useSessions = create<SessionState>((set, get) => ({
             text,
             at: new Date().toISOString(),
           },
+          {
+            kind: "pending",
+            id: pendingId,
+            startedAt: Date.now(),
+            stalled: false,
+          },
         ],
       },
     }));
+    armStallTimer(sessionId, pendingId);
     get().ws?.send({
       type: "user_message",
       sessionId,
       content: text,
     } satisfies ClientFrame);
+  },
+
+  interruptSession(sessionId) {
+    get().ws?.send({ type: "interrupt", sessionId } satisfies ClientFrame);
+  },
+
+  ensurePendingFor(sessionId) {
+    const list = get().transcripts[sessionId] ?? [];
+    // If there's already a pending piece at the tail, don't duplicate.
+    if (list.length > 0 && list[list.length - 1].kind === "pending") return;
+    const pendingId = `pending-${Date.now()}`;
+    set((s) => ({
+      transcripts: {
+        ...s.transcripts,
+        [sessionId]: [
+          ...(s.transcripts[sessionId] ?? []),
+          {
+            kind: "pending",
+            id: pendingId,
+            startedAt: Date.now(),
+            stalled: false,
+          },
+        ],
+      },
+    }));
+    // No stall timer here — the session was already running before we
+    // arrived, so we can't usefully claim "30s since user typed". We'll
+    // clear this piece naturally when the next WS frame shows up.
   },
 
   resolvePermission(sessionId, approvalId, decision) {
@@ -268,5 +402,24 @@ export const useSessions = create<SessionState>((set, get) => ({
       approvalId,
       decision,
     } satisfies ClientFrame);
+    // After deciding, claude's about to continue — re-arm a pending placeholder
+    // so the user doesn't stare at an empty thread while the next reply cooks.
+    const pendingId = `pending-${Date.now()}`;
+    set((s) => ({
+      transcripts: {
+        ...s.transcripts,
+        [sessionId]: [
+          ...(s.transcripts[sessionId] ?? []),
+          {
+            kind: "pending",
+            id: pendingId,
+            startedAt: Date.now(),
+            stalled: false,
+          },
+        ],
+      },
+    }));
+    armStallTimer(sessionId, pendingId);
   },
-}));
+  };
+});
