@@ -11,8 +11,8 @@ Three status tiers:
   use from the API; users won't see it yet.
 - ⬜ **Planned** — listed so nobody re-plans it from scratch, but not started.
 
-Last updated: see the git log of this file. Current revision lists **58 shipped
-behaviors** and **116 backend tests**.
+Last updated: see the git log of this file. Current revision lists **65 shipped
+behaviors** and **136 backend tests**.
 
 ---
 
@@ -62,8 +62,19 @@ behaviors** and **116 backend tests**.
 | ✅ | Login-gated REST CRUD | `server/src/sessions/routes.ts` |
 | ✅ | `GET /api/projects` — list | same |
 | ✅ | `POST /api/projects` — add. Rejects non-existent paths (400) and duplicate paths (409). Paths are resolved to absolute and stored verbatim | same |
-| ✅ | `ProjectStore.setTrusted` + `.delete` implemented | `server/src/sessions/projects.ts` |
-| 🟡 | `setTrusted` and `delete` are not yet exposed as REST endpoints or UI actions — all projects are trusted on create today | same |
+| ✅ | `PATCH /api/projects/:id` — rename (only `name` is mutable; `path` changes would be a different project and are rejected at the schema level) | same |
+| ✅ | `DELETE /api/projects/:id` — delete. Returns `409 has_sessions` with `{sessionCount}` if the project still owns any session (archived included) — FK is `ON DELETE RESTRICT` | same |
+| ✅ | `ProjectStore.setTrusted` + `.setName` + `.countSessions` + `.delete` | `server/src/sessions/projects.ts` |
+| 🟡 | `setTrusted` is not yet exposed as a REST endpoint or UI action — all projects are trusted on create today | same |
+
+## Filesystem browse
+
+| Status | Feature | Where |
+|---|---|---|
+| ✅ | `GET /api/browse?path=<abs>` — lists immediate children. Entries are `{name, path, isDir, isHidden}` sorted dirs-first then by name. Hidden (leading-dot) entries are returned with `isHidden: true` so the UI chooses visibility. Symlinks are classified via `lstat` and never followed; dangling symlinks show up as non-dirs instead of crashing the listing | `server/src/sessions/browse.ts` |
+| ✅ | `GET /api/browse/home` — returns `{path: os.homedir()}` for a "back to home" shortcut | same |
+| ✅ | Errors: `400 not_absolute`, `404 not_found`, `403 not_a_directory`, `403 permission_denied` (EACCES/EPERM). Never reads file contents | same |
+| ✅ | Login-gated alongside the rest of `/api/*` | same |
 
 ## Sessions
 
@@ -133,7 +144,9 @@ behaviors** and **116 backend tests**.
 |---|---|---|
 | ✅ | Login screen with 2-step flow (credentials → 6-digit TOTP). Auto-clears the TOTP input on wrong code so the next attempt doesn't concatenate | `web/src/screens/Login.tsx` |
 | ✅ | Home: session list grouped by update time, status dot (idle/running/awaiting/archived/error), model + mode row, relative timestamp, live WS connection indicator | `web/src/screens/Home.tsx` |
-| ✅ | New-session bottom sheet: project picker OR add-project (name + absolute path), title input, model pills (Opus 4.7 / Sonnet 4.6 / Haiku 4.5), 4-way permission mode selector | same |
+| ✅ | New-session bottom sheet: existing-project picker **and** "+ add new project" row coexist (no more mutual-exclusion bug); title input, model pills (Opus 4.7 / Sonnet 4.6 / Haiku 4.5), 4-way permission mode selector. Name auto-defaults to the folder's last segment if left blank | same |
+| ✅ | **Folder picker** (`FolderPicker.tsx`) behind the "Browse" button — full-screen on mobile, modal on desktop. Walks the host filesystem via `/api/browse`, with Home/Up buttons, dotfile toggle, dirs-first list, "Select this folder" confirms at the current path | `web/src/components/FolderPicker.tsx` |
+| ✅ | **Project management sheet** (gear button in the Home header) — lists every project, inline rename, delete with friendly 409 `has_sessions` handling that tells the user to archive/delete sessions first | `web/src/screens/Home.tsx` |
 | ✅ | Chat screen: user messages as ink bubbles, assistant as flowing prose, thinking in an italic left-rule block, tool_use chip with truncated input summary, tool_result in a mono block (error-tinted when `isError`) | `web/src/screens/Chat.tsx` |
 | ✅ | Permission card in-thread with Allow-once / Always / Deny buttons, diff preview for Edit/Write/MultiEdit | same |
 | ✅ | Optimistic echo of user messages (shown before the WS ack) | `web/src/state/sessions.ts` |
@@ -150,14 +163,15 @@ behaviors** and **116 backend tests**.
 
 | Status | Feature | Where |
 |---|---|---|
-| ✅ | 116 backend tests, vitest, all green | `server/tests/` |
+| ✅ | 136 backend tests, vitest, all green | `server/tests/` |
 | ✅ | Bind-safety, DB migration + FK cascade | `tests/config.test.ts`, `tests/db.test.ts` |
 | ✅ | Password/TOTP/JWT edge cases (tampering, cross-secret, wrong audience, expiry, file-mode 0600) | `tests/auth.test.ts` |
 | ✅ | Auth HTTP routes including peek-retry TOTP, replay rejection, cookie attributes, user enumeration parity | `tests/auth-routes.test.ts` |
 | ✅ | Session + project stores: stats, archive filtering, per-session event seq isolation, payload JSON roundtrip, FK cascade | `tests/sessions-store.test.ts` |
 | ✅ | Deterministic Agent SDK → RunnerEvent translation (15 cases covering every block kind + malformed input) | `tests/agent-runner.test.ts` |
 | ✅ | SessionManager lifecycle, status transitions, grant-based auto-approval | `tests/session-manager.test.ts` |
-| ✅ | Session REST routes (path validation, duplicate path 409, archive, events) | `tests/session-routes.test.ts` |
+| ✅ | Session REST routes (path validation, duplicate path 409, archive, events, project rename + delete with sessions-FK guard) | `tests/session-routes.test.ts` |
+| ✅ | Filesystem browse routes: auth gate, abs-path validation, 404 / 403 error paths, sort + flags, parent-null at root, symlinks are not followed | `tests/browse.test.ts` |
 | ✅ | WebSocket end-to-end over a real port (auth gate, hello_ack, broadcast isolation, permission decision round-trip, bad-frame recovery) | `tests/ws.test.ts` |
 | ✅ | Tool grants: signature conventions, session-vs-global scope, idempotent insert, revoke, FK cascade | `tests/grants.test.ts` |
 | ✅ | Permission summary content for every supported tool + missing-field edge cases | `tests/permission-summary.test.ts` |

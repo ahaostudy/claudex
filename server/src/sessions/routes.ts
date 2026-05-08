@@ -3,7 +3,7 @@ import type Database from "better-sqlite3";
 import fs from "node:fs";
 import path from "node:path";
 import { z } from "zod";
-import { CreateSessionRequest } from "@claudex/shared";
+import { CreateSessionRequest, UpdateProjectRequest } from "@claudex/shared";
 import { ProjectStore } from "./projects.js";
 import { SessionStore } from "./store.js";
 
@@ -52,6 +52,41 @@ export async function registerSessionRoutes(
         trusted: true,
       });
       return reply.send({ project });
+    },
+  );
+
+  app.patch(
+    "/api/projects/:id",
+    { preHandler: app.requireAuth as any },
+    async (req, reply) => {
+      const { id } = req.params as { id: string };
+      const parsed = UpdateProjectRequest.safeParse(req.body);
+      if (!parsed.success) return reply.code(400).send({ error: "bad_request" });
+      const existing = projects.findById(id);
+      if (!existing) return reply.code(404).send({ error: "not_found" });
+      projects.setName(id, parsed.data.name);
+      const updated = projects.findById(id);
+      return reply.send({ project: updated });
+    },
+  );
+
+  app.delete(
+    "/api/projects/:id",
+    { preHandler: app.requireAuth as any },
+    async (req, reply) => {
+      const { id } = req.params as { id: string };
+      const existing = projects.findById(id);
+      if (!existing) return reply.code(404).send({ error: "not_found" });
+      const sessionCount = projects.countSessions(id);
+      if (sessionCount > 0) {
+        // FK is ON DELETE RESTRICT — bail with a precise count so the UI
+        // can phrase the error properly ("project has N sessions").
+        return reply
+          .code(409)
+          .send({ error: "has_sessions", sessionCount });
+      }
+      projects.delete(id);
+      return reply.send({ ok: true });
     },
   );
 

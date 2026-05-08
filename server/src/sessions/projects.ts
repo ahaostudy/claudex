@@ -68,6 +68,23 @@ export class ProjectStore {
       .run(trusted ? 1 : 0, id);
   }
 
+  setName(id: string, name: string): void {
+    this.db
+      .prepare("UPDATE projects SET name = ? WHERE id = ?")
+      .run(name, id);
+  }
+
+  /**
+   * Count sessions that reference this project. Used to decide whether a
+   * delete would trip the FK RESTRICT. Includes archived sessions.
+   */
+  countSessions(id: string): number {
+    const row = this.db
+      .prepare("SELECT COUNT(*) AS n FROM sessions WHERE project_id = ?")
+      .get(id) as { n: number };
+    return row.n;
+  }
+
   delete(id: string): void {
     this.db.prepare("DELETE FROM projects WHERE id = ?").run(id);
   }

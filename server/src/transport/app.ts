@@ -12,6 +12,7 @@ import { SessionStore } from "../sessions/store.js";
 import { SessionManager } from "../sessions/manager.js";
 import { ToolGrantStore } from "../sessions/grants.js";
 import { registerSessionRoutes } from "../sessions/routes.js";
+import { registerBrowseRoutes } from "../sessions/browse.js";
 import { registerWsRoute } from "./ws.js";
 import { agentRunnerFactory } from "../sessions/agent-runner.js";
 import type { RunnerFactory } from "../sessions/runner.js";
@@ -70,6 +71,7 @@ export async function buildApp(
   });
 
   await registerSessionRoutes(app, { db: deps.db });
+  await registerBrowseRoutes(app);
   await registerWsRoute(app, {
     manager,
     db: deps.db,

@@ -156,3 +156,29 @@ export const CreateSessionRequest = z.object({
   initialPrompt: z.string().optional(),
 });
 export type CreateSessionRequest = z.infer<typeof CreateSessionRequest>;
+
+export const UpdateProjectRequest = z.object({
+  // Only `name` is mutable. Changing `path` would effectively be a different
+  // project — adding a new one is the correct way to express that.
+  name: z.string().min(1),
+});
+export type UpdateProjectRequest = z.infer<typeof UpdateProjectRequest>;
+
+// ============================================================================
+// Filesystem browse (for the FolderPicker UI)
+// ============================================================================
+
+export const BrowseEntry = z.object({
+  name: z.string(),
+  path: z.string(), // absolute host path
+  isDir: z.boolean(),
+  isHidden: z.boolean(), // leading-dot entries; UI decides whether to show
+});
+export type BrowseEntry = z.infer<typeof BrowseEntry>;
+
+export const BrowseResponse = z.object({
+  path: z.string(), // the (resolved) directory that was listed
+  parent: z.string().nullable(), // absolute parent path, or null at the root
+  entries: z.array(BrowseEntry),
+});
+export type BrowseResponse = z.infer<typeof BrowseResponse>;

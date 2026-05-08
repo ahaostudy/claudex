@@ -1,76 +1,8 @@
 import { describe, it, expect, afterEach } from "vitest";
 import type { FastifyInstance } from "fastify";
-import fs from "node:fs";
-import path from "node:path";
-import os from "node:os";
-import { buildApp } from "../src/transport/app.js";
-import { openDb, type ClaudexDb } from "../src/db/index.js";
-import {
-  currentTotp,
-  generateTotpSecret,
-  hashPassword,
-  loadOrCreateJwtSecret,
-  UserStore,
-} from "../src/auth/index.js";
-import { tempConfig } from "./helpers.js";
-import type { RunnerFactory } from "../src/sessions/runner.js";
+import { bootstrapAuthedApp } from "./helpers.js";
 
-async function bootstrap(
-  runnerFactory?: RunnerFactory,
-): Promise<{
-  app: FastifyInstance;
-  dbh: ClaudexDb;
-  cookie: string;
-  tmpDir: string;
-  cleanup: () => Promise<void>;
-}> {
-  const { config, log, cleanup } = tempConfig();
-  const dbh = openDb(config, log);
-  const jwtSecret = loadOrCreateJwtSecret(config);
-  const { app, manager } = await buildApp({
-    db: dbh.db,
-    jwtSecret,
-    logger: false,
-    isProduction: false,
-    runnerFactory,
-  });
-  const users = new UserStore(dbh.db);
-  const totpSecret = generateTotpSecret();
-  const passwordHash = await hashPassword("hunter22-please-work");
-  users.create({ username: "hao", passwordHash, totpSecret });
-
-  const login = await app.inject({
-    method: "POST",
-    url: "/api/auth/login",
-    payload: { username: "hao", password: "hunter22-please-work" },
-  });
-  const challengeId = login.json().challengeId as string;
-  const verify = await app.inject({
-    method: "POST",
-    url: "/api/auth/verify-totp",
-    payload: { challengeId, code: currentTotp(totpSecret) },
-  });
-  const sessionCookie = verify.cookies.find(
-    (c) => c.name === "claudex_session",
-  )!;
-  const cookie = `claudex_session=${sessionCookie.value}`;
-
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "claudex-proj-"));
-
-  return {
-    app,
-    dbh,
-    cookie,
-    tmpDir,
-    cleanup: async () => {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
-      await manager.disposeAll();
-      await app.close();
-      dbh.close();
-      cleanup();
-    },
-  };
-}
+const bootstrap = bootstrapAuthedApp;
 
 describe("session HTTP routes", () => {
   const disposers: Array<() => Promise<void>> = [];
@@ -134,6 +66,172 @@ describe("session HTTP routes", () => {
         payload: { name: "b", path: ctx.tmpDir },
       });
       expect(twice.statusCode).toBe(409);
+    });
+  });
+
+  describe("PATCH /api/projects/:id", () => {
+    async function createProject(ctx: {
+      app: FastifyInstance;
+      cookie: string;
+      tmpDir: string;
+    }) {
+      const res = await ctx.app.inject({
+        method: "POST",
+        url: "/api/projects",
+        headers: { cookie: ctx.cookie },
+        payload: { name: "orig", path: ctx.tmpDir },
+      });
+      return res.json().project as { id: string };
+    }
+
+    it("requires auth", async () => {
+      const ctx = await bootstrap();
+      disposers.push(ctx.cleanup);
+      const proj = await createProject(ctx);
+      const res = await ctx.app.inject({
+        method: "PATCH",
+        url: `/api/projects/${proj.id}`,
+        payload: { name: "new" },
+      });
+      expect(res.statusCode).toBe(401);
+    });
+
+    it("renames a project and the change is visible in GET", async () => {
+      const ctx = await bootstrap();
+      disposers.push(ctx.cleanup);
+      const proj = await createProject(ctx);
+      const patched = await ctx.app.inject({
+        method: "PATCH",
+        url: `/api/projects/${proj.id}`,
+        headers: { cookie: ctx.cookie },
+        payload: { name: "renamed" },
+      });
+      expect(patched.statusCode).toBe(200);
+      expect(patched.json().project.name).toBe("renamed");
+      // and it sticks
+      const list = await ctx.app.inject({
+        method: "GET",
+        url: "/api/projects",
+        headers: { cookie: ctx.cookie },
+      });
+      const found = list
+        .json()
+        .projects.find((p: { id: string }) => p.id === proj.id);
+      expect(found.name).toBe("renamed");
+    });
+
+    it("rejects an empty name with 400", async () => {
+      const ctx = await bootstrap();
+      disposers.push(ctx.cleanup);
+      const proj = await createProject(ctx);
+      const res = await ctx.app.inject({
+        method: "PATCH",
+        url: `/api/projects/${proj.id}`,
+        headers: { cookie: ctx.cookie },
+        payload: { name: "" },
+      });
+      expect(res.statusCode).toBe(400);
+      expect(res.json().error).toBe("bad_request");
+    });
+
+    it("returns 404 for an unknown project id", async () => {
+      const ctx = await bootstrap();
+      disposers.push(ctx.cleanup);
+      const res = await ctx.app.inject({
+        method: "PATCH",
+        url: "/api/projects/no-such-id",
+        headers: { cookie: ctx.cookie },
+        payload: { name: "whatever" },
+      });
+      expect(res.statusCode).toBe(404);
+      expect(res.json().error).toBe("not_found");
+    });
+  });
+
+  describe("DELETE /api/projects/:id", () => {
+    async function createProject(ctx: {
+      app: FastifyInstance;
+      cookie: string;
+      tmpDir: string;
+    }) {
+      const res = await ctx.app.inject({
+        method: "POST",
+        url: "/api/projects",
+        headers: { cookie: ctx.cookie },
+        payload: { name: "to-delete", path: ctx.tmpDir },
+      });
+      return res.json().project as { id: string };
+    }
+
+    it("requires auth", async () => {
+      const ctx = await bootstrap();
+      disposers.push(ctx.cleanup);
+      const proj = await createProject(ctx);
+      const res = await ctx.app.inject({
+        method: "DELETE",
+        url: `/api/projects/${proj.id}`,
+      });
+      expect(res.statusCode).toBe(401);
+    });
+
+    it("deletes a project with no sessions", async () => {
+      const ctx = await bootstrap();
+      disposers.push(ctx.cleanup);
+      const proj = await createProject(ctx);
+      const res = await ctx.app.inject({
+        method: "DELETE",
+        url: `/api/projects/${proj.id}`,
+        headers: { cookie: ctx.cookie },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toEqual({ ok: true });
+      const list = await ctx.app.inject({
+        method: "GET",
+        url: "/api/projects",
+        headers: { cookie: ctx.cookie },
+      });
+      const exists = list
+        .json()
+        .projects.some((p: { id: string }) => p.id === proj.id);
+      expect(exists).toBe(false);
+    });
+
+    it("refuses to delete a project that has sessions (409 has_sessions)", async () => {
+      const ctx = await bootstrap();
+      disposers.push(ctx.cleanup);
+      const proj = await createProject(ctx);
+      await ctx.app.inject({
+        method: "POST",
+        url: "/api/sessions",
+        headers: { cookie: ctx.cookie },
+        payload: {
+          projectId: proj.id,
+          title: "s",
+          model: "claude-opus-4-7",
+          mode: "default",
+          worktree: false,
+        },
+      });
+      const res = await ctx.app.inject({
+        method: "DELETE",
+        url: `/api/projects/${proj.id}`,
+        headers: { cookie: ctx.cookie },
+      });
+      expect(res.statusCode).toBe(409);
+      const body = res.json();
+      expect(body.error).toBe("has_sessions");
+      expect(body.sessionCount).toBe(1);
+    });
+
+    it("returns 404 for an unknown project id", async () => {
+      const ctx = await bootstrap();
+      disposers.push(ctx.cleanup);
+      const res = await ctx.app.inject({
+        method: "DELETE",
+        url: "/api/projects/no-such-id",
+        headers: { cookie: ctx.cookie },
+      });
+      expect(res.statusCode).toBe(404);
     });
   });
 
