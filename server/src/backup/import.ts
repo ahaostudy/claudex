@@ -244,14 +244,14 @@ export function importBackupBundle(
          parent_session_id, forked_from_session_id,
          stats_messages, stats_files_changed, stats_lines_added,
          stats_lines_removed, stats_context_pct,
-         cli_jsonl_seq
+         cli_jsonl_seq, tags
        ) VALUES (
          @id, @title, @project_id, @branch, @worktree_path, @status, @model, @mode,
          @created_at, @updated_at, @last_message_at, @archived_at, @sdk_session_id,
          @parent_session_id, @forked_from_session_id,
          @stats_messages, @stats_files_changed, @stats_lines_added,
          @stats_lines_removed, @stats_context_pct,
-         @cli_jsonl_seq
+         @cli_jsonl_seq, @tags
        )`,
     );
     // Pass 1: insert rows with parent_session_id = NULL so we don't care
@@ -301,6 +301,12 @@ export function importBackupBundle(
         stats_lines_removed: s.stats.linesRemoved,
         stats_context_pct: s.stats.contextPct,
         cli_jsonl_seq: s.cliJsonlSeq ?? 0,
+        // Tags ride along with the bundle verbatim — they're user-authored
+        // and the schema is locked down at the HTTP surface, so round-trips
+        // are safe. Fallback to `[]` when the bundle predates the column.
+        tags: JSON.stringify(
+          Array.isArray(s.tags) ? s.tags.filter((t) => typeof t === "string") : [],
+        ),
       });
       // Mirror SessionStore.create: a session's title participates in title
       // search from the moment it exists on disk.

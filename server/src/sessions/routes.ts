@@ -563,7 +563,7 @@ export async function registerSessionRoutes(
       }
 
       const warnings: string[] = [];
-      const { title, model, mode } = parsed.data;
+      const { title, model, mode, tags } = parsed.data;
 
       if (title !== undefined) sessions.setTitle(id, title);
       if (model !== undefined && model !== existing.model) {
@@ -587,6 +587,9 @@ export async function registerSessionRoutes(
             "failed to propagate permission mode to runner",
           );
         }
+      }
+      if (tags !== undefined) {
+        sessions.setTags(id, tags);
       }
 
       const updated = sessions.findById(id)!;

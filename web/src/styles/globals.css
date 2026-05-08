@@ -63,3 +63,18 @@ body {
   animation: pending-dot-bounce 1.1s infinite ease-in-out both;
 }
 
+/* Short horizontal shake used to signal a rejected inline input (e.g. the
+   project-rename editor when the user tries to save an empty name). We pair
+   this with a toast message — the shake catches the eye where the input is,
+   the toast says why. */
+@keyframes shake-x {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-4px); }
+  40% { transform: translateX(4px); }
+  60% { transform: translateX(-3px); }
+  80% { transform: translateX(2px); }
+}
+.animate-shake {
+  animation: shake-x 320ms ease-in-out;
+}
+

@@ -30,13 +30,36 @@ const DATA_URL_RE =
 // (the attachments feature is in flight), so we match any non-slash id.
 const ATTACHMENT_RE = /\/api\/attachments\/[^/\s)"'<>]+\/raw/g;
 
+// Claude Agent SDK image block, stringified by agent-runner.ts before it hits
+// the tool_result event payload (see server/src/sessions/agent-runner.ts —
+// non-text content blocks get `JSON.stringify`'d into the content string).
+// Shape is Anthropic's standard image block:
+//   {"type":"image","source":{"type":"base64","media_type":"image/png","data":"iVBO..."}}
+// We reconstruct a data URL from `media_type` + `data` so the existing
+// ImageThumbs path can render it. The regex is lenient about key order
+// (`media_type` / `data` may come in either order) and tolerant of
+// whitespace from a `JSON.stringify(x, null, 2)` sender — but anchored on
+// `"type":"image"` so we don't eat unrelated JSON.
+const SDK_IMAGE_BLOCK_RE =
+  /\{\s*"type"\s*:\s*"image"\s*,\s*"source"\s*:\s*\{[^}]*?"media_type"\s*:\s*"(image\/(?:png|jpe?g|gif|webp))"[^}]*?"data"\s*:\s*"([A-Za-z0-9+/=]+)"[^}]*\}\s*\}/g;
+
+// Same as above but with `data` before `media_type` — we can't express that
+// alternation in a single non-backtracky pattern without regex lookarounds
+// that aren't available cross-browser. Keep it as a second pass.
+const SDK_IMAGE_BLOCK_RE_ALT =
+  /\{\s*"type"\s*:\s*"image"\s*,\s*"source"\s*:\s*\{[^}]*?"data"\s*:\s*"([A-Za-z0-9+/=]+)"[^}]*?"media_type"\s*:\s*"(image\/(?:png|jpe?g|gif|webp))"[^}]*\}\s*\}/g;
+
 export function extractImagesFromText(text: string): {
   images: ImageRef[];
   remainingText: string;
 } {
   if (!text) return { images: [], remainingText: text };
-  // Fast path: if neither marker is present, short-circuit.
-  if (!text.includes("data:image/") && !text.includes("/api/attachments/")) {
+  // Fast path: if no marker is present, short-circuit.
+  const hasDataUrl = text.includes("data:image/");
+  const hasAttachment = text.includes("/api/attachments/");
+  const hasSdkBlock =
+    text.includes('"type":"image"') || text.includes('"type": "image"');
+  if (!hasDataUrl && !hasAttachment && !hasSdkBlock) {
     return { images: [], remainingText: text };
   }
   const images: ImageRef[] = [];
@@ -51,6 +74,22 @@ export function extractImagesFromText(text: string): {
     images.push({ src: match, alt: "attachment" });
     return "";
   });
+  if (hasSdkBlock) {
+    remaining = remaining.replace(
+      SDK_IMAGE_BLOCK_RE,
+      (_full, mime: string, data: string) => {
+        images.push({ src: `data:${mime};base64,${data}`, alt: mime });
+        return "";
+      },
+    );
+    remaining = remaining.replace(
+      SDK_IMAGE_BLOCK_RE_ALT,
+      (_full, data: string, mime: string) => {
+        images.push({ src: `data:${mime};base64,${data}`, alt: mime });
+        return "";
+      },
+    );
+  }
 
   return { images, remainingText: remaining };
 }

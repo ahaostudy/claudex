@@ -1234,6 +1234,116 @@ describe("session HTTP routes", () => {
       expect(res.statusCode).toBe(404);
       expect(res.json().error).toBe("not_found");
     });
+
+    // -----------------------------------------------------------------------
+    // Tags — validated at the HTTP surface via SessionTag + the 8-tag cap on
+    // UpdateSessionRequest. Round-trip via GET to prove persistence.
+    // -----------------------------------------------------------------------
+    it("persists tags on PATCH and round-trips via GET", async () => {
+      const ctx = await bootstrap();
+      disposers.push(ctx.cleanup);
+      const { s } = await seedSession(ctx);
+      const patched = await ctx.app.inject({
+        method: "PATCH",
+        url: `/api/sessions/${s.id}`,
+        headers: { cookie: ctx.cookie },
+        payload: { tags: ["bug", "backend", "p0"] },
+      });
+      expect(patched.statusCode).toBe(200);
+      expect(patched.json().session.tags).toEqual(["bug", "backend", "p0"]);
+      const fetched = await ctx.app
+        .inject({
+          method: "GET",
+          url: `/api/sessions/${s.id}`,
+          headers: { cookie: ctx.cookie },
+        })
+        .then((r) => r.json().session);
+      expect(fetched.tags).toEqual(["bug", "backend", "p0"]);
+    });
+
+    it("replaces the full tag list (not append) and can clear to empty", async () => {
+      const ctx = await bootstrap();
+      disposers.push(ctx.cleanup);
+      const { s } = await seedSession(ctx);
+      await ctx.app.inject({
+        method: "PATCH",
+        url: `/api/sessions/${s.id}`,
+        headers: { cookie: ctx.cookie },
+        payload: { tags: ["a", "b", "c"] },
+      });
+      const replaced = await ctx.app.inject({
+        method: "PATCH",
+        url: `/api/sessions/${s.id}`,
+        headers: { cookie: ctx.cookie },
+        payload: { tags: ["d"] },
+      });
+      expect(replaced.json().session.tags).toEqual(["d"]);
+      const cleared = await ctx.app.inject({
+        method: "PATCH",
+        url: `/api/sessions/${s.id}`,
+        headers: { cookie: ctx.cookie },
+        payload: { tags: [] },
+      });
+      expect(cleared.json().session.tags).toEqual([]);
+    });
+
+    it("rejects a non-string tag with 400", async () => {
+      const ctx = await bootstrap();
+      disposers.push(ctx.cleanup);
+      const { s } = await seedSession(ctx);
+      const res = await ctx.app.inject({
+        method: "PATCH",
+        url: `/api/sessions/${s.id}`,
+        headers: { cookie: ctx.cookie },
+        payload: { tags: ["ok", 42] },
+      });
+      expect(res.statusCode).toBe(400);
+      expect(res.json().error).toBe("bad_request");
+    });
+
+    it("rejects a tag longer than 24 chars with 400", async () => {
+      const ctx = await bootstrap();
+      disposers.push(ctx.cleanup);
+      const { s } = await seedSession(ctx);
+      const res = await ctx.app.inject({
+        method: "PATCH",
+        url: `/api/sessions/${s.id}`,
+        headers: { cookie: ctx.cookie },
+        payload: { tags: ["x".repeat(25)] },
+      });
+      expect(res.statusCode).toBe(400);
+      expect(res.json().error).toBe("bad_request");
+    });
+
+    it("rejects a tag with invalid characters with 400", async () => {
+      const ctx = await bootstrap();
+      disposers.push(ctx.cleanup);
+      const { s } = await seedSession(ctx);
+      const res = await ctx.app.inject({
+        method: "PATCH",
+        url: `/api/sessions/${s.id}`,
+        headers: { cookie: ctx.cookie },
+        payload: { tags: ["Bug!"] },
+      });
+      expect(res.statusCode).toBe(400);
+      expect(res.json().error).toBe("bad_request");
+    });
+
+    it("rejects more than 8 tags with 400", async () => {
+      const ctx = await bootstrap();
+      disposers.push(ctx.cleanup);
+      const { s } = await seedSession(ctx);
+      const res = await ctx.app.inject({
+        method: "PATCH",
+        url: `/api/sessions/${s.id}`,
+        headers: { cookie: ctx.cookie },
+        payload: {
+          tags: ["a", "b", "c", "d", "e", "f", "g", "h", "i"],
+        },
+      });
+      expect(res.statusCode).toBe(400);
+      expect(res.json().error).toBe("bad_request");
+    });
   });
 
   describe("tool grants REST", () => {

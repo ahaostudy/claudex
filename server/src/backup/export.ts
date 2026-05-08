@@ -114,6 +114,7 @@ function selectSessions(db: Database.Database): Session[] {
     stats_lines_removed: number;
     stats_context_pct: number;
     cli_jsonl_seq: number;
+    tags: string;
   }>;
   return rows.map((r) => ({
     id: r.id,
@@ -132,6 +133,7 @@ function selectSessions(db: Database.Database): Session[] {
     parentSessionId: r.parent_session_id,
     forkedFromSessionId: r.forked_from_session_id,
     cliJsonlSeq: r.cli_jsonl_seq ?? 0,
+    tags: parseTagsBlob(r.tags),
     stats: {
       messages: r.stats_messages,
       filesChanged: r.stats_files_changed,
@@ -140,6 +142,22 @@ function selectSessions(db: Database.Database): Session[] {
       contextPct: r.stats_context_pct,
     },
   }));
+}
+
+// Mirror of SessionStore's private parser. Duplicated (rather than exported)
+// so the backup module doesn't reach into the store for a one-liner, and so
+// the export path can't accidentally pick up unrelated store behavior later.
+function parseTagsBlob(raw: string | null | undefined): string[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      return parsed.filter((v): v is string => typeof v === "string");
+    }
+  } catch {
+    // Malformed / legacy rows fall through as empty.
+  }
+  return [];
 }
 
 function selectEvents(db: Database.Database): SessionEvent[] {

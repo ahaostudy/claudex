@@ -11,6 +11,7 @@ import { ImportSessionsSheet } from "@/components/ImportSessionsSheet";
 import { GlobalSearchSheet } from "@/components/GlobalSearchSheet";
 import { StatsSheet } from "@/components/StatsSheet";
 import { cn } from "@/lib/cn";
+import { toast } from "@/lib/toast";
 import { useFocusReturn } from "@/hooks/useFocusReturn";
 
 // Status dot colors for the flat row layout. `running` and `awaiting` get a
@@ -107,6 +108,10 @@ export function HomeScreen() {
   const [searchParams, setSearchParams] = useSearchParams();
   const activeProjectId = searchParams.get("project");
   const activeFilter = (searchParams.get("filter") ?? "all") as FilterId;
+  // Optional tag filter sourced from `?tag=<name>`. Stored in the URL so the
+  // filter is shareable + survives back/forward. Only one tag active at a
+  // time for now; multi-tag intersection can come later if the UI asks.
+  const activeTag = searchParams.get("tag");
   const [showNew, setShowNew] = useState(false);
   const [showProjects, setShowProjects] = useState(false);
   const [showWsDiag, setShowWsDiag] = useState(false);
@@ -201,6 +206,10 @@ export function HomeScreen() {
       // their parent chat's side drawer, not as top-level rows.
       if (s.parentSessionId) continue;
       if (!chipMatches(s, activeFilter)) continue;
+      if (activeTag) {
+        const tags = s.tags ?? [];
+        if (!tags.includes(activeTag)) continue;
+      }
       if (q) {
         // Substring match across title / project name / branch. Placeholder
         // copy says "files" too, but we don't index file content — keep the
@@ -234,7 +243,7 @@ export function HomeScreen() {
       (a, b) => sortKey(b.sessions[0]) - sortKey(a.sessions[0]),
     );
     return out;
-  }, [sourceSessions, projects, activeFilter, searchQuery]);
+  }, [sourceSessions, projects, activeFilter, searchQuery, activeTag]);
 
   const filteredGroups = useMemo(() => {
     if (!activeProjectId) return groups;
@@ -248,6 +257,16 @@ export function HomeScreen() {
   const clearFilter = () => {
     const next = new URLSearchParams(searchParams);
     next.delete("project");
+    setSearchParams(next, { replace: true });
+  };
+
+  // Set or clear the tag filter. When called with the currently-active tag
+  // we clear; otherwise we swap. Used by both the rail chip's X and the
+  // per-row tag chips. The URL stays the source of truth for the filter.
+  const setTag = (name: string | null) => {
+    const next = new URLSearchParams(searchParams);
+    if (!name) next.delete("tag");
+    else next.set("tag", name);
     setSearchParams(next, { replace: true });
   };
 
@@ -403,6 +422,24 @@ export function HomeScreen() {
             setSearchParams(next, { replace: true });
           }}
         />
+        {activeTag && (
+          <div className="px-4 md:px-6 pt-3 flex items-center gap-2">
+            <span className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-full bg-klein text-canvas text-[12px]">
+              #{activeTag}
+              <button
+                type="button"
+                onClick={() => setTag(null)}
+                aria-label={`Clear tag filter ${activeTag}`}
+                className="hover:opacity-80"
+              >
+                <X className="w-3 h-3" />
+              </button>
+            </span>
+            <span className="text-[11px] text-ink-muted">
+              Filtering by tag
+            </span>
+          </div>
+        )}
         <div className="px-4 md:px-6 py-3 flex items-center gap-3">
           <span className="mono text-[11px] text-ink-muted">
             {loadingSessions
@@ -447,6 +484,7 @@ export function HomeScreen() {
                 project={g.project}
                 projectId={g.projectId}
                 sessions={g.sessions}
+                onPickTag={(name) => setTag(name)}
               />
             ))}
           </div>
@@ -496,10 +534,12 @@ function ProjectGroup({
   project,
   projectId,
   sessions,
+  onPickTag,
 }: {
   project: Project | null;
   projectId: string;
   sessions: Session[];
+  onPickTag: (name: string) => void;
 }) {
   // Each group is its own block so its header `sticky top-0` is scoped to
   // the group's vertical run — when you scroll past, the next project's
@@ -527,7 +567,7 @@ function ProjectGroup({
       <ul>
         {sessions.map((s) => (
           <li key={s.id}>
-            <SessionRow session={s} />
+            <SessionRow session={s} onPickTag={onPickTag} />
           </li>
         ))}
       </ul>
@@ -556,7 +596,13 @@ function statusPillLabel(status: string): string {
   return status.toUpperCase();
 }
 
-function SessionRow({ session: s }: { session: Session }) {
+function SessionRow({
+  session: s,
+  onPickTag,
+}: {
+  session: Session;
+  onPickTag: (name: string) => void;
+}) {
   const href = `/session/${s.id}`;
   const archived = s.status === "archived";
   const dotTone = STATUS_DOT[s.status] ?? "bg-ink-faint";
@@ -564,6 +610,12 @@ function SessionRow({ session: s }: { session: Session }) {
   const rel = formatRel(s.lastMessageAt ?? s.updatedAt);
   const branch = s.branch ?? "main";
   const { linesAdded, linesRemoved, filesChanged, contextPct } = s.stats;
+  // Up to 3 tag chips are rendered next to the title on desktop; mobile has
+  // no room. Clicking a chip activates the `?tag=` filter on Home. The
+  // chip intercepts the row's <Link> navigation via stopPropagation +
+  // preventDefault so tapping a tag doesn't also open the session.
+  const visibleTags = (s.tags ?? []).slice(0, 3);
+  const extraTags = Math.max(0, (s.tags ?? []).length - visibleTags.length);
   const hasDiffs = linesAdded > 0 || linesRemoved > 0 || filesChanged > 0;
   // Progress ring geometry: r=9 → circumference ≈ 56.55. Dash offset
   // encodes remaining context. `running` shows an animated dot in place
@@ -676,6 +728,29 @@ function SessionRow({ session: s }: { session: Session }) {
               {s.worktreePath && (
                 <span className="text-[11px] caps text-ink-muted shrink-0">
                   worktree
+                </span>
+              )}
+              {visibleTags.length > 0 && (
+                <span className="hidden lg:flex items-center gap-1 shrink-0">
+                  {visibleTags.map((t) => (
+                    <button
+                      key={t}
+                      type="button"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        onPickTag(t);
+                      }}
+                      className="inline-flex items-center px-1.5 h-5 rounded-full border border-line bg-paper text-[10px] text-ink-soft hover:bg-klein-wash hover:text-klein-ink hover:border-klein/30"
+                    >
+                      #{t}
+                    </button>
+                  ))}
+                  {extraTags > 0 && (
+                    <span className="mono text-[10px] text-ink-faint">
+                      +{extraTags}
+                    </span>
+                  )}
                 </span>
               )}
             </div>
@@ -1349,6 +1424,7 @@ function ProjectsSheet({ onClose }: { onClose: () => void }) {
   const [loading, setLoading] = useState(true);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState("");
+  const [shakeId, setShakeId] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
   async function refresh() {
@@ -1369,7 +1445,11 @@ function ProjectsSheet({ onClose }: { onClose: () => void }) {
     setErr(null);
     const name = editingName.trim();
     if (!name) {
-      setErr("Name can't be empty.");
+      // Empty name → shake the input + toast. We don't use the top-level err
+      // banner for this so the visual feedback lives right next to the input.
+      setShakeId(id);
+      window.setTimeout(() => setShakeId(null), 340);
+      toast("Name can't be empty");
       return;
     }
     try {
@@ -1446,7 +1526,10 @@ function ProjectsSheet({ onClose }: { onClose: () => void }) {
                           if (e.key === "Enter") save(p.id);
                           if (e.key === "Escape") setEditingId(null);
                         }}
-                        className="w-full h-10 px-3 bg-canvas border border-line rounded-[8px] text-[14px]"
+                        className={cn(
+                          "w-full h-10 px-3 bg-canvas border border-line rounded-[8px] text-[14px]",
+                          shakeId === p.id && "animate-shake",
+                        )}
                       />
                       <div className="mono text-[11px] text-ink-muted truncate">
                         {p.path}

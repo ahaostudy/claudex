@@ -19,7 +19,8 @@
     "web": "pnpm --filter @claudex/web",
     "shared": "pnpm --filter @claudex/shared",
     "init": "pnpm --filter @claudex/server exec tsx src/bin/init.ts",
-    "reset-credentials": "pnpm --filter @claudex/server exec tsx src/bin/reset-credentials.ts"
+    "reset-credentials": "pnpm --filter @claudex/server exec tsx src/bin/reset-credentials.ts",
+    "claudex:status": "pnpm --filter @claudex/server exec tsx src/bin/status.ts"
   },
   "devDependencies": {
     "typescript": "^5.6.3"

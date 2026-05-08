@@ -12,7 +12,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "init": "tsx src/bin/init.ts"
+    "init": "tsx src/bin/init.ts",
+    "status": "tsx src/bin/status.ts"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.2.132",

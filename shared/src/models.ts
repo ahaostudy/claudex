@@ -78,6 +78,12 @@ export const Session = z.object({
   // adopted from the CLI (or when the row predates the column). Internal to
   // the server; clients can ignore it.
   cliJsonlSeq: z.number().int().nonnegative().default(0),
+  // User-authored tags for filtering / organization. Persisted as a JSON
+  // string array in SQLite (migration id=15). Tag strings must match
+  // `[a-z0-9-]{1,24}` and there is a max of 8 tags per session — both rules
+  // enforced at the route layer (invalid values → 400). Default `[]` for
+  // rows created before the column existed.
+  tags: z.array(z.string()).default([]),
   // aggregate counters, cheap to read
   stats: z.object({
     messages: z.number().int().nonnegative(),
@@ -440,6 +446,16 @@ export const UpdateProjectRequest = z.object({
 });
 export type UpdateProjectRequest = z.infer<typeof UpdateProjectRequest>;
 
+// Validator for a single session tag. Lowercase ASCII letters/digits/dashes,
+// length 1..24. Enforced at the HTTP surface so invalid inputs surface as
+// 400 rather than slipping into persisted JSON.
+export const SessionTag = z
+  .string()
+  .min(1)
+  .max(24)
+  .regex(/^[a-z0-9-]+$/);
+export type SessionTag = z.infer<typeof SessionTag>;
+
 // Partial update for a session. At least one field must be present — the
 // server uses `.refine()` to reject empty bodies (otherwise a no-op PATCH
 // would still bump updated_at).
@@ -448,10 +464,17 @@ export const UpdateSessionRequest = z
     title: z.string().min(1).optional(),
     model: ModelId.optional(),
     mode: PermissionMode.optional(),
+    // Max 8 tags per session. Each tag is validated by `SessionTag`. Passing
+    // an explicit empty array clears all tags.
+    tags: z.array(SessionTag).max(8).optional(),
   })
   .refine(
-    (v) => v.title !== undefined || v.model !== undefined || v.mode !== undefined,
-    { message: "at least one of title, model, or mode is required" },
+    (v) =>
+      v.title !== undefined ||
+      v.model !== undefined ||
+      v.mode !== undefined ||
+      v.tags !== undefined,
+    { message: "at least one of title, model, mode, or tags is required" },
   );
 export type UpdateSessionRequest = z.infer<typeof UpdateSessionRequest>;
 

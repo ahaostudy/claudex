@@ -1,10 +1,11 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import {
   Bell,
   BarChart3,
   Bot,
   Calendar,
+  Check,
   ListOrdered,
   MessageSquare,
   Settings as SettingsIcon,
@@ -14,6 +15,7 @@ import { useSessions } from "@/state/sessions";
 import { api } from "@/api/client";
 import type { Project } from "@claudex/shared";
 import { cn } from "@/lib/cn";
+import { toast, ToastHost } from "@/lib/toast";
 
 // ---------------------------------------------------------------------------
 // AppShell — the global navigation frame for all non-chat, non-login screens.
@@ -108,6 +110,12 @@ export function AppShell({
           scrolls; `pb-[env(safe-area-inset-bottom)]` keeps clear of the iOS
           home indicator. */}
       <MobileTabBar tab={tab} alertCount={alertCount} />
+
+      {/* Toast host — mounted at the shell so sheets and inline editors on
+          any non-chat screen (Home's ProjectsSheet rename, sidebar project
+          rename) can surface transient messages without each screen having
+          to wire its own host. */}
+      <ToastHost />
     </div>
   );
 }
@@ -116,6 +124,7 @@ function DesktopSidebar({ tab, alertCount }: { tab: ShellTab; alertCount: number
   const { user, logout } = useAuth();
   const { sessions } = useSessions();
   const [projects, setProjects] = useState<Project[]>([]);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const activeProjectId = searchParams.get("project");
@@ -150,6 +159,15 @@ function DesktopSidebar({ tab, alertCount }: { tab: ShellTab; alertCount: number
     const target =
       projectId === null ? "/sessions" : `/sessions?project=${projectId}`;
     navigate(target);
+  };
+
+  // Optimistic local-state patch on rename success so the sidebar reflects
+  // the new name without waiting for a re-fetch. The PATCH endpoint already
+  // audits the change; we just mirror the new value in-memory.
+  const applyRenamed = (next: Project) => {
+    setProjects((prev) =>
+      prev.map((p) => (p.id === next.id ? next : p)),
+    );
   };
 
   return (
@@ -233,26 +251,20 @@ function DesktopSidebar({ tab, alertCount }: { tab: ShellTab; alertCount: number
           projects.map((p) => {
             const active = tab === "sessions" && activeProjectId === p.id;
             return (
-              <button
+              <SidebarProjectRow
                 key={p.id}
-                type="button"
-                onClick={() => goToProject(p.id)}
-                className={cn(
-                  "w-full flex items-center gap-2 px-2.5 h-7 rounded-[6px] text-left",
-                  active
-                    ? "bg-canvas shadow-card border border-line text-ink"
-                    : "hover:bg-canvas/60 border border-transparent",
-                )}
-                title={p.path}
-              >
-                <span className="h-1.5 w-1.5 rounded-full bg-klein shrink-0" />
-                <span className="mono text-[13px] text-ink-soft truncate">
-                  {p.name}
-                </span>
-                <span className="ml-auto text-[11px] text-ink-muted mono">
-                  {countsByProject.get(p.id) ?? 0}
-                </span>
-              </button>
+                project={p}
+                active={active}
+                count={countsByProject.get(p.id) ?? 0}
+                editing={editingId === p.id}
+                onOpen={() => goToProject(p.id)}
+                onStartEdit={() => setEditingId(p.id)}
+                onCancelEdit={() => setEditingId(null)}
+                onSaved={(next) => {
+                  applyRenamed(next);
+                  setEditingId(null);
+                }}
+              />
             );
           })
         )}
@@ -277,6 +289,192 @@ function DesktopSidebar({ tab, alertCount }: { tab: ShellTab; alertCount: number
         </button>
       </div>
     </aside>
+  );
+}
+
+// Sidebar project row. Default state: clickable pill that filters the Sessions
+// list to this project. Double-click (desktop) or long-press ~600ms (touch
+// devices with the sidebar visible, e.g. iPads) on the name flips the row
+// into an inline <input> editor preloaded with the current name.
+//
+// - Enter saves, Escape cancels. A small Check button sits beside the input
+//   to commit on touch where there's no Enter key in the default on-screen
+//   keyboard layout.
+// - Empty name → the input briefly shakes and we toast "Name can't be empty".
+// - Save hits PATCH /api/projects/:id; success updates local state in-place
+//   (the server already writes an audit row).
+function SidebarProjectRow({
+  project,
+  active,
+  count,
+  editing,
+  onOpen,
+  onStartEdit,
+  onCancelEdit,
+  onSaved,
+}: {
+  project: Project;
+  active: boolean;
+  count: number;
+  editing: boolean;
+  onOpen: () => void;
+  onStartEdit: () => void;
+  onCancelEdit: () => void;
+  onSaved: (next: Project) => void;
+}) {
+  const [draft, setDraft] = useState(project.name);
+  const [shake, setShake] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const longPressFired = useRef(false);
+
+  useEffect(() => {
+    if (editing) {
+      setDraft(project.name);
+      // Focus + select-all next tick so the user can type-replace immediately.
+      requestAnimationFrame(() => {
+        inputRef.current?.focus();
+        inputRef.current?.select();
+      });
+    }
+  }, [editing, project.name]);
+
+  const clearLongPress = () => {
+    if (longPressTimer.current) {
+      clearTimeout(longPressTimer.current);
+      longPressTimer.current = null;
+    }
+  };
+
+  const triggerShake = () => {
+    setShake(true);
+    window.setTimeout(() => setShake(false), 340);
+  };
+
+  const save = async () => {
+    const name = draft.trim();
+    if (!name) {
+      triggerShake();
+      toast("Name can't be empty");
+      inputRef.current?.focus();
+      return;
+    }
+    if (name === project.name) {
+      onCancelEdit();
+      return;
+    }
+    setBusy(true);
+    try {
+      const r = await api.updateProject(project.id, { name });
+      onSaved(r.project);
+    } catch {
+      toast("Rename failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (editing) {
+    return (
+      <div
+        className={cn(
+          "w-full flex items-center gap-1.5 px-2.5 h-7 rounded-[6px]",
+          "bg-canvas border border-line",
+        )}
+      >
+        <span className="h-1.5 w-1.5 rounded-full bg-klein shrink-0" />
+        <input
+          ref={inputRef}
+          type="text"
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              void save();
+            } else if (e.key === "Escape") {
+              e.preventDefault();
+              onCancelEdit();
+            }
+          }}
+          onBlur={(e) => {
+            // Don't cancel if focus moved to the Check button — that click
+            // fires save() via its own onMouseDown.
+            const next = e.relatedTarget as HTMLElement | null;
+            if (next?.dataset.role === "rename-commit") return;
+            onCancelEdit();
+          }}
+          disabled={busy}
+          aria-label={`Rename ${project.name}`}
+          className={cn(
+            "flex-1 min-w-0 bg-transparent outline-none mono text-[13px] text-ink",
+            shake && "animate-shake",
+          )}
+        />
+        <button
+          type="button"
+          data-role="rename-commit"
+          onMouseDown={(e) => {
+            // mouseDown (not onClick) so the input's onBlur sees this as the
+            // relatedTarget and skips the cancel branch.
+            e.preventDefault();
+            void save();
+          }}
+          title="Save"
+          aria-label="Save rename"
+          disabled={busy}
+          className="shrink-0 h-5 w-5 rounded-[4px] border border-line bg-paper flex items-center justify-center text-ink-soft hover:bg-canvas disabled:opacity-50"
+        >
+          <Check className="w-3 h-3" />
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        // Swallow the click that follows a long-press "flip to edit" — the
+        // long-press opened the editor, the synthetic click shouldn't also
+        // trigger navigation.
+        if (longPressFired.current) {
+          longPressFired.current = false;
+          return;
+        }
+        onOpen();
+      }}
+      onDoubleClick={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        onStartEdit();
+      }}
+      onTouchStart={() => {
+        longPressFired.current = false;
+        clearLongPress();
+        longPressTimer.current = setTimeout(() => {
+          longPressFired.current = true;
+          onStartEdit();
+        }, 600);
+      }}
+      onTouchEnd={clearLongPress}
+      onTouchMove={clearLongPress}
+      onTouchCancel={clearLongPress}
+      className={cn(
+        "w-full flex items-center gap-2 px-2.5 h-7 rounded-[6px] text-left select-none",
+        active
+          ? "bg-canvas shadow-card border border-line text-ink"
+          : "hover:bg-canvas/60 border border-transparent",
+      )}
+      title={`${project.path}\nDouble-click to rename`}
+    >
+      <span className="h-1.5 w-1.5 rounded-full bg-klein shrink-0" />
+      <span className="mono text-[13px] text-ink-soft truncate">
+        {project.name}
+      </span>
+      <span className="ml-auto text-[11px] text-ink-muted mono">{count}</span>
+    </button>
   );
 }
 

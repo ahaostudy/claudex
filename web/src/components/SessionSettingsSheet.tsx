@@ -45,6 +45,9 @@ export function SessionSettingsSheet({
   useFocusReturn();
   const [model, setModel] = useState<ModelId>(session.model);
   const [mode, setMode] = useState<PermissionMode>(session.mode);
+  const [tags, setTags] = useState<string[]>(session.tags ?? []);
+  const [tagDraft, setTagDraft] = useState("");
+  const [tagErr, setTagErr] = useState<string | null>(null);
   const [warnings, setWarnings] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -70,7 +73,10 @@ export function SessionSettingsSheet({
   useEffect(() => {
     setModel(session.model);
     setMode(session.mode);
-  }, [session.id, session.model, session.mode]);
+    setTags(session.tags ?? []);
+    setTagDraft("");
+    setTagErr(null);
+  }, [session.id, session.model, session.mode, session.tags]);
 
   // Escape closes the sheet.
   useEffect(() => {
@@ -119,7 +125,11 @@ export function SessionSettingsSheet({
     };
   }, [session.projectId]);
 
-  async function patch(partial: { model?: ModelId; mode?: PermissionMode }) {
+  async function patch(partial: {
+    model?: ModelId;
+    mode?: PermissionMode;
+    tags?: string[];
+  }) {
     setSaving(true);
     setErr(null);
     try {
@@ -131,6 +141,52 @@ export function SessionSettingsSheet({
     } finally {
       setSaving(false);
     }
+  }
+
+  // Normalize a user-typed tag candidate to the server-side schema
+  // (`[a-z0-9-]{1,24}`). We strip rather than reject-with-error so hitting
+  // Enter on "Backend Bug!" produces "backendbug" without a confusing dialog.
+  // Empty string after normalization returns null → caller skips the add.
+  function normalizeTag(raw: string): string | null {
+    const cleaned = raw
+      .toLowerCase()
+      .replace(/\s+/g, "-")
+      .replace(/[^a-z0-9-]/g, "")
+      .replace(/-+/g, "-")
+      .replace(/^-|-$/g, "")
+      .slice(0, 24);
+    return cleaned.length > 0 ? cleaned : null;
+  }
+
+  function addTagFromDraft() {
+    if (archived || saving) return;
+    const next = normalizeTag(tagDraft);
+    if (!next) {
+      setTagDraft("");
+      return;
+    }
+    if (tags.includes(next)) {
+      setTagDraft("");
+      setTagErr(null);
+      return;
+    }
+    if (tags.length >= 8) {
+      setTagErr("Max 8 tags");
+      return;
+    }
+    const nextTags = [...tags, next];
+    setTags(nextTags);
+    setTagDraft("");
+    setTagErr(null);
+    patch({ tags: nextTags });
+  }
+
+  function removeTag(t: string) {
+    if (archived || saving) return;
+    const nextTags = tags.filter((x) => x !== t);
+    setTags(nextTags);
+    setTagErr(null);
+    patch({ tags: nextTags });
   }
 
   async function revoke(id: string) {
@@ -511,6 +567,74 @@ export function SessionSettingsSheet({
                   {memoryErr}
                 </div>
               )}
+            </div>
+          </div>
+
+          {/* Tags — user-authored labels for filtering sessions from Home.
+              Validation mirrors the server: lowercase `[a-z0-9-]{1,24}`,
+              max 8 tags. `normalizeTag` scrubs user input before send so
+              typing "Backend Bug!" + Enter commits "backendbug" instead of
+              surfacing a validation error. The delete-pill X removes an
+              entry with a PATCH round-trip. */}
+          <div>
+            <div className="text-[11px] uppercase tracking-[0.14em] text-ink-muted mb-2">
+              Tags
+            </div>
+            <div className="rounded-[8px] border border-line bg-canvas p-3">
+              <div className="flex flex-wrap gap-1.5">
+                {tags.map((t) => (
+                  <span
+                    key={t}
+                    className="inline-flex items-center gap-1 px-2 h-7 rounded-full border border-line bg-paper text-[12px]"
+                  >
+                    {t}
+                    <button
+                      type="button"
+                      onClick={() => removeTag(t)}
+                      disabled={archived || saving}
+                      aria-label={`Remove tag ${t}`}
+                      className="text-ink-muted hover:text-ink disabled:opacity-50"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </span>
+                ))}
+                <input
+                  value={tagDraft}
+                  onChange={(e) => {
+                    setTagDraft(e.target.value);
+                    if (tagErr) setTagErr(null);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      addTagFromDraft();
+                    } else if (
+                      e.key === "Backspace" &&
+                      tagDraft === "" &&
+                      tags.length > 0
+                    ) {
+                      // Empty-backspace removes the last chip — matches how
+                      // most tag inputs behave and lets mobile users trim
+                      // without aiming at the tiny X button.
+                      e.preventDefault();
+                      removeTag(tags[tags.length - 1]);
+                    }
+                  }}
+                  onBlur={() => {
+                    if (tagDraft.trim().length > 0) addTagFromDraft();
+                  }}
+                  disabled={archived || saving || tags.length >= 8}
+                  placeholder={tags.length >= 8 ? "Max 8 tags" : "+ add"}
+                  className="flex-1 min-w-[120px] h-7 px-2 text-[12px] bg-transparent outline-none disabled:cursor-not-allowed"
+                />
+              </div>
+              {tagErr && (
+                <div className="mt-2 text-[11px] text-danger">{tagErr}</div>
+              )}
+              <div className="mt-2 text-[11px] text-ink-muted">
+                Lowercase letters, digits, and dashes. Up to 8 tags.
+              </div>
             </div>
           </div>
 

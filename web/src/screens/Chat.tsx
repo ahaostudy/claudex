@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import {
   AlertTriangle,
+  Archive,
   Check,
   ChevronDown,
   ChevronLeft,
@@ -1481,6 +1482,26 @@ function ToolCallBlock({
 // command output (Bash stdout, Read file contents) — markdown rendering
 // would destroy alignment for those.
 // ---------------------------------------------------------------------------
+
+// Matches the sentinel the WS mapper appends to tool_result content when it
+// clipped the payload to `TOOL_RESULT_WS_LIMIT` (see
+// server/src/transport/ws.ts). The full payload is in the DB — refetching
+// the tail via GET /api/sessions/:id/events recovers it.
+const TRUNCATION_SUFFIX_RE =
+  /\n\n… \[truncated — (\d+) chars dropped\. Refetch transcript to see full content\.\]\s*$/;
+
+function detectTruncation(content: string): {
+  cleanText: string;
+  dropped: number | null;
+} {
+  const m = content.match(TRUNCATION_SUFFIX_RE);
+  if (!m) return { cleanText: content, dropped: null };
+  return {
+    cleanText: content.slice(0, content.length - m[0].length),
+    dropped: Number(m[1]),
+  };
+}
+
 function ToolResultBlock({
   content,
   isError,
@@ -1492,13 +1513,22 @@ function ToolResultBlock({
   verbose: boolean;
   onOpenLightbox: (images: ImageRef[], index: number) => void;
 }) {
-  // Extract any inline images (base64 data URLs or attachment refs) before
-  // we measure for truncation — otherwise a single screenshot dominates the
-  // "1200 chars" budget and hides the actual text output. Memoized per
-  // piece since tool_result bodies can be large.
-  const { images, remainingText } = useMemo(
-    () => extractImagesFromText(content),
+  // Strip the WS back-pressure truncation marker (if any) before extraction +
+  // measurement. We don't want the sentinel text to count against the 1200
+  // char budget, AND we want to render a proper action button below the
+  // block instead of leaving "Refetch transcript to see full content." as
+  // opaque inline text.
+  const { cleanText, dropped } = useMemo(
+    () => detectTruncation(content),
     [content],
+  );
+  // Extract any inline images (base64 data URLs, attachment refs, or SDK
+  // image blocks) before we measure for truncation — otherwise a single
+  // screenshot dominates the "1200 chars" budget and hides the actual text
+  // output. Memoized per piece since tool_result bodies can be large.
+  const { images, remainingText } = useMemo(
+    () => extractImagesFromText(cleanText),
+    [cleanText],
   );
   const LIMIT = 1200;
   const overflows = remainingText.length > LIMIT;
@@ -1513,7 +1543,25 @@ function ToolResultBlock({
     overflows && !expanded ? remainingText.length - LIMIT : 0;
   const hasText = remainingText.trim().length > 0;
 
-  if (images.length === 0 && !hasText) {
+  // Pull refetchTail + the URL-bound session id without threading new props
+  // through every caller. `refetchTail` hits `/api/sessions/:id/events` with
+  // limit=200, which reads the DB directly (the WS truncation only clips the
+  // in-flight frame, not the persisted row) — so the fresh tail will carry
+  // the full payload for any truncated tool_result inside the window.
+  const refetchTail = useSessions((s) => s.refetchTail);
+  const { id: routeSessionId } = useParams<{ id: string }>();
+  const [refetching, setRefetching] = useState(false);
+  const onRefetch = async () => {
+    if (!routeSessionId || refetching) return;
+    setRefetching(true);
+    try {
+      await refetchTail(routeSessionId);
+    } finally {
+      setRefetching(false);
+    }
+  };
+
+  if (images.length === 0 && !hasText && dropped == null) {
     // Defensive: an empty tool_result (image-only source but stripped, or
     // just plain empty). Drop the whole block — nothing useful to render.
     return null;
@@ -1551,6 +1599,19 @@ function ToolResultBlock({
             </button>
           )}
         </div>
+      )}
+      {dropped != null && (
+        <button
+          type="button"
+          onClick={onRefetch}
+          disabled={refetching || !routeSessionId}
+          className="mt-1 block text-[11px] mono text-klein-ink underline cursor-pointer disabled:opacity-50 disabled:cursor-wait"
+          title={`WS frame clipped ${dropped.toLocaleString()} chars. Click to fetch the full payload from the transcript.`}
+        >
+          {refetching
+            ? "Refetching…"
+            : `Refetch full content (${dropped.toLocaleString()} chars clipped)`}
+        </button>
       )}
     </div>
   );
@@ -2401,6 +2462,7 @@ function Composer({
    */
   keyboardOffset?: number;
 }) {
+  const isArchived = session?.status === "archived";
   const [text, setText] = useState("");
   const [trigger, setTrigger] = useState<Trigger | null>(null);
   // Prompt history recall (↑ / ↓ like bash/readline). Scoped per-session via
@@ -2715,6 +2777,7 @@ function Composer({
   }
 
   const send = () => {
+    if (isArchived) return;
     if (!text.trim() && attachments.length === 0) return;
     const blocked = leadingUnsupported(text);
     if (blocked) {
@@ -2801,7 +2864,8 @@ function Composer({
         <button
           onClick={openSlashManually}
           type="button"
-          className="h-7 px-2.5 rounded-full border border-line bg-canvas text-[12px] flex items-center gap-1 whitespace-nowrap text-ink-soft"
+          disabled={isArchived}
+          className="h-7 px-2.5 rounded-full border border-line bg-canvas text-[12px] flex items-center gap-1 whitespace-nowrap text-ink-soft disabled:opacity-40"
         >
           <span className="mono text-klein">/</span>
           Slash
@@ -2809,7 +2873,7 @@ function Composer({
         <button
           onClick={openMentionManually}
           type="button"
-          disabled={!project}
+          disabled={!project || isArchived}
           className="h-7 px-2.5 rounded-full border border-line bg-canvas text-[12px] flex items-center gap-1 whitespace-nowrap text-ink-soft disabled:opacity-40"
         >
           <span className="mono text-klein">@</span>
@@ -2818,9 +2882,11 @@ function Composer({
         <button
           type="button"
           onClick={() => fileInputRef.current?.click()}
-          disabled={!session}
+          disabled={!session || isArchived}
           title={
-            session
+            isArchived
+              ? "Session is archived — read-only"
+              : session
               ? "Attach images or text files to this message"
               : "Create or open a session first"
           }
@@ -2844,7 +2910,7 @@ function Composer({
         <button
           type="button"
           onClick={onOpenSideChat}
-          disabled={!session}
+          disabled={!session || isArchived}
           className="h-7 px-2.5 rounded-full border border-line bg-canvas text-[12px] flex items-center gap-1 whitespace-nowrap text-ink-soft disabled:opacity-40"
         >
           <MessageCircle className="w-3 h-3 text-klein" />
@@ -2856,7 +2922,8 @@ function Composer({
             // /compact is a real slash command; insert it like any other.
             insertCompact();
           }}
-          className="h-7 px-2.5 rounded-full border border-line bg-canvas text-[12px] flex items-center gap-1 whitespace-nowrap text-ink-soft"
+          disabled={isArchived}
+          className="h-7 px-2.5 rounded-full border border-line bg-canvas text-[12px] flex items-center gap-1 whitespace-nowrap text-ink-soft disabled:opacity-40"
         >
           <span className="mono text-klein">/</span>compact
         </button>
@@ -2910,6 +2977,13 @@ function Composer({
         </div>
       )}
 
+      {isArchived && (
+        <div className="text-[11px] text-ink-muted mono px-3 py-1 border-t border-line bg-paper/50 flex items-center gap-1.5">
+          <Archive className="w-3 h-3" />
+          Archived · read-only — open a new session to continue.
+        </div>
+      )}
+
       <div
         className="shrink-0 border-t border-line bg-canvas px-3 pt-2 pb-3 mt-2 md:px-5 md:pt-3 md:pb-4"
         style={{
@@ -2922,7 +2996,7 @@ function Composer({
           transition: "transform 120ms ease-out",
         }}
         onDragOver={(e) => {
-          if (!session) return;
+          if (!session || isArchived) return;
           e.preventDefault();
           if (!isDragging) setIsDragging(true);
         }}
@@ -2934,7 +3008,7 @@ function Composer({
           }
         }}
         onDrop={(e) => {
-          if (!session) return;
+          if (!session || isArchived) return;
           e.preventDefault();
           setIsDragging(false);
           void onFilesPicked(e.dataTransfer.files);
@@ -3057,10 +3131,13 @@ function Composer({
               }
             }}
             placeholder={
-              busy
+              isArchived
+                ? "This session is archived — read-only"
+                : busy
                 ? "Type while claude thinks — will queue…"
                 : "Type a message…  try / or @"
             }
+            disabled={isArchived}
           />
           <div className="flex items-center justify-between px-1 mt-1">
             {/* Mobile: show model · mode here (mockup 929). Desktop (mockup
@@ -3078,7 +3155,7 @@ function Composer({
                 "—"
               )}
             </div>
-            {busy ? (
+            {isArchived ? null : busy ? (
               <>
                 <button
                   type="button"
@@ -3215,12 +3292,14 @@ function HighlightedComposer({
   onChange,
   onKeyDown,
   placeholder,
+  disabled,
 }: {
   textareaRef: React.RefObject<HTMLTextAreaElement>;
   value: string;
   onChange: (e: React.ChangeEvent<HTMLTextAreaElement>) => void;
   onKeyDown: (e: React.KeyboardEvent<HTMLTextAreaElement>) => void;
   placeholder?: string;
+  disabled?: boolean;
 }) {
   const mirrorRef = useRef<HTMLPreElement>(null);
 
@@ -3259,7 +3338,11 @@ function HighlightedComposer({
         rows={1}
         placeholder={placeholder}
         spellCheck={false}
-        className="relative w-full bg-transparent outline-none text-[15px] leading-[1.5] resize-none min-h-[24px] max-h-40 py-1 px-2 text-transparent caret-ink selection:bg-klein/20 selection:text-transparent placeholder:text-ink-muted"
+        disabled={disabled}
+        className={cn(
+          "relative w-full bg-transparent outline-none text-[15px] leading-[1.5] resize-none min-h-[24px] max-h-40 py-1 px-2 text-transparent caret-ink selection:bg-klein/20 selection:text-transparent placeholder:text-ink-muted",
+          disabled && "opacity-70 cursor-not-allowed",
+        )}
       />
     </div>
   );

@@ -419,6 +419,25 @@ const MIGRATIONS: { id: number; name: string; up: string }[] = [
       ALTER TABLE sessions ADD COLUMN forked_from_session_id TEXT;
     `,
   },
+  {
+    id: 15,
+    name: "sessions_tags",
+    // User-authored tags for filtering sessions from Home. Stored as a JSON
+    // string array (TEXT). Kept denormalized rather than a join table — tag
+    // lists are tiny (cap 8/session, 24 chars/tag), read on every Home
+    // render, and we never query "every session with tag X" across all
+    // users (single-user install). SQLite's json1 extension plus JS filter
+    // handle every predicate we need without a second table.
+    //
+    // Validation lives at the HTTP route: `SessionTag` enforces
+    // `[a-z0-9-]{1,24}` per tag and `UpdateSessionRequest` caps the array
+    // at 8 entries. The column's only defense is NOT NULL DEFAULT '[]' so
+    // a row missing the field round-trips as an empty array rather than
+    // null.
+    up: `
+      ALTER TABLE sessions ADD COLUMN tags TEXT NOT NULL DEFAULT '[]';
+    `,
+  },
 ];
 
 export function openDb(config: Config, log: Logger): ClaudexDb {

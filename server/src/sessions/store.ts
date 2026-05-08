@@ -32,6 +32,21 @@ interface SessionRow {
   stats_lines_removed: number;
   stats_context_pct: number;
   cli_jsonl_seq: number;
+  tags: string;
+}
+
+function parseTags(raw: string | null | undefined): string[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      return parsed.filter((v): v is string => typeof v === "string");
+    }
+  } catch {
+    // Malformed rows (shouldn't happen; the column is NOT NULL DEFAULT '[]')
+    // degrade to empty rather than crash every list call.
+  }
+  return [];
 }
 
 function toSession(row: SessionRow): Session {
@@ -52,6 +67,7 @@ function toSession(row: SessionRow): Session {
     parentSessionId: row.parent_session_id,
     forkedFromSessionId: row.forked_from_session_id,
     cliJsonlSeq: row.cli_jsonl_seq ?? 0,
+    tags: parseTags(row.tags),
     stats: {
       messages: row.stats_messages,
       filesChanged: row.stats_files_changed,
@@ -171,6 +187,7 @@ export class SessionStore {
       stats_lines_removed: 0,
       stats_context_pct: 0,
       cli_jsonl_seq: 0,
+      tags: "[]",
     };
     this.db
       .prepare(
@@ -180,14 +197,14 @@ export class SessionStore {
            parent_session_id, forked_from_session_id,
            stats_messages, stats_files_changed, stats_lines_added,
            stats_lines_removed, stats_context_pct,
-           cli_jsonl_seq
+           cli_jsonl_seq, tags
          ) VALUES (
            @id, @title, @project_id, @branch, @worktree_path, @status, @model, @mode,
            @created_at, @updated_at, @last_message_at, @archived_at, @sdk_session_id,
            @parent_session_id, @forked_from_session_id,
            @stats_messages, @stats_files_changed, @stats_lines_added,
            @stats_lines_removed, @stats_context_pct,
-           @cli_jsonl_seq
+           @cli_jsonl_seq, @tags
          )`,
       )
       .run(row);
@@ -218,6 +235,27 @@ export class SessionStore {
     this.db
       .prepare("UPDATE sessions SET mode = ?, updated_at = ? WHERE id = ?")
       .run(mode, new Date().toISOString(), id);
+  }
+
+  /**
+   * Replace the session's tag list. Caller is responsible for validating
+   * individual tags (see `SessionTag` in `@claudex/shared` — lowercase
+   * ASCII letters/digits/dashes, 1..24 chars) and the 8-tag cap; the store
+   * just serializes whatever array it's given. De-duplicates preserving
+   * first-occurrence order so the UI doesn't get surprised by a round-trip
+   * that mutates the array.
+   */
+  setTags(id: string, tags: string[]): void {
+    const seen = new Set<string>();
+    const deduped: string[] = [];
+    for (const t of tags) {
+      if (seen.has(t)) continue;
+      seen.add(t);
+      deduped.push(t);
+    }
+    this.db
+      .prepare("UPDATE sessions SET tags = ?, updated_at = ? WHERE id = ?")
+      .run(JSON.stringify(deduped), new Date().toISOString(), id);
   }
 
   /**
