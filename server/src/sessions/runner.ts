@@ -1,5 +1,10 @@
 import type { EventEmitter } from "node:events";
-import type { ModelId, PermissionMode } from "@claudex/shared";
+import type {
+  AskUserQuestionAnnotation,
+  AskUserQuestionItem,
+  ModelId,
+  PermissionMode,
+} from "@claudex/shared";
 
 // -----------------------------------------------------------------------------
 // Runner abstraction
@@ -56,6 +61,15 @@ export type RunnerEvent =
       input: Record<string, unknown>;
       title: string;
     }
+  // SDK's built-in `AskUserQuestion` tool — NOT a permission ask. Surfaces a
+  // multiple-choice interaction the model wants the user to answer before it
+  // continues. We resolve the corresponding `canUseTool` promise via
+  // `resolveAskUserQuestion` with the user's selections as `updatedInput`.
+  | {
+      type: "ask_user_question";
+      askId: string;
+      questions: AskUserQuestionItem[];
+    }
   | {
       type: "turn_end";
       stopReason: string;
@@ -100,6 +114,15 @@ export interface Runner {
   start(initialPrompt?: string): Promise<void>;
   sendUserMessage(content: string): Promise<void>;
   resolvePermission(toolUseId: string, decision: PermissionDecision): void;
+  // Resolve a pending AskUserQuestion interaction with the user's answers.
+  // Mirror of `resolvePermission`: no-op when the askId is unknown (double
+  // submit / stale client). The runner resolves the SDK `canUseTool` promise
+  // with `{ behavior: "allow", updatedInput: { answers, annotations? } }`.
+  resolveAskUserQuestion(
+    askId: string,
+    answers: Record<string, string>,
+    annotations?: Record<string, AskUserQuestionAnnotation>,
+  ): void;
   interrupt(): Promise<void>;
   setPermissionMode(mode: PermissionMode): Promise<void>;
   dispose(): Promise<void>;

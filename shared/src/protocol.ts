@@ -1,5 +1,10 @@
 import { z } from "zod";
-import { PermissionMode, SessionStatus } from "./models.js";
+import {
+  AskUserQuestionAnnotation,
+  AskUserQuestionItem,
+  PermissionMode,
+  SessionStatus,
+} from "./models.js";
 
 // ============================================================================
 // WebSocket protocol
@@ -51,6 +56,18 @@ export const ClientPermissionDecision = z.object({
   decision: z.enum(["allow_once", "allow_always", "deny"]),
 });
 
+// User-submitted answers for an `AskUserQuestion` tool call. Routed to
+// `SessionManager.resolveAskUserQuestion`, which resolves the corresponding
+// `canUseTool` promise with `{ behavior: "allow", updatedInput: { answers,
+// annotations? } }` (matching the SDK's `AskUserQuestionOutput`).
+export const ClientAskUserAnswer = z.object({
+  type: z.literal("ask_user_answer"),
+  sessionId: z.string(),
+  askId: z.string(),
+  answers: z.record(z.string(), z.string()),
+  annotations: z.record(z.string(), AskUserQuestionAnnotation).optional(),
+});
+
 export const ClientFrame = z.discriminatedUnion("type", [
   ClientHello,
   ClientSubscribe,
@@ -58,6 +75,7 @@ export const ClientFrame = z.discriminatedUnion("type", [
   ClientUserMessage,
   ClientInterrupt,
   ClientPermissionDecision,
+  ClientAskUserAnswer,
 ]);
 export type ClientFrame = z.infer<typeof ClientFrame>;
 
@@ -128,6 +146,18 @@ export const ServerPermissionRequest = z.object({
   blastRadius: z.string().nullable(),
 });
 
+// Broadcast when the SDK's `AskUserQuestion` tool fires. The client renders an
+// in-transcript multiple-choice card (see `AskUserQuestionCard`) and replies
+// with a `ClientAskUserAnswer` frame once the user submits. `askId` is the
+// SDK `toolUseID` — we reuse it as the correlation id.
+export const ServerAskUserQuestion = z.object({
+  type: z.literal("ask_user_question"),
+  sessionId: z.string(),
+  seq: z.number().int().nonnegative(),
+  askId: z.string(),
+  questions: z.array(AskUserQuestionItem),
+});
+
 export const ServerTurnEnd = z.object({
   type: z.literal("turn_end"),
   sessionId: z.string(),
@@ -185,6 +215,7 @@ export const ServerFrame = z.discriminatedUnion("type", [
   ServerToolUse,
   ServerToolResult,
   ServerPermissionRequest,
+  ServerAskUserQuestion,
   ServerTurnEnd,
   ServerUserMessage,
   ServerRefreshTranscript,

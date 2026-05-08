@@ -1,19 +1,23 @@
 // ---------------------------------------------------------------------------
 // Per-message action row.
 //
-// Rendered alongside user / assistant_text / tool_result bubbles in Chat.tsx.
-// Wraps into an absolutely-positioned row that stays hidden until the bubble's
-// `group` wrapper is hovered (desktop) or the `…` popover is opened (mobile).
+// Rendered as a sibling BELOW user / assistant_text / tool_result bubbles in
+// Chat.tsx. Hidden by default — appears on hover (desktop) or when the parent
+// bubble has been tapped (mobile). The component is stateless about reveal:
+// the parent owns a single `revealedSeq` and passes `revealed` down so only
+// one bubble ever shows its row at a time.
 //
 // We intentionally don't ship this on tool_use / thinking / permission_request
 // pieces — those aren't user-addressable content and the actions would be
 // awkward (a tool_use chip is a summary, not a message; permission_request is
 // interactive).
 // ---------------------------------------------------------------------------
-import { useEffect, useRef, useState } from "react";
-import { Copy, FileCode, Link as LinkIcon, MoreHorizontal } from "lucide-react";
+import { useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { Copy, FileCode, GitFork, Link as LinkIcon } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { toast } from "@/lib/toast";
+import { api, ApiError } from "@/api/client";
 
 async function copy(text: string, successMsg = "Copied"): Promise<void> {
   // Clipboard API is async and only works on secure contexts / focused docs.
@@ -41,6 +45,17 @@ export interface MessageActionsProps {
    * session, dropping the anchor. */
   sessionId: string;
   seq?: number;
+  /** Align the chip row with the bubble. User bubbles are right-aligned,
+   * assistant / tool_result bubbles are left-aligned. */
+  align?: "start" | "end";
+  /** Mobile reveal override. When true, the row is forced visible regardless
+   * of hover state; this is how the Chat-level `revealedSeq` pokes through
+   * the default `opacity-0` on touch devices. Desktop still uses hover — the
+   * `md:` hover classes override this (see the class list below). */
+  revealed?: boolean;
+  /** Called after any action runs. Chat uses it to clear `revealedSeq` so
+   * the chips auto-dismiss once the user picked something. */
+  onActionComplete?: () => void;
 }
 
 function buildPermalink(sessionId: string, seq?: number): string {
@@ -52,28 +67,37 @@ function buildPermalink(sessionId: string, seq?: number): string {
   return seq != null ? `${base}#seq-${seq}` : base;
 }
 
-/** The flat button used on desktop for a single action. */
-function ActionButton({
+/** Rounded-full pill chip matching the composer chip rail. */
+function ActionChip({
   icon: Icon,
   label,
   onClick,
   title,
+  disabled,
 }: {
   icon: typeof Copy;
   label: string;
   onClick: () => void;
   title: string;
+  disabled?: boolean;
 }) {
   return (
     <button
       type="button"
-      onClick={onClick}
+      onClick={(e) => {
+        // Stop the click from bubbling up to the bubble wrapper's tap
+        // handler — otherwise tapping a chip would immediately toggle
+        // `revealedSeq` back on, racing the `onActionComplete` clear.
+        e.stopPropagation();
+        if (!disabled) onClick();
+      }}
       title={title}
       aria-label={title}
-      className="h-6 px-1.5 rounded-[4px] border border-line bg-paper/80 hover:bg-paper text-[11px] text-ink-muted inline-flex items-center gap-1"
+      disabled={disabled}
+      className="h-7 px-2.5 rounded-full border border-line bg-canvas text-[12px] flex items-center gap-1 whitespace-nowrap text-ink-soft hover:bg-paper disabled:opacity-50"
     >
-      <Icon className="h-3.5 w-3.5" />
-      <span className="hidden md:inline">{label}</span>
+      <Icon className="w-3 h-3" />
+      <span>{label}</span>
     </button>
   );
 }
@@ -83,132 +107,107 @@ export function MessageActions({
   markdown,
   sessionId,
   seq,
+  align = "start",
+  revealed = false,
+  onActionComplete,
 }: MessageActionsProps): JSX.Element {
-  const [menuOpen, setMenuOpen] = useState(false);
-  const menuRef = useRef<HTMLDivElement>(null);
+  const [forking, setForking] = useState(false);
+  const navigate = useNavigate();
 
-  useEffect(() => {
-    if (!menuOpen) return;
-    const onDown = (ev: MouseEvent | TouchEvent) => {
-      if (!menuRef.current) return;
-      if (menuRef.current.contains(ev.target as Node)) return;
-      setMenuOpen(false);
-    };
-    const onKey = (ev: KeyboardEvent) => {
-      if (ev.key === "Escape") setMenuOpen(false);
-    };
-    document.addEventListener("mousedown", onDown);
-    document.addEventListener("touchstart", onDown);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDown);
-      document.removeEventListener("touchstart", onDown);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [menuOpen]);
+  const done = () => {
+    onActionComplete?.();
+  };
 
   const doCopyText = () => {
     void copy(text);
-    setMenuOpen(false);
+    done();
   };
   const doCopyMarkdown = () => {
     if (markdown == null) return;
     void copy(markdown);
-    setMenuOpen(false);
+    done();
   };
   const doCopyPermalink = () => {
     const url = buildPermalink(sessionId, seq);
     void copy(url, "Permalink copied");
-    setMenuOpen(false);
+    done();
+  };
+  // Branch this session at `seq` into a new top-level session. The fork
+  // copies every event with `seq <= this event.seq`, inherits project /
+  // model / mode, and lands with a fresh SDK conversation — the assistant
+  // has no memory of being forked. On success we navigate straight into
+  // the new session so the user can keep going from the branch point.
+  const doFork = async () => {
+    if (forking || seq == null) return;
+    setForking(true);
+    try {
+      const { session } = await api.forkSession(sessionId, { upToSeq: seq });
+      toast("Branched into new session");
+      done();
+      navigate(`/session/${session.id}`);
+    } catch (err) {
+      const code =
+        err instanceof ApiError ? err.code : "fork_failed";
+      toast(
+        code === "archived"
+          ? "Can't branch from an archived session"
+          : "Branch failed",
+      );
+      done();
+    } finally {
+      setForking(false);
+    }
   };
 
   return (
-    <>
-      {/* Desktop: inline row at top-right of the bubble, visible on hover. */}
-      <div
-        className={cn(
-          "hidden md:flex absolute right-0 top-0 -translate-y-1/2 gap-1",
-          "opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity",
-          "pointer-events-none group-hover:pointer-events-auto focus-within:pointer-events-auto",
-        )}
-      >
-        <ActionButton
-          icon={Copy}
-          label="Copy"
-          title="Copy text"
-          onClick={doCopyText}
-        />
-        {markdown != null && (
-          <ActionButton
-            icon={FileCode}
-            label="Markdown"
-            title="Copy as markdown"
-            onClick={doCopyMarkdown}
-          />
-        )}
-        <ActionButton
-          icon={LinkIcon}
-          label="Link"
-          title="Copy permalink"
-          onClick={doCopyPermalink}
-        />
-      </div>
-
-      {/* Mobile: single … button at top-right that opens a popover. */}
-      <div ref={menuRef} className="md:hidden absolute right-0 top-0 -translate-y-1/2">
-        <button
-          type="button"
-          onClick={() => setMenuOpen((v) => !v)}
-          title="Message actions"
-          aria-label="Message actions"
-          aria-expanded={menuOpen}
-          className="h-6 w-6 rounded-[4px] border border-line bg-paper/80 text-ink-muted inline-flex items-center justify-center"
-        >
-          <MoreHorizontal className="h-3.5 w-3.5" />
-        </button>
-        {menuOpen && (
-          <div
-            className="absolute right-0 top-full mt-1 z-[60] min-w-[150px] rounded-[8px] border border-line bg-paper shadow-lift py-1"
-            role="menu"
-          >
-            <PopoverItem icon={Copy} label="Copy text" onClick={doCopyText} />
-            {markdown != null && (
-              <PopoverItem
-                icon={FileCode}
-                label="Copy as markdown"
-                onClick={doCopyMarkdown}
-              />
-            )}
-            <PopoverItem
-              icon={LinkIcon}
-              label="Copy permalink"
-              onClick={doCopyPermalink}
-            />
-          </div>
-        )}
-      </div>
-    </>
-  );
-}
-
-function PopoverItem({
-  icon: Icon,
-  label,
-  onClick,
-}: {
-  icon: typeof Copy;
-  label: string;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      role="menuitem"
-      onClick={onClick}
-      className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px] text-ink hover:bg-canvas text-left"
+    <div
+      className={cn(
+        // Rendered in normal flow as a sibling below the bubble. Tight top
+        // margin so the chips hug the bubble without touching it.
+        "flex gap-1 mt-1",
+        align === "end" ? "justify-end" : "justify-start",
+        // Default hidden. Mobile: parent flips `revealed` to force-show.
+        // Desktop (md+): hover on the `group` wrapper wins unconditionally,
+        // so the tap state is ignored — exactly what we want for pointer
+        // devices where the bubble isn't tappable.
+        "transition-opacity duration-150",
+        revealed ? "opacity-100" : "opacity-0",
+        "md:opacity-0 md:group-hover:opacity-100 md:focus-within:opacity-100",
+        // Don't let the hidden row swallow clicks aimed at pieces behind it.
+        revealed
+          ? "pointer-events-auto"
+          : "pointer-events-none md:group-hover:pointer-events-auto md:focus-within:pointer-events-auto",
+      )}
     >
-      <Icon className="h-3.5 w-3.5 text-ink-muted" />
-      <span>{label}</span>
-    </button>
+      <ActionChip
+        icon={Copy}
+        label="Copy"
+        title="Copy text"
+        onClick={doCopyText}
+      />
+      {markdown != null && (
+        <ActionChip
+          icon={FileCode}
+          label="Markdown"
+          title="Copy as markdown"
+          onClick={doCopyMarkdown}
+        />
+      )}
+      <ActionChip
+        icon={LinkIcon}
+        label="Link"
+        title="Copy permalink"
+        onClick={doCopyPermalink}
+      />
+      {seq != null && (
+        <ActionChip
+          icon={GitFork}
+          label="Branch"
+          title="Branch from here into a new session"
+          onClick={() => void doFork()}
+          disabled={forking}
+        />
+      )}
+    </div>
   );
 }

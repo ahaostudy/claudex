@@ -1335,6 +1335,64 @@ describe("session HTTP routes", () => {
       expect(res.statusCode).toBe(404);
       expect(res.json().error).toBe("not_found");
     });
+
+    it("GET /api/grants requires auth", async () => {
+      const ctx = await bootstrap();
+      disposers.push(ctx.cleanup);
+      await seedGrants(ctx);
+      const res = await ctx.app.inject({
+        method: "GET",
+        url: `/api/grants`,
+      });
+      expect(res.statusCode).toBe(401);
+    });
+
+    it("GET /api/grants returns global + session grants, global first, newest first within group", async () => {
+      const ctx = await bootstrap();
+      disposers.push(ctx.cleanup);
+      const s = await seedGrants(ctx);
+      // Add a second global grant at a later timestamp so we can verify
+      // the secondary sort (created_at DESC within a scope group).
+      ctx.dbh.db
+        .prepare(
+          `INSERT INTO tool_grants (id, session_id, tool_name, input_signature, created_at)
+           VALUES (?, NULL, ?, ?, ?)`,
+        )
+        .run("g-global-2", "Bash", "ls -la", "2030-01-01T00:00:00Z");
+      const res = await ctx.app.inject({
+        method: "GET",
+        url: `/api/grants`,
+        headers: { cookie: ctx.cookie },
+      });
+      expect(res.statusCode).toBe(200);
+      const grants = res.json().grants as Array<{
+        id: string;
+        toolName: string;
+        signature: string;
+        scope: "session" | "global";
+        sessionId?: string;
+        sessionTitle?: string;
+        createdAt: string;
+      }>;
+      expect(grants).toHaveLength(4);
+      // Global rows come first.
+      expect(grants[0].scope).toBe("global");
+      expect(grants[1].scope).toBe("global");
+      expect(grants[2].scope).toBe("session");
+      expect(grants[3].scope).toBe("session");
+      // Within global: newest (g-global-2 @ 2030) before g-global (seeded now()).
+      // `seedGrants` uses `new Date().toISOString()` which is in 2026, so
+      // g-global-2 at 2030 sorts first.
+      expect(grants[0].id).toBe("g-global-2");
+      expect(grants[1].id).toBe("g-global");
+      // Session rows carry owning session metadata; global rows don't.
+      const globalRow = grants[0];
+      expect(globalRow.sessionId).toBeUndefined();
+      expect(globalRow.sessionTitle).toBeUndefined();
+      const sessionRow = grants.find((g) => g.id === "g-sess-1")!;
+      expect(sessionRow.sessionId).toBe(s.id);
+      expect(typeof sessionRow.sessionTitle).toBe("string");
+    });
   });
 
   // ---------------------------------------------------------------------------
@@ -1511,6 +1569,247 @@ describe("session HTTP routes", () => {
       });
       expect(res.statusCode).toBe(400);
       expect(res.json().error).toBe("has_attachments");
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // POST /api/sessions/:id/fork
+  //
+  // Branch a session at a specific seq into a brand-new session under the
+  // same project. The fork inherits project / model / mode, copies every
+  // event with `seq <= upToSeq` verbatim (renumbered 1..N), and starts with
+  // a null sdk_session_id so the SDK treats it as a fresh conversation.
+  // ---------------------------------------------------------------------------
+  describe("POST /api/sessions/:id/fork", () => {
+    async function seedWithEvents(
+      ctx: {
+        app: FastifyInstance;
+        cookie: string;
+        tmpDir: string;
+        dbh: ClaudexDb;
+      },
+      count: number,
+      opts?: { title?: string },
+    ) {
+      const proj = await ctx.app
+        .inject({
+          method: "POST",
+          url: "/api/projects",
+          headers: { cookie: ctx.cookie },
+          payload: { name: "demo", path: ctx.tmpDir },
+        })
+        .then((r) => r.json().project);
+      trustProject(ctx.dbh, proj.id);
+      const s = await ctx.app
+        .inject({
+          method: "POST",
+          url: "/api/sessions",
+          headers: { cookie: ctx.cookie },
+          payload: {
+            projectId: proj.id,
+            title: opts?.title ?? "origin",
+            model: "claude-opus-4-7",
+            mode: "acceptEdits",
+            worktree: false,
+          },
+        })
+        .then((r) => r.json().session as { id: string });
+      // Seed `count` events, alternating user / assistant so we can verify
+      // kinds and payloads round-trip intact.
+      const now = new Date().toISOString();
+      const stmt = ctx.dbh.db.prepare(
+        `INSERT INTO session_events (id, session_id, kind, seq, created_at, payload)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+      );
+      for (let i = 0; i < count; i++) {
+        const kind = i % 2 === 0 ? "user_message" : "assistant_text";
+        stmt.run(
+          `ev-${i}`,
+          s.id,
+          kind,
+          i,
+          now,
+          JSON.stringify({ text: `m-${i}` }),
+        );
+      }
+      return { proj, s };
+    }
+
+    it("rejects unauthenticated", async () => {
+      const ctx = await bootstrap();
+      disposers.push(ctx.cleanup);
+      const { s } = await seedWithEvents(ctx, 0);
+      const res = await ctx.app.inject({
+        method: "POST",
+        url: `/api/sessions/${s.id}/fork`,
+        payload: {},
+      });
+      expect(res.statusCode).toBe(401);
+    });
+
+    it("returns 404 for an unknown session id", async () => {
+      const ctx = await bootstrap();
+      disposers.push(ctx.cleanup);
+      const res = await ctx.app.inject({
+        method: "POST",
+        url: "/api/sessions/no-such-id/fork",
+        headers: { cookie: ctx.cookie },
+        payload: {},
+      });
+      expect(res.statusCode).toBe(404);
+      expect(res.json().error).toBe("not_found");
+    });
+
+    it("returns 409 archived when the source session is archived", async () => {
+      const ctx = await bootstrap();
+      disposers.push(ctx.cleanup);
+      const { s } = await seedWithEvents(ctx, 2);
+      await ctx.app.inject({
+        method: "POST",
+        url: `/api/sessions/${s.id}/archive`,
+        headers: { cookie: ctx.cookie },
+      });
+      const res = await ctx.app.inject({
+        method: "POST",
+        url: `/api/sessions/${s.id}/fork`,
+        headers: { cookie: ctx.cookie },
+        payload: {},
+      });
+      expect(res.statusCode).toBe(409);
+      expect(res.json().error).toBe("archived");
+    });
+
+    it("happy path: fork at seq 5 copies 5 events with fresh ids and matching kinds/payloads", async () => {
+      const ctx = await bootstrap();
+      disposers.push(ctx.cleanup);
+      // Source has 10 events at seq 0..9.
+      const { proj, s } = await seedWithEvents(ctx, 10);
+
+      const res = await ctx.app.inject({
+        method: "POST",
+        url: `/api/sessions/${s.id}/fork`,
+        headers: { cookie: ctx.cookie },
+        payload: { upToSeq: 4 }, // copy seq 0..4 → 5 events in the fork
+      });
+      expect(res.statusCode).toBe(200);
+      const fork = res.json().session as {
+        id: string;
+        projectId: string;
+        model: string;
+        mode: string;
+        sdkSessionId: string | null;
+        parentSessionId: string | null;
+        status: string;
+        title: string;
+      };
+      expect(fork.id).not.toBe(s.id);
+      expect(fork.projectId).toBe(proj.id);
+      expect(fork.model).toBe("claude-opus-4-7");
+      expect(fork.mode).toBe("acceptEdits");
+      expect(fork.sdkSessionId).toBeNull();
+      expect(fork.parentSessionId).toBeNull();
+      expect(fork.status).toBe("idle");
+      expect(fork.title).toBe("Fork of origin");
+
+      // Source events for seq 0..4
+      const sourceRows = ctx.dbh.db
+        .prepare(
+          "SELECT id, kind, seq, payload FROM session_events WHERE session_id = ? AND seq <= 4 ORDER BY seq ASC",
+        )
+        .all(s.id) as Array<{
+        id: string;
+        kind: string;
+        seq: number;
+        payload: string;
+      }>;
+      expect(sourceRows).toHaveLength(5);
+
+      // Fork events should be 5 rows, renumbered 1..5, same kinds/payloads,
+      // but with *different* ids than the source rows.
+      const forkRows = ctx.dbh.db
+        .prepare(
+          "SELECT id, kind, seq, payload FROM session_events WHERE session_id = ? ORDER BY seq ASC",
+        )
+        .all(fork.id) as Array<{
+        id: string;
+        kind: string;
+        seq: number;
+        payload: string;
+      }>;
+      expect(forkRows).toHaveLength(5);
+      expect(forkRows.map((r) => r.seq)).toEqual([1, 2, 3, 4, 5]);
+      for (let i = 0; i < 5; i++) {
+        expect(forkRows[i].kind).toBe(sourceRows[i].kind);
+        expect(forkRows[i].payload).toBe(sourceRows[i].payload);
+        // Fresh id per fork row — no collision with the source.
+        expect(forkRows[i].id).not.toBe(sourceRows[i].id);
+      }
+
+      // Source is untouched — it still has its full 10 events.
+      const srcTotal = ctx.dbh.db
+        .prepare("SELECT COUNT(*) AS c FROM session_events WHERE session_id = ?")
+        .get(s.id) as { c: number };
+      expect(srcTotal.c).toBe(10);
+    });
+
+    it("fork inherits project_id / model / mode but NOT sdk_session_id", async () => {
+      const ctx = await bootstrap();
+      disposers.push(ctx.cleanup);
+      const { proj, s } = await seedWithEvents(ctx, 3);
+      // Stamp an sdk_session_id on the source so we can prove it doesn't
+      // leak into the fork row.
+      ctx.dbh.db
+        .prepare("UPDATE sessions SET sdk_session_id = ? WHERE id = ?")
+        .run("sdk-abc-123", s.id);
+
+      const res = await ctx.app.inject({
+        method: "POST",
+        url: `/api/sessions/${s.id}/fork`,
+        headers: { cookie: ctx.cookie },
+        payload: {},
+      });
+      expect(res.statusCode).toBe(200);
+      const fork = res.json().session as {
+        id: string;
+        projectId: string;
+        model: string;
+        mode: string;
+        sdkSessionId: string | null;
+      };
+      expect(fork.projectId).toBe(proj.id);
+      expect(fork.model).toBe("claude-opus-4-7");
+      expect(fork.mode).toBe("acceptEdits");
+      // The whole point — the fork is a fresh SDK conversation.
+      expect(fork.sdkSessionId).toBeNull();
+      // Omitted upToSeq forks at the latest event (seq 2 → 3 events copied,
+      // renumbered 1..3).
+      const forkRows = ctx.dbh.db
+        .prepare(
+          "SELECT seq FROM session_events WHERE session_id = ? ORDER BY seq ASC",
+        )
+        .all(fork.id) as Array<{ seq: number }>;
+      expect(forkRows.map((r) => r.seq)).toEqual([1, 2, 3]);
+    });
+
+    it("title is truncated to 60 chars when the source title is long", async () => {
+      const ctx = await bootstrap();
+      disposers.push(ctx.cleanup);
+      // 80-char source title → fork title `"Fork of "` (8) + 52 chars + "…"
+      // = 60 chars total. Verifies both the ellipsis and the length cap.
+      const longTitle = "x".repeat(80);
+      const { s } = await seedWithEvents(ctx, 1, { title: longTitle });
+
+      const res = await ctx.app.inject({
+        method: "POST",
+        url: `/api/sessions/${s.id}/fork`,
+        headers: { cookie: ctx.cookie },
+        payload: {},
+      });
+      expect(res.statusCode).toBe(200);
+      const fork = res.json().session as { title: string };
+      expect(fork.title.length).toBe(60);
+      expect(fork.title.endsWith("…")).toBe(true);
+      expect(fork.title.startsWith("Fork of ")).toBe(true);
     });
   });
 });

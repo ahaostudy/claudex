@@ -1,0 +1,251 @@
+import { describe, it, expect, afterEach } from "vitest";
+import { bootstrapAuthedApp } from "./helpers.js";
+import type { StatsResponse } from "@claudex/shared";
+
+// ---------------------------------------------------------------------------
+// Stats routes — single-snapshot aggregation over sessions + session_events.
+// We seed rows directly against the DB (same pattern as usage-routes.test.ts)
+// so the tests stay insulated from the agent-runner mock dance. Each case
+// boots a fresh app so state is independent.
+// ---------------------------------------------------------------------------
+
+const bootstrap = bootstrapAuthedApp;
+
+interface Ctx {
+  app: Awaited<ReturnType<typeof bootstrapAuthedApp>>["app"];
+  dbh: Awaited<ReturnType<typeof bootstrapAuthedApp>>["dbh"];
+  cookie: string;
+  tmpDir: string;
+}
+
+async function createProject(ctx: Ctx, name = "demo"): Promise<string> {
+  const res = await ctx.app.inject({
+    method: "POST",
+    url: "/api/projects",
+    headers: { cookie: ctx.cookie },
+    payload: { name, path: ctx.tmpDir },
+  });
+  const id = res.json().project.id as string;
+  // New projects land untrusted (migration 11); flip so createSession works.
+  ctx.dbh.db.prepare("UPDATE projects SET trusted = 1 WHERE id = ?").run(id);
+  return id;
+}
+
+async function createSession(
+  ctx: Ctx,
+  projectId: string,
+  title = "session",
+): Promise<string> {
+  const res = await ctx.app.inject({
+    method: "POST",
+    url: "/api/sessions",
+    headers: { cookie: ctx.cookie },
+    payload: {
+      projectId,
+      title,
+      model: "claude-opus-4-7",
+      mode: "default",
+      worktree: false,
+    },
+  });
+  return res.json().session.id as string;
+}
+
+function setStatus(ctx: Ctx, sessionId: string, status: string): void {
+  // Direct-write bypass of the usual archive flow — the stats aggregator only
+  // reads the `status` column, so we don't need to bother with archived_at.
+  ctx.dbh.db
+    .prepare("UPDATE sessions SET status = ? WHERE id = ?")
+    .run(status, sessionId);
+}
+
+function seedTurnEnd(
+  ctx: Ctx,
+  sessionId: string,
+  usage: {
+    inputTokens?: number;
+    outputTokens?: number;
+    cacheReadInputTokens?: number;
+    cacheCreationInputTokens?: number;
+  },
+  seq = 1,
+): void {
+  ctx.dbh.db
+    .prepare(
+      `INSERT INTO session_events (id, session_id, kind, seq, created_at, payload)
+       VALUES (?, ?, 'turn_end', ?, ?, ?)`,
+    )
+    .run(
+      `ev-${Math.random().toString(36).slice(2)}`,
+      sessionId,
+      seq,
+      new Date().toISOString(),
+      JSON.stringify({ usage }),
+    );
+}
+
+function seedToolUse(
+  ctx: Ctx,
+  sessionId: string,
+  toolName: string,
+  seq: number,
+): void {
+  ctx.dbh.db
+    .prepare(
+      `INSERT INTO session_events (id, session_id, kind, seq, created_at, payload)
+       VALUES (?, ?, 'tool_use', ?, ?, ?)`,
+    )
+    .run(
+      `ev-${Math.random().toString(36).slice(2)}`,
+      sessionId,
+      seq,
+      new Date().toISOString(),
+      JSON.stringify({
+        toolUseId: `tu-${seq}`,
+        name: toolName,
+        input: {},
+      }),
+    );
+}
+
+describe("stats routes", () => {
+  const disposers: Array<() => Promise<void>> = [];
+  afterEach(async () => {
+    while (disposers.length) await disposers.pop()!();
+  });
+
+  it("requires auth", async () => {
+    const ctx = await bootstrap();
+    disposers.push(ctx.cleanup);
+    const res = await ctx.app.inject({
+      method: "GET",
+      url: "/api/stats",
+    });
+    expect(res.statusCode).toBe(401);
+  });
+
+  it("returns zeros + nulls + empty arrays on an empty DB", async () => {
+    const ctx = await bootstrap();
+    disposers.push(ctx.cleanup);
+    const res = await ctx.app.inject({
+      method: "GET",
+      url: "/api/stats",
+      headers: { cookie: ctx.cookie },
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as StatsResponse;
+    expect(body.totalSessions).toBe(0);
+    expect(body.activeSessions).toBe(0);
+    expect(body.archivedSessions).toBe(0);
+    expect(body.totalTurns).toBe(0);
+    expect(body.avgTurnsPerSession).toBe(0);
+    expect(body.totalTokens).toBe(0);
+    expect(body.avgTokensPerTurn).toBe(0);
+    expect(body.topTools).toEqual([]);
+    expect(body.busiestProject).toBeNull();
+    expect(body.oldestSession).toBeNull();
+    expect(body.newestSession).toBeNull();
+  });
+
+  it("aggregates seeded sessions, turns, usage, and tools correctly", async () => {
+    const ctx = await bootstrap();
+    disposers.push(ctx.cleanup);
+    const projectId = await createProject(ctx, "alpha");
+
+    // Three sessions: one archived, one running, one idle.
+    const sArchived = await createSession(ctx, projectId, "zzz-archived");
+    const sRunning = await createSession(ctx, projectId, "yyy-running");
+    const sIdle = await createSession(ctx, projectId, "xxx-idle");
+    setStatus(ctx, sArchived, "archived");
+    setStatus(ctx, sRunning, "running");
+    // sIdle keeps default status from POST /api/sessions — which is "idle".
+
+    // Nudge `created_at` apart by hand so oldest/newest ordering is stable.
+    // Three `createSession` calls inside the same millisecond otherwise tie
+    // on created_at and SQLite breaks the tie however it likes.
+    ctx.dbh.db
+      .prepare("UPDATE sessions SET created_at = ? WHERE id = ?")
+      .run("2025-01-01T00:00:00.000Z", sArchived);
+    ctx.dbh.db
+      .prepare("UPDATE sessions SET created_at = ? WHERE id = ?")
+      .run("2025-02-01T00:00:00.000Z", sRunning);
+    ctx.dbh.db
+      .prepare("UPDATE sessions SET created_at = ? WHERE id = ?")
+      .run("2025-03-01T00:00:00.000Z", sIdle);
+
+    // Five turn_end events, distributed across sessions. Token math:
+    //   t1: 100 + 50                    = 150
+    //   t2: 200 + 100 + 50 (cacheRead)  = 350
+    //   t3: 300 + 200                   = 500
+    //   t4: 50                           = 50
+    //   t5: 1000 + 500 + 100 (cacheCr.) = 1600
+    // total = 2650
+    seedTurnEnd(ctx, sRunning, { inputTokens: 100, outputTokens: 50 }, 1);
+    seedTurnEnd(
+      ctx,
+      sRunning,
+      { inputTokens: 200, outputTokens: 100, cacheReadInputTokens: 50 },
+      2,
+    );
+    seedTurnEnd(ctx, sIdle, { inputTokens: 300, outputTokens: 200 }, 1);
+    seedTurnEnd(ctx, sIdle, { inputTokens: 50 }, 2);
+    seedTurnEnd(
+      ctx,
+      sArchived,
+      {
+        inputTokens: 1000,
+        outputTokens: 500,
+        cacheCreationInputTokens: 100,
+      },
+      1,
+    );
+
+    // 10 tool_use events across 3 tools: Read x5, Edit x3, Bash x2.
+    let seq = 100;
+    for (let i = 0; i < 5; i++) seedToolUse(ctx, sRunning, "Read", seq++);
+    for (let i = 0; i < 3; i++) seedToolUse(ctx, sIdle, "Edit", seq++);
+    for (let i = 0; i < 2; i++) seedToolUse(ctx, sArchived, "Bash", seq++);
+
+    const res = await ctx.app.inject({
+      method: "GET",
+      url: "/api/stats",
+      headers: { cookie: ctx.cookie },
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as StatsResponse;
+
+    // Session status buckets.
+    expect(body.totalSessions).toBe(3);
+    expect(body.activeSessions).toBe(1); // only running (awaiting + running counted; here just running)
+    expect(body.archivedSessions).toBe(1);
+
+    // Turn aggregates.
+    expect(body.totalTurns).toBe(5);
+    // Non-archived sessions = 2 (running + idle). avg = 5 / 2 = 2.5.
+    expect(body.avgTurnsPerSession).toBe(2.5);
+
+    // Token aggregates.
+    expect(body.totalTokens).toBe(2650);
+    // 2650 / 5 = 530 exactly.
+    expect(body.avgTokensPerTurn).toBe(530);
+
+    // Busiest project — only one project, 3 sessions.
+    expect(body.busiestProject).not.toBeNull();
+    expect(body.busiestProject!.id).toBe(projectId);
+    expect(body.busiestProject!.name).toBe("alpha");
+    expect(body.busiestProject!.sessionCount).toBe(3);
+
+    // Top tools — Read > Edit > Bash, all three surface because we only have 3.
+    expect(body.topTools).toHaveLength(3);
+    expect(body.topTools[0]).toEqual({ name: "Read", uses: 5 });
+    expect(body.topTools[1]).toEqual({ name: "Edit", uses: 3 });
+    expect(body.topTools[2]).toEqual({ name: "Bash", uses: 2 });
+
+    // Oldest / newest session refs by created_at.
+    expect(body.oldestSession).not.toBeNull();
+    expect(body.newestSession).not.toBeNull();
+    // sArchived was created first in this test, sIdle last.
+    expect(body.oldestSession!.id).toBe(sArchived);
+    expect(body.newestSession!.id).toBe(sIdle);
+  });
+});

@@ -43,6 +43,13 @@ class MockRunner implements Runner {
   resolvePermission(id: string, d: { behavior: string }) {
     this.permissions.push({ id, behavior: d.behavior });
   }
+  resolveAskUserQuestion(
+    _id: string,
+    _answers: Record<string, string>,
+    _annotations?: unknown,
+  ) {
+    // Mock only — real tests that care about AskUserQuestion use a dedicated harness.
+  }
   async interrupt() {
     this.interrupted += 1;
   }

@@ -2,6 +2,8 @@ import { create } from "zustand";
 import { api } from "@/api/client";
 import { createWsClient, type WsClient, type WsDiagnostics } from "@/api/ws";
 import type {
+  AskUserQuestionAnnotation,
+  AskUserQuestionItem,
   ClientFrame,
   Session,
   SessionEvent,
@@ -63,6 +65,20 @@ export type UIPiece =
       input: Record<string, unknown>;
       summary: string;
       seq?: number;
+    }
+  // SDK's AskUserQuestion tool — rendered as an in-transcript multiple-choice
+  // card. Distinct from permission_request because it's an interaction, not a
+  // security gate. `answers` is set once the user submits; until then the
+  // card is pending. `answerSeq` tracks the seq of the sibling
+  // `ask_user_answer` event so we can dedupe on refetch.
+  | {
+      kind: "ask_user_question";
+      askId: string;
+      questions: AskUserQuestionItem[];
+      seq?: number;
+      answers?: Record<string, string>;
+      annotations?: Record<string, AskUserQuestionAnnotation>;
+      answerSeq?: number;
     }
   // `pending` is a UI-only piece (never persisted, never comes off the wire).
   // Inserted right after a user_message echo to give the user immediate
@@ -140,6 +156,12 @@ interface SessionState {
     approvalId: string,
     decision: "allow_once" | "allow_always" | "deny",
   ) => void;
+  resolveAskUserQuestion: (
+    sessionId: string,
+    askId: string,
+    answers: Record<string, string>,
+    annotations?: Record<string, AskUserQuestionAnnotation>,
+  ) => void;
   setViewMode: (mode: ViewMode) => void;
   forgetSession: (id: string) => void;
 }
@@ -200,6 +222,21 @@ function eventToPiece(ev: SessionEvent): UIPiece | null {
         summary: String(p.title ?? ""),
         seq: ev.seq,
       };
+    case "ask_user_question":
+      return {
+        kind: "ask_user_question",
+        askId: String(p.askId ?? ""),
+        questions: Array.isArray(p.questions)
+          ? (p.questions as AskUserQuestionItem[])
+          : [],
+        seq: ev.seq,
+      };
+    case "ask_user_answer":
+      // Answers land as a sibling event; we don't render them as a
+      // standalone piece. The reducer (see `eventsToPieces` below)
+      // folds them into the matching `ask_user_question` piece. Return null
+      // here so the default piece builder skips it.
+      return null;
     default:
       return null;
   }
@@ -237,9 +274,54 @@ function frameToPiece(frame: ServerFrame): UIPiece | null {
         input: frame.toolInput,
         summary: frame.summary,
       };
+    case "ask_user_question":
+      return {
+        kind: "ask_user_question",
+        askId: frame.askId,
+        questions: frame.questions,
+      };
     default:
       return null;
   }
+}
+
+/**
+ * Build UIPieces from a list of persisted SessionEvents, folding any
+ * `ask_user_answer` events into the matching `ask_user_question` piece so the
+ * card renders in its resolved (read-only) state after refetch.
+ */
+function eventsToPieces(events: SessionEvent[]): UIPiece[] {
+  const pieces: UIPiece[] = [];
+  // Map askId → index into `pieces` for fast answer-fold.
+  const askIdx = new Map<string, number>();
+  for (const ev of events) {
+    if (ev.kind === "ask_user_answer") {
+      const p = ev.payload as Record<string, any>;
+      const askId = String(p.askId ?? "");
+      const idx = askIdx.get(askId);
+      if (idx !== undefined) {
+        const existing = pieces[idx];
+        if (existing.kind === "ask_user_question") {
+          pieces[idx] = {
+            ...existing,
+            answers: (p.answers as Record<string, string>) ?? {},
+            annotations:
+              (p.annotations as Record<string, AskUserQuestionAnnotation>) ??
+              undefined,
+            answerSeq: ev.seq,
+          };
+        }
+      }
+      continue;
+    }
+    const piece = eventToPiece(ev);
+    if (!piece) continue;
+    if (piece.kind === "ask_user_question") {
+      askIdx.set(piece.askId, pieces.length);
+    }
+    pieces.push(piece);
+  }
+  return pieces;
 }
 
 export const useSessions = create<SessionState>((set, get) => {
@@ -433,6 +515,7 @@ export const useSessions = create<SessionState>((set, get) => {
         frame.type === "tool_use" ||
         frame.type === "tool_result" ||
         frame.type === "permission_request" ||
+        frame.type === "ask_user_question" ||
         frame.type === "turn_end" ||
         frame.type === "error"
       ) {
@@ -483,9 +566,7 @@ export const useSessions = create<SessionState>((set, get) => {
     }));
     try {
       const res = await api.listEvents(sessionId, { limit: 200 });
-      const pieces = res.events
-        .map(eventToPiece)
-        .filter((p): p is UIPiece => p != null);
+      const pieces = eventsToPieces(res.events);
       set((s) => ({
         transcripts: { ...s.transcripts, [sessionId]: pieces },
         transcriptMeta: {
@@ -536,9 +617,7 @@ export const useSessions = create<SessionState>((set, get) => {
         beforeSeq: lowest,
         limit: 200,
       });
-      const older = res.events
-        .map(eventToPiece)
-        .filter((p): p is UIPiece => p != null);
+      const older = eventsToPieces(res.events);
       set((s) => ({
         transcripts: {
           ...s.transcripts,
@@ -571,9 +650,7 @@ export const useSessions = create<SessionState>((set, get) => {
     // stay intact — we only touch the tail.
     try {
       const res = await api.listEvents(sessionId, { limit: 200 });
-      const freshTail = res.events
-        .map(eventToPiece)
-        .filter((p): p is UIPiece => p != null);
+      const freshTail = eventsToPieces(res.events);
       const oldestInTail =
         res.events.length > 0 ? res.events[0].seq : null;
       set((s) => {
@@ -701,6 +778,46 @@ export const useSessions = create<SessionState>((set, get) => {
     } satisfies ClientFrame);
     // After deciding, claude's about to continue — re-arm a pending placeholder
     // so the user doesn't stare at an empty thread while the next reply cooks.
+    const pendingId = `pending-${Date.now()}`;
+    set((s) => ({
+      transcripts: {
+        ...s.transcripts,
+        [sessionId]: [
+          ...(s.transcripts[sessionId] ?? []),
+          {
+            kind: "pending",
+            id: pendingId,
+            startedAt: Date.now(),
+            stalled: false,
+          },
+        ],
+      },
+    }));
+    armStallTimer(sessionId, pendingId);
+  },
+
+  resolveAskUserQuestion(sessionId, askId, answers, annotations) {
+    // Mark the matching question piece as answered in place — we DON'T
+    // filter it out (unlike permission_request, which gets removed on
+    // decide). The card stays in the transcript and renders read-only.
+    set((s) => ({
+      transcripts: {
+        ...s.transcripts,
+        [sessionId]: (s.transcripts[sessionId] ?? []).map((p) =>
+          p.kind === "ask_user_question" && p.askId === askId
+            ? { ...p, answers, annotations }
+            : p,
+        ),
+      },
+    }));
+    get().ws?.send({
+      type: "ask_user_answer",
+      sessionId,
+      askId,
+      answers,
+      ...(annotations ? { annotations } : {}),
+    } satisfies ClientFrame);
+    // Re-arm a pending placeholder so the next assistant turn isn't silent.
     const pendingId = `pending-${Date.now()}`;
     set((s) => ({
       transcripts: {

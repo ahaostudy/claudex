@@ -267,6 +267,7 @@ class MockRunner implements Runner {
     this.sent.push(c);
   }
   resolvePermission() {}
+  resolveAskUserQuestion() {}
   async interrupt() {}
   async setPermissionMode(_: PermissionMode) {}
   async dispose() {

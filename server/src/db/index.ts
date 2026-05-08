@@ -379,6 +379,33 @@ const MIGRATIONS: { id: number; name: string; up: string }[] = [
       CREATE INDEX idx_recovery_codes_user ON recovery_codes(user_id, used_at);
     `,
   },
+  {
+    id: 13,
+    name: "link_previews",
+    // URL → OpenGraph-ish metadata cache for the chat bubble link-preview
+    // cards. Successful fetches are cached for 24h (see fetch.ts); failures
+    // are cached for 1h as a negative lookup so a bad URL doesn't hammer
+    // upstream on every render. The `status` column carries the HTTP status
+    // of the original fetch (or a fake 0 for network errors / aborts); the
+    // route layer decides freshness based on (status < 400 ? 24h : 1h).
+    //
+    // `url` is the PRIMARY KEY — we don't canonicalize beyond "the exact
+    // string the caller sent", matching the link-preview UX which only
+    // ever feeds URLs lifted verbatim from message text. The index on
+    // `fetched_at` is there for future pruning; nothing prunes today.
+    up: `
+      CREATE TABLE link_previews (
+        url TEXT PRIMARY KEY,
+        title TEXT,
+        description TEXT,
+        image TEXT,
+        site_name TEXT,
+        fetched_at TEXT NOT NULL,
+        status INTEGER NOT NULL
+      );
+      CREATE INDEX idx_link_previews_fetched ON link_previews(fetched_at);
+    `,
+  },
 ];
 
 export function openDb(config: Config, log: Logger): ClaudexDb {

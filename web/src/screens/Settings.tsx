@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   Bell,
@@ -16,11 +16,12 @@ import {
   Sliders,
   Terminal as TerminalIcon,
   Trash2,
+  Upload,
   User as UserIcon,
 } from "lucide-react";
 import { useAuth } from "@/state/auth";
 import { api, ApiError, type WorktreeSummary } from "@/api/client";
-import type { Project, PushDevice, UserEnvResponse, AuditEvent } from "@claudex/shared";
+import type { Project, PushDevice, UserEnvResponse, AuditEvent, ToolGrant, ImportAllResponse } from "@claudex/shared";
 import { cn } from "@/lib/cn";
 import { AppShell } from "@/components/AppShell";
 import {
@@ -551,6 +552,8 @@ function SecurityPanel() {
 
       <RecoveryCodesCard />
 
+      <GrantedToolsCard />
+
       <TrustedProjectsCard />
 
       <AuditLogCard
@@ -820,6 +823,197 @@ function RecoveryCodesModal({
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+// Granted-tools card. Lists every `tool_grants` row on this machine — global
+// first (biggest blast radius → most important to audit), then session rows.
+// Each row shows a scope pill, the tool name + signature (monospace, because
+// the signature is often an exact command like `pnpm vitest run *` or a
+// path), the owning session title if any, a short relative time, and a
+// Revoke button. "Revoke all" is two-click armed for 3s and iterates the
+// current list, refetching after each batch — keeps the UI in sync without
+// baking a bulk endpoint into the server.
+function GrantedToolsCard() {
+  const [grants, setGrants] = useState<ToolGrant[] | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [armedAll, setArmedAll] = useState(false);
+  const [busyAll, setBusyAll] = useState(false);
+
+  async function refresh() {
+    setErr(null);
+    try {
+      const res = await api.listAllGrants();
+      setGrants(res.grants);
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.code : "load failed");
+    }
+  }
+
+  useEffect(() => {
+    void refresh();
+  }, []);
+
+  useEffect(() => {
+    if (!armedAll) return;
+    const t = window.setTimeout(() => setArmedAll(false), 3000);
+    return () => window.clearTimeout(t);
+  }, [armedAll]);
+
+  async function revokeOne(id: string) {
+    setBusyId(id);
+    setErr(null);
+    try {
+      await api.revokeGrant(id);
+      await refresh();
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.code : "revoke failed");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function revokeAll() {
+    if (!grants || grants.length === 0) return;
+    if (!armedAll) {
+      setArmedAll(true);
+      return;
+    }
+    setArmedAll(false);
+    setBusyAll(true);
+    setErr(null);
+    try {
+      // Snapshot the list so a concurrent mutation (e.g. a permission prompt
+      // auto-grant arriving mid-revoke) doesn't make us revoke rows we never
+      // saw. Ignore individual failures — a grant that vanished between the
+      // list and the delete is effectively already revoked.
+      const ids = grants.map((g) => g.id);
+      await Promise.all(
+        ids.map((id) =>
+          api.revokeGrant(id).catch(() => {
+            /* best-effort */
+          }),
+        ),
+      );
+      await refresh();
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.code : "revoke failed");
+    } finally {
+      setBusyAll(false);
+    }
+  }
+
+  const globalCount = grants?.filter((g) => g.scope === "global").length ?? 0;
+  const sessionCount = grants?.filter((g) => g.scope === "session").length ?? 0;
+
+  return (
+    <div className="rounded-[12px] border border-line bg-canvas overflow-hidden">
+      <div className="flex items-center gap-3 px-5 py-4 border-b border-line">
+        <div className="h-9 w-9 rounded-[8px] bg-paper border border-line flex items-center justify-center shrink-0">
+          <Shield className="w-4 h-4 text-ink-muted" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="display text-[18px] leading-tight">
+            Granted tools
+          </div>
+          <div className="text-[13px] text-ink-muted mt-0.5">
+            {grants === null
+              ? "Tools you auto-approved via \"Always\" on a permission prompt."
+              : `${globalCount} global · ${sessionCount} session`}
+          </div>
+        </div>
+      </div>
+      {grants === null ? (
+        <div className="px-5 py-5 text-[13px] mono text-ink-muted">loading…</div>
+      ) : grants.length === 0 ? (
+        <div className="px-5 py-5 text-[13px] text-ink-muted">
+          No tools have been granted yet. "Always" on a permission prompt adds
+          one here.
+        </div>
+      ) : (
+        <ul className="divide-y divide-line">
+          {grants.map((g) => {
+            const busy = busyId === g.id;
+            return (
+              <li
+                key={g.id}
+                className="flex items-center gap-3 px-5 py-3 text-[13px]"
+              >
+                <span
+                  className={cn(
+                    "shrink-0 inline-flex items-center h-5 px-1.5 rounded-[4px] text-[10px] mono uppercase tracking-[0.1em] border",
+                    g.scope === "global"
+                      ? "bg-klein-wash text-klein-ink border-klein/30"
+                      : "bg-paper text-ink-muted border-line",
+                  )}
+                  title={
+                    g.scope === "global"
+                      ? "Applies to every session"
+                      : "Scoped to one session"
+                  }
+                >
+                  {g.scope}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <div className="mono text-[12.5px] truncate">
+                    <span className="text-ink-soft">{g.toolName}</span>
+                    {g.signature ? (
+                      <>
+                        <span className="text-ink-muted"> </span>
+                        <span className="text-ink-muted">{g.signature}</span>
+                      </>
+                    ) : null}
+                  </div>
+                  <div className="text-[11px] text-ink-muted truncate mt-0.5">
+                    {g.scope === "global"
+                      ? "All sessions"
+                      : g.sessionTitle || "—"}
+                  </div>
+                </div>
+                <span className="shrink-0 text-[11px] mono text-ink-muted tabular-nums">
+                  {relativeTimeShort(g.createdAt)}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => revokeOne(g.id)}
+                  disabled={busy || busyAll}
+                  className="shrink-0 h-8 px-3 rounded-[8px] text-[12.5px] border border-line bg-canvas text-ink-soft hover:bg-paper hover:text-danger disabled:opacity-50"
+                >
+                  {busy ? "…" : "Revoke"}
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      {grants && grants.length > 0 && (
+        <div className="px-5 py-3 border-t border-line bg-paper/40 flex items-center justify-end">
+          <button
+            type="button"
+            onClick={revokeAll}
+            disabled={busyAll}
+            className={cn(
+              "h-8 px-3 rounded-[8px] text-[12.5px] border disabled:opacity-50",
+              armedAll
+                ? "border-danger/40 bg-danger-wash text-danger font-medium"
+                : "border-line bg-canvas text-ink-soft hover:bg-paper hover:text-danger",
+            )}
+          >
+            {busyAll
+              ? "Revoking…"
+              : armedAll
+                ? "Click again to confirm"
+                : "Revoke all"}
+          </button>
+        </div>
+      )}
+      {err && (
+        <div className="m-4 text-[13px] text-danger bg-danger-wash rounded-[8px] px-3 py-2 border border-danger/30">
+          {err}
+        </div>
+      )}
     </div>
   );
 }
@@ -1647,6 +1841,15 @@ function EnvironmentPanel() {
 // ----------------------------------------------------------------------------
 
 function AdvancedPanel() {
+  return (
+    <div className="space-y-5">
+      <AdvancedWorktreesCard />
+      <BackupCard />
+    </div>
+  );
+}
+
+function AdvancedWorktreesCard() {
   const [worktrees, setWorktrees] = useState<WorktreeSummary[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -1760,6 +1963,172 @@ function AdvancedPanel() {
           {err}
         </div>
       )}
+    </Card>
+  );
+}
+
+// ----------------------------------------------------------------------------
+// Advanced — Full-data backup + restore.
+//
+// Export goes through a plain <a href="/api/export/all" download> so the
+// browser handles the JSON download natively — no Blob juggling. Import
+// accepts a drag-drop or file-picker bundle and POSTs it as multipart to
+// /api/import/all; on success we show an honest "imported N … skipped M …"
+// summary. Secrets are not included in the export (see docs/FEATURES.md) and
+// push subscriptions / users / recovery codes are skipped on import.
+// ----------------------------------------------------------------------------
+
+function BackupCard() {
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [dragOver, setDragOver] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [result, setResult] = useState<ImportAllResponse | null>(null);
+
+  async function handleFile(file: File) {
+    setBusy(true);
+    setErr(null);
+    setResult(null);
+    try {
+      const res = await api.importAll(file);
+      setResult(res);
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.code : "import failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function onDrop(ev: React.DragEvent<HTMLDivElement>) {
+    ev.preventDefault();
+    setDragOver(false);
+    const file = ev.dataTransfer.files?.[0];
+    if (file) void handleFile(file);
+  }
+
+  function onPickChange(ev: React.ChangeEvent<HTMLInputElement>) {
+    const file = ev.target.files?.[0];
+    if (file) void handleFile(file);
+    // Reset so selecting the same file twice fires change again.
+    ev.target.value = "";
+  }
+
+  const importedTotal = result
+    ? result.imported.projects +
+      result.imported.sessions +
+      result.imported.events +
+      result.imported.routines +
+      result.imported.queue +
+      result.imported.audit
+    : 0;
+
+  return (
+    <Card header="Backup & restore">
+      <div className="px-4 py-4 space-y-2">
+        <div className="text-[13.5px] text-ink">Export everything</div>
+        <div className="text-[12.5px] text-ink-muted max-w-[65ch]">
+          Downloads a JSON bundle of every project, session, event, routine,
+          and queued prompt on this machine. Secrets stay on this machine —
+          hashes, TOTP, push keys, and JWT secrets are <em>not</em> exported.
+        </div>
+        <div>
+          <a
+            href={api.exportAllUrl()}
+            download
+            className="inline-flex items-center gap-1.5 h-8 px-3 rounded-[8px] border border-line bg-paper/40 text-[13px] text-ink hover:bg-paper/70"
+          >
+            <Download className="w-3.5 h-3.5" />
+            Download bundle
+          </a>
+        </div>
+      </div>
+      <div className="px-4 py-4 space-y-2">
+        <div className="text-[13.5px] text-ink">Import from bundle</div>
+        <div className="text-[12.5px] text-ink-muted max-w-[65ch]">
+          Merges a previously exported bundle into this instance. Existing
+          projects with the same path are left alone; sessions and their
+          events are always added as new rows. Push subscriptions, grants,
+          and attachment files are skipped.
+        </div>
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={busy}
+            className="inline-flex items-center gap-1.5 h-8 px-3 rounded-[8px] border border-line bg-paper/40 text-[13px] text-ink hover:bg-paper/70 disabled:opacity-50"
+          >
+            <Upload className="w-3.5 h-3.5" />
+            {busy ? "Importing…" : "Upload bundle"}
+          </button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="application/json,.json"
+            className="hidden"
+            onChange={onPickChange}
+          />
+          <div
+            onDragOver={(ev) => {
+              ev.preventDefault();
+              setDragOver(true);
+            }}
+            onDragLeave={() => setDragOver(false)}
+            onDrop={onDrop}
+            className={cn(
+              "flex-1 min-w-[200px] h-10 rounded-[8px] border border-dashed flex items-center justify-center text-[12px]",
+              dragOver
+                ? "border-accent text-accent bg-accent/5"
+                : "border-line text-ink-muted",
+              busy && "opacity-50 pointer-events-none",
+            )}
+          >
+            {dragOver ? "Drop to import" : "or drop a .json bundle here"}
+          </div>
+        </div>
+        {result && (
+          <div className="rounded-[8px] border border-line bg-paper/40 px-3 py-2 text-[12px] text-ink space-y-0.5">
+            <div>
+              Imported {importedTotal} row{importedTotal === 1 ? "" : "s"}:{" "}
+              {result.imported.projects} project
+              {result.imported.projects === 1 ? "" : "s"},{" "}
+              {result.imported.sessions} session
+              {result.imported.sessions === 1 ? "" : "s"},{" "}
+              {result.imported.events} event
+              {result.imported.events === 1 ? "" : "s"},{" "}
+              {result.imported.routines} routine
+              {result.imported.routines === 1 ? "" : "s"},{" "}
+              {result.imported.queue} queued,{" "}
+              {result.imported.audit} audit.
+            </div>
+            {(result.skipped.projectsByPath > 0 ||
+              result.skipped.sessionsBySdkId > 0 ||
+              result.skipped.grants > 0 ||
+              result.skipped.attachments > 0) && (
+              <div className="text-ink-muted">
+                Skipped: {result.skipped.projectsByPath} existing project
+                {result.skipped.projectsByPath === 1 ? "" : "s"},{" "}
+                {result.skipped.sessionsBySdkId} already-adopted session
+                {result.skipped.sessionsBySdkId === 1 ? "" : "s"},{" "}
+                {result.skipped.grants} grant
+                {result.skipped.grants === 1 ? "" : "s"},{" "}
+                {result.skipped.attachments} attachment
+                {result.skipped.attachments === 1 ? "" : "s"}.
+              </div>
+            )}
+            {result.versionMismatch && (
+              <div className="text-ink-muted">
+                Bundle was produced by a different claudex version; import
+                proceeded but some fields may be new or missing.
+              </div>
+            )}
+          </div>
+        )}
+        {err && (
+          <div className="rounded-[8px] border border-danger/40 bg-danger-wash px-3 py-2 text-[12px] text-danger">
+            {err}
+          </div>
+        )}
+      </div>
     </Card>
   );
 }

@@ -12,8 +12,8 @@ import { cn } from "@/lib/cn";
  * (permission card, mid-thread Edit tool block) constrains width, the
  * diff fills that column and the hunk grid scrolls horizontally inside.
  */
-export function DiffView({ diff }: { diff: FileDiff }) {
-  const [open, setOpen] = useState(true);
+export function DiffView({ diff, defaultOpen = false }: { diff: FileDiff; defaultOpen?: boolean }) {
+  const [open, setOpen] = useState(defaultOpen);
   return (
     <div className="rounded-[10px] border border-line bg-canvas overflow-hidden w-full">
       <button

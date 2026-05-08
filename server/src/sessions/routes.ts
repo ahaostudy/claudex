@@ -700,6 +700,56 @@ export async function registerSessionRoutes(
     },
   );
 
+  // POST /api/sessions/:id/fork
+  //
+  // Fork a session at a specific `upToSeq` into a brand-new top-level session
+  // under the same project. The new session inherits `project_id`, `model`,
+  // and `mode` from the source; it does NOT inherit `sdk_session_id` — the
+  // fork is a fresh SDK conversation, and the model has no memory of being
+  // forked. Events with `seq <= upToSeq` are copied verbatim into the fork
+  // with a normalized 1..N seq sequence.
+  //
+  // Body `{ upToSeq?, title? }`:
+  //  - `upToSeq` omitted → fork at the latest event in the source.
+  //  - `title` omitted → `"Fork of <source.title>"`, truncated at 60 chars.
+  //
+  // Error codes:
+  //   401 — auth gate (via requireAuth)
+  //   404 not_found   — source session doesn't exist
+  //   409 archived    — source is archived (fork from a read-only session
+  //                     would be misleading; unarchive or export first)
+  //   400 bad_request — body schema mismatch (upToSeq not a number, etc.)
+  app.post(
+    "/api/sessions/:id/fork",
+    { preHandler: app.requireAuth as any },
+    async (req, reply) => {
+      const { id } = req.params as { id: string };
+      const parsed = z
+        .object({
+          upToSeq: z.number().int().nonnegative().optional(),
+          title: z.string().min(1).optional(),
+        })
+        .safeParse(req.body ?? {});
+      if (!parsed.success) return reply.code(400).send({ error: "bad_request" });
+
+      const source = sessions.findById(id);
+      if (!source) return reply.code(404).send({ error: "not_found" });
+      if (source.status === "archived") {
+        return reply.code(409).send({ error: "archived" });
+      }
+
+      const fork = sessions.forkSession(
+        id,
+        parsed.data.upToSeq,
+        parsed.data.title,
+      );
+      // forkSession returns null only when the source row vanished between
+      // our findById and the call — treat it as a 404 for symmetry.
+      if (!fork) return reply.code(404).send({ error: "not_found" });
+      return reply.send({ session: fork });
+    },
+  );
+
   // -- tool grants ---------------------------------------------------------
 
   app.get(
@@ -717,6 +767,41 @@ export async function registerSessionRoutes(
         scope: r.session_id === null ? "global" : "session",
         createdAt: r.created_at,
       }));
+      return reply.send({ grants: out });
+    },
+  );
+
+  // Flat listing of every tool grant on the machine. Used by Settings →
+  // Security's Granted-tools card so the user can audit and revoke grants
+  // without first drilling into each session. Global grants sort first
+  // (biggest blast radius → shown first), then session-scoped grants;
+  // within each group, newest first. Session-scoped rows include the
+  // owning session's id + title so the UI can label "which session" and
+  // link back.
+  app.get(
+    "/api/grants",
+    { preHandler: app.requireAuth as any },
+    async (_req, reply) => {
+      const rows = grants.listAllGrants();
+      const out: ToolGrant[] = rows.map((r) => {
+        const scope: "session" | "global" =
+          r.session_id === null ? "global" : "session";
+        const base: ToolGrant = {
+          id: r.id,
+          toolName: r.tool_name,
+          signature: r.input_signature,
+          scope,
+          createdAt: r.created_at,
+        };
+        if (scope === "session") {
+          base.sessionId = r.session_id ?? undefined;
+          // `session_title` can be NULL if the FK cascade somehow raced
+          // with the read (it shouldn't — cascade drops the grant row
+          // too — but be defensive rather than coerce to "").
+          if (r.session_title != null) base.sessionTitle = r.session_title;
+        }
+        return base;
+      });
       return reply.send({ grants: out });
     },
   );

@@ -92,10 +92,49 @@ export const EventKind = z.enum([
   "tool_result",
   "permission_request",
   "permission_decision",
+  // `AskUserQuestion` SDK tool — surfaces a multiple-choice interaction in the
+  // transcript instead of a permission card. The model emits a tool call with
+  // `questions[]`; we persist it as `ask_user_question` and the user's answer
+  // as a sibling `ask_user_answer` event (append-only, mirroring how
+  // `permission_request` pairs with `permission_decision`).
+  "ask_user_question",
+  "ask_user_answer",
   "turn_end",
   "error",
 ]);
 export type EventKind = z.infer<typeof EventKind>;
+
+// ============================================================================
+// AskUserQuestion SDK tool — shapes the wire protocol + the persisted event
+// payloads.
+//
+// The Claude Agent SDK's built-in `AskUserQuestion` tool feeds us an input of
+// this shape (see node_modules/@anthropic-ai/claude-agent-sdk/sdk-tools.d.ts
+// `AskUserQuestionInput`). When the user answers, we resolve `canUseTool` with
+// `{ behavior: "allow", updatedInput: { answers, annotations? } }`, matching
+// the SDK's `AskUserQuestionOutput` expectation.
+// ============================================================================
+
+export const AskUserQuestionOption = z.object({
+  label: z.string(),
+  description: z.string().optional(),
+  preview: z.string().optional(),
+});
+export type AskUserQuestionOption = z.infer<typeof AskUserQuestionOption>;
+
+export const AskUserQuestionItem = z.object({
+  question: z.string(),
+  header: z.string().optional(),
+  multiSelect: z.boolean().optional(),
+  options: z.array(AskUserQuestionOption),
+});
+export type AskUserQuestionItem = z.infer<typeof AskUserQuestionItem>;
+
+export const AskUserQuestionAnnotation = z.object({
+  notes: z.string().optional(),
+  preview: z.string().optional(),
+});
+export type AskUserQuestionAnnotation = z.infer<typeof AskUserQuestionAnnotation>;
 
 export const SessionEvent = z.object({
   id: z.string(),
@@ -419,6 +458,13 @@ export const ToolGrant = z.object({
   signature: z.string(),
   scope: ToolGrantScope,
   createdAt: z.string(),
+  // Populated for `scope: "session"` rows. `GET /api/grants` (global view)
+  // returns them so the Settings → Security card can show "which session
+  // owns this grant" next to each row; `GET /api/sessions/:id/grants`
+  // (single-session view) omits them because every row is already scoped
+  // to the current session.
+  sessionId: z.string().optional(),
+  sessionTitle: z.string().optional(),
 });
 export type ToolGrant = z.infer<typeof ToolGrant>;
 
@@ -979,3 +1025,158 @@ export const MemoryResponse = z.object({
   files: z.array(MemoryFile),
 });
 export type MemoryResponse = z.infer<typeof MemoryResponse>;
+
+// ============================================================================
+// Link previews
+//
+// Returned by `GET /api/link-preview?url=<encoded>`. A tiny metadata shape
+// good enough to render a card with title / description / thumbnail next to a
+// message bubble that contains a link. Fields beyond `url` and `fetchedAt`
+// are best-effort — the server might have got a 200 with nothing useful in
+// the HTML, in which case everything else is omitted and the web client
+// silently renders nothing. Errors (private IP, non-http, rate limit, 4xx /
+// 5xx upstream) surface as HTTP errors and are NOT shaped into this struct.
+// ============================================================================
+
+export const LinkPreview = z.object({
+  url: z.string(),
+  title: z.string().optional(),
+  description: z.string().optional(),
+  image: z.string().optional(),
+  siteName: z.string().optional(),
+  fetchedAt: z.string(),
+});
+export type LinkPreview = z.infer<typeof LinkPreview>;
+
+// ============================================================================
+// Stats dashboard (`GET /api/stats`)
+//
+// Single-snapshot aggregation over the sessions / session_events tables. Backs
+// the StatsSheet reached from Home's overflow menu. Kept intentionally
+// high-signal: totals, honest averages, the busiest project, the top 5 tools
+// by tool_use count, and oldest/newest session stamps. No vanity metrics
+// (no "streak days", no social counters) — every number has a direct query
+// behind it. Gracefully zero when the DB is empty.
+// ============================================================================
+
+export const StatsTopTool = z.object({
+  name: z.string(),
+  uses: z.number().int().nonnegative(),
+});
+export type StatsTopTool = z.infer<typeof StatsTopTool>;
+
+export const StatsBusiestProject = z.object({
+  id: z.string(),
+  name: z.string(),
+  sessionCount: z.number().int().nonnegative(),
+});
+export type StatsBusiestProject = z.infer<typeof StatsBusiestProject>;
+
+export const StatsSessionRef = z.object({
+  id: z.string(),
+  title: z.string(),
+  createdAt: z.string(),
+});
+export type StatsSessionRef = z.infer<typeof StatsSessionRef>;
+
+export const StatsResponse = z.object({
+  totalSessions: z.number().int().nonnegative(),
+  // status in ('running', 'awaiting')
+  activeSessions: z.number().int().nonnegative(),
+  archivedSessions: z.number().int().nonnegative(),
+  // Count of `turn_end` events across every session.
+  totalTurns: z.number().int().nonnegative(),
+  // totalTurns / nonArchivedSessions, rounded to one decimal. Zero when there
+  // are no non-archived sessions.
+  avgTurnsPerSession: z.number().nonnegative(),
+  busiestProject: StatsBusiestProject.nullable(),
+  // Up to five entries, sorted by `uses` desc. Empty when no tool_use events.
+  topTools: z.array(StatsTopTool),
+  // Rounded to the nearest integer. Zero when totalTurns is 0.
+  avgTokensPerTurn: z.number().int().nonnegative(),
+  totalTokens: z.number().int().nonnegative(),
+  oldestSession: StatsSessionRef.nullable(),
+  newestSession: StatsSessionRef.nullable(),
+});
+export type StatsResponse = z.infer<typeof StatsResponse>;
+
+// ============================================================================
+// Full-data backup bundle
+//
+// `GET /api/export/all` emits a single JSON document matching `BackupBundle`
+// shape — every project/session/event/routine/queued-prompt/grant on this
+// installation plus best-effort attachment metadata (no file bytes) and the
+// most recent audit rows. Secrets (password hashes, TOTP secrets, recovery
+// code hashes, push subscription keys, VAPID / JWT secrets) are deliberately
+// NOT included — the bundle is meant to be portable to another claudex
+// install, not to mirror the auth store.
+//
+// `POST /api/import/all` accepts a multipart upload whose `bundle` part is the
+// same JSON shape. Semantics are merge-not-replace: projects dedupe on path,
+// sessions are always appended (new ids, remapped project ids), events are
+// re-sequenced 1..N per session, and device-bound tables (push subscriptions,
+// recovery codes, users) are skipped entirely.
+// ============================================================================
+
+// Attachment metadata as it appears in a backup bundle. The on-disk bytes are
+// NOT copied — restore-to-another-machine preserves the row history but links
+// a raw-path that may no longer exist. The web surface already tolerates
+// missing files (the raw route 404s with `file_missing`) so this is honest.
+export const BackupAttachmentMeta = z.object({
+  id: z.string(),
+  sessionId: z.string(),
+  messageEventSeq: z.number().int().nullable(),
+  filename: z.string(),
+  mime: z.string(),
+  sizeBytes: z.number().int().nonnegative(),
+  path: z.string(),
+  createdAt: z.string(),
+});
+export type BackupAttachmentMeta = z.infer<typeof BackupAttachmentMeta>;
+
+export const BackupBundle = z.object({
+  /** Version of claudex that produced this bundle (server package.json). */
+  claudexVersion: z.string(),
+  exportedAt: z.string(),
+  projects: z.array(Project),
+  // Sessions list is exhaustive — includes archived rows + side chats.
+  sessions: z.array(Session),
+  // Flat events list across every session, ordered by created_at ASC so a
+  // naive restore replay preserves causality without peeking at seqs.
+  events: z.array(SessionEvent),
+  routines: z.array(Routine),
+  queue: z.array(QueuedPrompt),
+  grants: z.array(ToolGrant),
+  attachments: z.array(BackupAttachmentMeta),
+  // Optional so older bundles that predated audit export still parse. When
+  // present, capped at the last 1000 rows server-side (the table can grow
+  // unbounded — full-dump would blow the bundle size for no gain).
+  audit: z.array(AuditEvent).optional(),
+});
+export type BackupBundle = z.infer<typeof BackupBundle>;
+
+// Response shape for `POST /api/import/all`. Tallies per-table inserts, and a
+// bag of skip reasons the UI surfaces so the user can tell why not everything
+// landed.
+export const ImportAllResponse = z.object({
+  imported: z.object({
+    projects: z.number().int().nonnegative(),
+    sessions: z.number().int().nonnegative(),
+    events: z.number().int().nonnegative(),
+    routines: z.number().int().nonnegative(),
+    queue: z.number().int().nonnegative(),
+    audit: z.number().int().nonnegative(),
+  }),
+  skipped: z.object({
+    projectsByPath: z.number().int().nonnegative(),
+    sessionsBySdkId: z.number().int().nonnegative(),
+    routinesMissingProject: z.number().int().nonnegative(),
+    queueMissingProject: z.number().int().nonnegative(),
+    grants: z.number().int().nonnegative(),
+    attachments: z.number().int().nonnegative(),
+  }),
+  /** `true` when the incoming `claudexVersion` didn't match this server's —
+   * import still proceeded (shapes are additive) but the UI can nag the user. */
+  versionMismatch: z.boolean(),
+});
+export type ImportAllResponse = z.infer<typeof ImportAllResponse>;

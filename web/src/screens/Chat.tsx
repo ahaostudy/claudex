@@ -22,6 +22,7 @@ import { ChatTasksRail } from "@/components/ChatTasksRail";
 import { useSessions } from "@/state/sessions";
 import { api } from "@/api/client";
 import type {
+  AskUserQuestionAnnotation,
   Attachment,
   ModelId,
   PermissionMode,
@@ -33,6 +34,7 @@ import { cn } from "@/lib/cn";
 import { DiffView, toolCallToDiff } from "@/components/DiffView";
 import { diffForToolCall } from "@/lib/diff";
 import { SessionSettingsSheet } from "@/components/SessionSettingsSheet";
+import { AskUserQuestionCard } from "@/components/AskUserQuestionCard";
 import { SideChatDrawer } from "@/components/SideChatDrawer";
 import { SlashCommandSheet, type PickerHandle } from "@/components/SlashCommandSheet";
 import { FileMentionSheet } from "@/components/FileMentionSheet";
@@ -40,6 +42,7 @@ import { TerminalDrawer } from "@/components/TerminalDrawer";
 import { ViewModePicker } from "@/components/ViewModePicker";
 import { ContextRingButton, UsagePanel } from "@/components/UsagePanel";
 import { Markdown } from "@/components/Markdown";
+import { LinkPreview, firstHttpUrl } from "@/components/LinkPreview";
 import { ImageLightbox } from "@/components/ImageLightbox";
 import { MessageActions } from "@/components/MessageActions";
 import { ToastHost } from "@/lib/toast";
@@ -99,6 +102,14 @@ export function ChatScreen() {
     images: ImageRef[];
     index: number;
   } | null>(null);
+  // Mobile tap-to-reveal state for the per-message action row. Only one
+  // bubble's chips can be shown at a time — tapping a different bubble flips
+  // `revealedSeq` to that bubble's seq, and tapping the revealed bubble again
+  // (or running an action) clears it. Desktop uses `group-hover` instead and
+  // ignores this entirely (see MessageActions classes). Optimistic echoes
+  // without a persisted seq can't be revealed via tap — acceptable tradeoff,
+  // their chips only surface on desktop hover.
+  const [revealedSeq, setRevealedSeq] = useState<number | null>(null);
   // Mobile three-dot menu. Desktop uses header pills instead.
   const [showMore, setShowMore] = useState(false);
   // Desktop tasks rail visibility. Persisted across navigations so users
@@ -135,6 +146,7 @@ export function ChatScreen() {
     interruptSession,
     ensurePendingFor,
     resolvePermission,
+    resolveAskUserQuestion,
     viewMode,
     setViewMode,
   } = useSessions();
@@ -189,6 +201,29 @@ export function ChatScreen() {
       if (visiblePieces[i].kind === "user") return i;
     }
     return -1;
+  }, [visiblePieces]);
+
+  // Map a tool_use piece's id to its matching tool_result (if present in the
+  // current visible list). Used to merge the two into a single collapsible
+  // block: the `tool_use` branch reads the matched result from here; the
+  // `tool_result` branch checks the matchedIds set and skips rendering to
+  // avoid a duplicate bubble. Orphan tool_results (no preceding tool_use)
+  // continue to render on their own.
+  const { matchedResultByToolUseId, matchedToolUseIds } = useMemo(() => {
+    const byId = new Map<string, { content: string; isError: boolean }>();
+    const absorbed = new Set<string>();
+    const seenToolUse = new Set<string>();
+    for (const p of visiblePieces) {
+      if (p.kind === "tool_use") {
+        seenToolUse.add(p.id);
+      } else if (p.kind === "tool_result" && p.toolUseId) {
+        if (seenToolUse.has(p.toolUseId) && !byId.has(p.toolUseId)) {
+          byId.set(p.toolUseId, { content: p.content, isError: p.isError });
+          absorbed.add(p.toolUseId);
+        }
+      }
+    }
+    return { matchedResultByToolUseId: byId, matchedToolUseIds: absorbed };
   }, [visiblePieces]);
 
   // Any still-pending permission request for a diff-producing tool
@@ -555,7 +590,23 @@ export function ChatScreen() {
             onDecide={(approvalId, decision) =>
               id && resolvePermission(id, approvalId, decision)
             }
+            onAnswerAskUserQuestion={(askId, answers, annotations) => {
+              if (id) resolveAskUserQuestion(id, askId, answers, annotations);
+            }}
             onOpenLightbox={(images, index) => setLightbox({ images, index })}
+            revealedSeq={revealedSeq}
+            onToggleReveal={(seq) =>
+              setRevealedSeq((current) => (current === seq ? null : seq))
+            }
+            onClearReveal={() => setRevealedSeq(null)}
+            matchedResult={
+              p.kind === "tool_use"
+                ? matchedResultByToolUseId.get(p.id) ?? null
+                : null
+            }
+            isAbsorbedResult={
+              p.kind === "tool_result" && matchedToolUseIds.has(p.toolUseId)
+            }
           />
         ))}
         {viewMode === "summary" && (
@@ -881,10 +932,16 @@ function Piece({
   session,
   project,
   onDecide,
+  onAnswerAskUserQuestion,
   onOpenLightbox,
   isLastUserMessage,
   canEdit,
   onEditLastUserMessage,
+  revealedSeq,
+  onToggleReveal,
+  onClearReveal,
+  matchedResult,
+  isAbsorbedResult,
 }: {
   p: UIPiece;
   viewMode: ViewMode;
@@ -894,6 +951,11 @@ function Piece({
     approvalId: string,
     decision: "allow_once" | "allow_always" | "deny",
   ) => void;
+  onAnswerAskUserQuestion: (
+    askId: string,
+    answers: Record<string, string>,
+    annotations?: Record<string, AskUserQuestionAnnotation>,
+  ) => void;
   onOpenLightbox: (images: ImageRef[], index: number) => void;
   /** True when this piece is the newest user_message currently visible. */
   isLastUserMessage?: boolean;
@@ -902,6 +964,24 @@ function Piece({
   /** Resolves after the server has accepted the edit. Caller handles the
    * subsequent refresh_transcript / events refetch. */
   onEditLastUserMessage?: (text: string) => Promise<void>;
+  /** Shared mobile tap-to-reveal state. Only the bubble whose seq matches
+   * `revealedSeq` shows its action chips; all others stay hidden until
+   * hovered on desktop. */
+  revealedSeq?: number | null;
+  /** Tap handler — flips `revealedSeq` to this bubble's seq or clears it if
+   * already revealed. No-op on desktop (reveal is driven by hover there). */
+  onToggleReveal?: (seq: number) => void;
+  /** Clears `revealedSeq` unconditionally. Called from inside action chips
+   * so running an action dismisses the row. */
+  onClearReveal?: () => void;
+  /** For tool_use pieces: the tool_result content matched by toolUseId, if
+   * present in the same visible list. Triggers the merged input+result
+   * rendering. */
+  matchedResult?: { content: string; isError: boolean } | null;
+  /** For tool_result pieces: true when this result was absorbed into the
+   * preceding tool_use's merged block — render nothing here to avoid a
+   * duplicate bubble. */
+  isAbsorbedResult?: boolean;
 }) {
   // Verbose = everything expanded, no truncation. Normal = compact by default,
   // user can click to expand individual tool_use chips and tool_result blocks.
@@ -940,14 +1020,24 @@ function Piece({
           onSubmitEdit={onEditLastUserMessage}
           sessionId={session?.id ?? ""}
           seq={p.seq}
+          revealed={p.seq != null && revealedSeq === p.seq}
+          onToggleReveal={() => {
+            if (p.seq != null) onToggleReveal?.(p.seq);
+          }}
+          onClearReveal={onClearReveal}
         />
       );
     }
-    case "assistant_text":
+    case "assistant_text": {
+      const thisRevealed = p.seq != null && revealedSeq === p.seq;
       return (
         <div
           className="group relative max-w-[72ch]"
           data-event-seq={p.seq}
+          data-show-actions={thisRevealed ? "true" : "false"}
+          onClick={() => {
+            if (p.seq != null) onToggleReveal?.(p.seq);
+          }}
         >
           <div className="flex items-center gap-2 mb-1.5">
             <svg viewBox="0 0 32 32" className="w-3.5 h-3.5">
@@ -957,16 +1047,24 @@ function Piece({
             <span className="mono text-[11px] text-ink-muted">claude</span>
           </div>
           <Markdown source={p.text} />
+          {(() => {
+            const previewUrl = firstHttpUrl(p.text);
+            return previewUrl ? <LinkPreview url={previewUrl} /> : null;
+          })()}
           {session?.id && (
             <MessageActions
               text={p.text}
               markdown={p.text}
               sessionId={session.id}
               seq={p.seq}
+              align="start"
+              revealed={thisRevealed}
+              onActionComplete={onClearReveal}
             />
           )}
         </div>
       );
+    }
     case "thinking":
       // Thinking is only reached in verbose mode (normal/summary filter it
       // out in applyViewMode). Render full.
@@ -981,22 +1079,40 @@ function Piece({
         // Mid-thread Edit/Write diffs render full-width so the hunk grid
         // isn't clipped; the DiffView itself handles horizontal overflow.
         return (
-          <div className="w-full" data-tool-use-id={p.id}>
+          <div
+            className="w-full"
+            data-tool-use-id={p.id}
+            data-event-seq={p.seq}
+          >
             <DiffView diff={diff} />
           </div>
         );
       }
       return (
-        <div data-tool-use-id={p.id}>
-          <ToolUseBlock name={p.name} input={p.input} verbose={verbose} />
+        <div data-tool-use-id={p.id} data-event-seq={p.seq}>
+          <ToolCallBlock
+            name={p.name}
+            input={p.input}
+            resultContent={matchedResult?.content ?? null}
+            isError={matchedResult?.isError ?? false}
+            verbose={verbose}
+            onOpenLightbox={onOpenLightbox}
+          />
         </div>
       );
     }
-    case "tool_result":
+    case "tool_result": {
+      // Absorbed by the merged tool_use block above — render nothing.
+      if (isAbsorbedResult) return null;
+      const thisRevealed = p.seq != null && revealedSeq === p.seq;
       return (
         <div
           className="group relative"
           data-event-seq={p.seq}
+          data-show-actions={thisRevealed ? "true" : "false"}
+          onClick={() => {
+            if (p.seq != null) onToggleReveal?.(p.seq);
+          }}
         >
           <ToolResultBlock
             content={p.content}
@@ -1009,10 +1125,14 @@ function Piece({
               text={p.content}
               sessionId={session.id}
               seq={p.seq}
+              align="start"
+              revealed={thisRevealed}
+              onActionComplete={onClearReveal}
             />
           )}
         </div>
       );
+    }
     case "permission_request":
       return (
         <div data-approval-id={p.approvalId}>
@@ -1026,6 +1146,17 @@ function Piece({
             onDecide={onDecide}
           />
         </div>
+      );
+    case "ask_user_question":
+      return (
+        <AskUserQuestionCard
+          askId={p.askId}
+          questions={p.questions}
+          answers={p.answers}
+          onSubmit={(answers, annotations) =>
+            onAnswerAskUserQuestion(p.askId, answers, annotations)
+          }
+        />
       );
     case "pending":
       return <PendingBlock stalled={p.stalled} />;
@@ -1087,19 +1218,39 @@ function PendingBlock({ stalled }: { stalled: boolean }) {
 }
 
 // ---------------------------------------------------------------------------
-// Tool-use chip with an optional expansion into full pretty-printed input.
+// Tool call block — a tool_use + its matching tool_result rendered as ONE
+// collapsible unit with a single chevron that toggles both the input JSON and
+// the result body. When the result hasn't streamed yet (`resultContent` is
+// null) we show a pulsing "running…" tag on the right and only the input in
+// the expanded body.
 //
-// Normal mode: single-line chip; chevron reveals the full JSON on click.
-// Verbose mode: always expanded, no toggle — the chevron would be noise.
+// Folded state: single chip — chevron, tool name, summarizeInput on the
+// left, summarizeResult (or "running…") on the right.
+// Expanded state: dark `<pre>` with pretty-printed input, followed by the
+// existing ToolResultBlock (which keeps its own inner "show N more chars"
+// affordance so huge results don't blow the viewport even when the outer
+// block is open).
+//
+// Verbose mode: always expanded, no outer toggle. Inner ToolResultBlock
+// still truncates overflows because even verbose shouldn't dump 50 KB.
+// Error state: folded chip gets a danger dot + subtle danger-wash tint.
 // ---------------------------------------------------------------------------
-function ToolUseBlock({
+function ToolCallBlock({
   name,
   input,
+  resultContent,
+  isError,
   verbose,
+  onOpenLightbox,
 }: {
   name: string;
   input: Record<string, unknown>;
+  /** Matched tool_result content. `null` when the result hasn't landed yet
+   * (tool still running) — chip shows a pulsing indicator. */
+  resultContent: string | null;
+  isError: boolean;
   verbose: boolean;
+  onOpenLightbox: (images: ImageRef[], index: number) => void;
 }) {
   const [expanded, setExpanded] = useState(verbose);
   // Keep expand state in sync when the user flips modes mid-session so
@@ -1111,6 +1262,8 @@ function ToolUseBlock({
   const showBody = expanded || verbose;
   const canToggle = !verbose;
   const pretty = useMemo(() => safeStringify(input), [input]);
+  const running = resultContent === null;
+  const rightHint = running ? null : summarizeResult(resultContent, isError);
 
   return (
     <div className="w-fit max-w-full">
@@ -1119,7 +1272,10 @@ function ToolUseBlock({
         onClick={() => canToggle && setExpanded((v) => !v)}
         disabled={!canToggle}
         className={cn(
-          "flex items-center gap-2 py-1.5 pl-1.5 pr-3 rounded-[8px] bg-paper border border-line max-w-full text-left",
+          "flex items-center gap-2 py-1.5 pl-1.5 pr-3 rounded-[8px] border max-w-full text-left",
+          isError
+            ? "bg-danger-wash/40 border-danger/30"
+            : "bg-paper border-line",
           canToggle && "hover:bg-paper/80 cursor-pointer",
         )}
         aria-expanded={showBody}
@@ -1133,15 +1289,45 @@ function ToolUseBlock({
         ) : (
           <ChevronDown className="w-3 h-3 text-ink-muted shrink-0" />
         )}
+        {isError && (
+          <span className="h-1.5 w-1.5 rounded-full bg-danger shrink-0" />
+        )}
         <span className="mono text-[12px] text-ink-soft">{name}</span>
-        <span className="mono text-[11px] text-ink-muted truncate max-w-[60vw]">
+        <span className="mono text-[11px] text-ink-muted truncate max-w-[40vw]">
           {summarizeInput(input)}
         </span>
+        {running ? (
+          <span className="mono text-[11px] text-ink-muted flex items-center gap-1 shrink-0">
+            <span className="pending-dot" />
+            <span className="pending-dot" style={{ animationDelay: "0.15s" }} />
+            <span className="pending-dot" style={{ animationDelay: "0.3s" }} />
+            <span>running</span>
+          </span>
+        ) : rightHint ? (
+          <span
+            className={cn(
+              "mono text-[11px] truncate max-w-[40vw] shrink min-w-0",
+              isError ? "text-danger" : "text-ink-muted",
+            )}
+          >
+            {rightHint}
+          </span>
+        ) : null}
       </button>
       {showBody && (
-        <pre className="mono text-[11.5px] text-canvas bg-ink rounded-[8px] mt-1 px-3 py-2 whitespace-pre-wrap break-all overflow-x-auto max-w-full">
-          {pretty}
-        </pre>
+        <div className="mt-1 space-y-1">
+          <pre className="mono text-[11.5px] text-canvas bg-ink rounded-[8px] px-3 py-2 whitespace-pre-wrap [overflow-wrap:anywhere] break-all overflow-x-auto max-w-full">
+            {pretty}
+          </pre>
+          {!running && (
+            <ToolResultBlock
+              content={resultContent}
+              isError={isError}
+              verbose={verbose}
+              onOpenLightbox={onOpenLightbox}
+            />
+          )}
+        </div>
       )}
     </div>
   );
@@ -1204,7 +1390,7 @@ function ToolResultBlock({
       {hasText && (
         <div
           className={cn(
-            "mono text-[12px] whitespace-pre-wrap px-3 py-2 rounded-[8px] border w-fit max-w-full",
+            "mono text-[12px] whitespace-pre-wrap [overflow-wrap:anywhere] break-all px-3 py-2 rounded-[8px] border w-fit max-w-full",
             isError
               ? "bg-danger-wash border-danger/30 text-[#7a1d21]"
               : "bg-paper border-line text-ink-soft",
@@ -1243,6 +1429,9 @@ function UserBubble({
   onSubmitEdit,
   sessionId,
   seq,
+  revealed,
+  onToggleReveal,
+  onClearReveal,
 }: {
   text: string;
   onOpenLightbox: (images: ImageRef[], index: number) => void;
@@ -1256,11 +1445,21 @@ function UserBubble({
    * `editable` is true. */
   onSubmitEdit?: (text: string) => Promise<void>;
   /** Session id + persisted event seq for the per-message action row. The
-   * action row is rendered only when we have a session id (always true in
-   * Chat screen) and is placed alongside the pencil — pencil stays top-left,
-   * actions row renders top-right. */
+   * chip row renders BELOW the bubble (right-aligned to match); the pencil
+   * affordance stays at the bubble's top-left corner so the two never
+   * collide. */
   sessionId: string;
   seq?: number;
+  /** Mobile tap-to-reveal flag — when true, the action chips AND the pencil
+   * are shown regardless of hover state. Desktop ignores this and uses
+   * `group-hover` (see `md:` overrides inside `MessageActions`). */
+  revealed?: boolean;
+  /** Single-tap handler wired on the bubble surface. Triggers the reveal
+   * toggle at the Chat level. No-op on desktop (hover wins there). */
+  onToggleReveal?: () => void;
+  /** Clears `revealedSeq` after an action fires or when starting the
+   * inline editor. */
+  onClearReveal?: () => void;
 }) {
   const { images, remainingText } = useMemo(
     () => extractImagesFromText(text),
@@ -1369,29 +1568,40 @@ function UserBubble({
   }
 
   return (
-    <div className="flex justify-end group" data-event-seq={seq}>
-      <div className="relative max-w-[88%] bg-ink text-canvas rounded-[14px] rounded-br-[4px] px-3.5 py-2.5 shadow-card text-[14px] leading-[1.55]">
+    <div
+      className="flex flex-col items-end group"
+      data-event-seq={seq}
+      data-show-actions={revealed ? "true" : "false"}
+    >
+      <div
+        className="relative max-w-[88%] bg-ink text-canvas rounded-[14px] rounded-br-[4px] px-3.5 py-2.5 shadow-card text-[14px] leading-[1.55]"
+        onClick={() => onToggleReveal?.()}
+      >
         {editable && (
           <button
             type="button"
             title="Edit this message and re-run"
             aria-label="Edit this message and re-run"
-            onClick={() => {
+            onClick={(e) => {
+              // Don't let the click bubble up to the bubble's reveal toggle
+              // — opening the editor already dismisses any shown chips via
+              // `onClearReveal`.
+              e.stopPropagation();
+              onClearReveal?.();
               setDraft(text);
               setEditing(true);
               setError(null);
             }}
-            className="absolute -top-2 -left-2 h-6 w-6 rounded-full bg-paper text-ink border border-line shadow-card opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity flex items-center justify-center"
+            className={cn(
+              "absolute -top-2 -left-2 h-6 w-6 rounded-full bg-paper text-ink border border-line shadow-card transition-opacity flex items-center justify-center",
+              // Desktop: show on hover; mobile: show when the bubble is
+              // revealed (same tap gesture as the action chips).
+              revealed ? "opacity-100" : "opacity-0",
+              "md:opacity-0 md:group-hover:opacity-100 md:focus:opacity-100",
+            )}
           >
             <Pencil className="h-3 w-3" />
           </button>
-        )}
-        {sessionId && (
-          <MessageActions
-            text={text}
-            sessionId={sessionId}
-            seq={seq}
-          />
         )}
         {images.length > 0 && (
           <ImageThumbs
@@ -1404,6 +1614,23 @@ function UserBubble({
           <div className="whitespace-pre-wrap">{remainingText}</div>
         )}
       </div>
+      {(() => {
+        // Preview card sits BELOW the dark bubble, right-aligned with the
+        // bubble edge. Rendered outside the bubble so the card inherits
+        // the regular paper palette instead of getting inverted.
+        const previewUrl = firstHttpUrl(remainingText);
+        return previewUrl ? <LinkPreview url={previewUrl} /> : null;
+      })()}
+      {sessionId && (
+        <MessageActions
+          text={text}
+          sessionId={sessionId}
+          seq={seq}
+          align="end"
+          revealed={revealed}
+          onActionComplete={onClearReveal}
+        />
+      )}
       {attachmentLock && (
         <div
           className="absolute mt-[52px] -ml-2 hidden md:block text-[11px] text-ink-muted mono"
@@ -1551,7 +1778,7 @@ function PermissionCard({
 
           {diff ? (
             <div className="mt-3 w-full space-y-1.5">
-              <DiffView diff={diff} />
+              <DiffView diff={diff} defaultOpen />
               {sessionId && (
                 <Link
                   to={`/session/${sessionId}/diff?approvalId=${encodeURIComponent(approvalId)}`}
@@ -1654,7 +1881,7 @@ function PermissionCard({
         <div className="px-6 py-4 space-y-4">
           {diff ? (
             <div className="w-full space-y-1.5">
-              <DiffView diff={diff} />
+              <DiffView diff={diff} defaultOpen />
               {sessionId && (
                 <Link
                   to={`/session/${sessionId}/diff?approvalId=${encodeURIComponent(approvalId)}`}
@@ -1784,7 +2011,10 @@ function CommandBlock({
         )}
       >
         {command.lines.map((line, i) => (
-          <div key={i} className="whitespace-pre">
+          <div
+            key={i}
+            className="whitespace-pre-wrap [overflow-wrap:anywhere] break-all"
+          >
             {line.kind === "bash-first" ? (
               <>
                 <span className="text-klein-soft">{line.binary}</span>
@@ -2887,6 +3117,40 @@ function summarizeInput(input: Record<string, unknown>): string {
 }
 
 /**
+ * One-line honest summary of a tool_result for the folded merged chip.
+ *
+ *  - isError          → prefix with `✗` (rendered in danger color by caller).
+ *  - empty            → `empty`.
+ *  - image-only       → `image only` (all textual content was image markers).
+ *  - explicit error   → multi-line stack / "Error:" prefix → first line + `✗`.
+ *  - short one-liner  → first line verbatim, up to 80 chars.
+ *  - otherwise        → `N lines, M chars`.
+ */
+function summarizeResult(content: string, isError: boolean): string {
+  const { remainingText } = extractImagesFromText(content);
+  const trimmed = remainingText.trim();
+  if (trimmed.length === 0) {
+    // Content might have been pure image markers; distinguish so users know
+    // the result wasn't just silence.
+    if (content.trim().length > 0) return "image only";
+    return isError ? "✗ empty" : "empty";
+  }
+  const firstLine = trimmed.split(/\r?\n/, 1)[0]?.trim() ?? "";
+  const looksLikeError =
+    isError ||
+    /^Error:|Traceback \(most recent call last\):/i.test(trimmed);
+  if (looksLikeError) {
+    const head = firstLine.length > 80 ? firstLine.slice(0, 78) + "…" : firstLine;
+    return `✗ ${head || "error"}`;
+  }
+  const lineCount = trimmed.split(/\r?\n/).length;
+  if (lineCount === 1 && firstLine.length <= 80) return firstLine;
+  const lineLbl = `${lineCount} line${lineCount === 1 ? "" : "s"}`;
+  const charLbl = `${trimmed.length} char${trimmed.length === 1 ? "" : "s"}`;
+  return `${lineLbl}, ${charLbl}`;
+}
+
+/**
  * Pretty-print tool input for the expanded chip body. Defensive against
  * circular references (shouldn't happen over the wire, but the JSON we get
  * is ultimately user-controlled so we don't want a single weird call to
@@ -2956,8 +3220,8 @@ function applyViewMode(
       }
       continue;
     }
-    // tool_use / tool_result / thinking / permission_request are all
-    // suppressed in summary mode.
+    // tool_use / tool_result / thinking / permission_request /
+    // ask_user_question are all suppressed in summary mode.
   }
   // Aggregate Edit/Write/MultiEdit tool_use pieces into a de-duplicated
   // changes list (latest stats win for a given path).

@@ -266,7 +266,7 @@ export function DiffReviewScreen() {
             )}
             {selected && (
               <div className="p-4 md:p-5">
-                <DiffView diff={toFileDiff(selected)} />
+                <DiffView diff={toFileDiff(selected)} defaultOpen />
               </div>
             )}
           </div>

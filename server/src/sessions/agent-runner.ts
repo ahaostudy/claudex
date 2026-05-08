@@ -13,7 +13,11 @@ import type {
   RunnerInitOptions,
   RunnerListener,
 } from "./runner.js";
-import type { PermissionMode } from "@claudex/shared";
+import type {
+  AskUserQuestionAnnotation,
+  AskUserQuestionItem,
+  PermissionMode,
+} from "@claudex/shared";
 
 /**
  * Real Agent SDK runner. One instance per session.
@@ -35,6 +39,16 @@ export class AgentRunner implements Runner {
   private pendingPermissions = new Map<
     string,
     (decision: PermissionDecision) => void
+  >();
+  // Pending AskUserQuestion interactions. Separate map from permissions so the
+  // SDK tool branch can't collide with a genuine permission ask and so
+  // double-submit protection is trivial (delete on first resolve).
+  private pendingAskUserQuestion = new Map<
+    string,
+    (resp: {
+      answers: Record<string, string>;
+      annotations?: Record<string, AskUserQuestionAnnotation>;
+    }) => void
   >();
   private userMessages: AsyncPush<SDKUserMessageShape>;
   private sdkHandle: ReturnType<typeof query> | null = null;
@@ -91,6 +105,28 @@ export class AgentRunner implements Runner {
           | { behavior: "allow"; updatedInput?: Record<string, unknown> }
           | { behavior: "deny"; message: string }
         >((resolve) => {
+          // AskUserQuestion is a multiple-choice interaction, not a security
+          // gate. Branch early so the permission_request flow never fires for
+          // it. The SDK expects `updatedInput` to match
+          // `AskUserQuestionOutput` (answers + optional annotations) — we fill
+          // that from whatever the client posts back via `resolveAskUserQuestion`.
+          if (toolName === "AskUserQuestion") {
+            const questions = extractAskUserQuestions(input);
+            this.pendingAskUserQuestion.set(toolUseID, ({ answers, annotations }) => {
+              const updatedInput: Record<string, unknown> = {
+                ...input,
+                answers,
+              };
+              if (annotations) updatedInput.annotations = annotations;
+              resolve({ behavior: "allow", updatedInput });
+            });
+            this.emit({
+              type: "ask_user_question",
+              askId: toolUseID,
+              questions,
+            });
+            return;
+          }
           this.pendingPermissions.set(toolUseID, (d) => {
             if (d.behavior === "allow") {
               resolve({ behavior: "allow", updatedInput: input });
@@ -267,6 +303,18 @@ export class AgentRunner implements Runner {
     resolver(decision);
   }
 
+  resolveAskUserQuestion(
+    askId: string,
+    answers: Record<string, string>,
+    annotations?: Record<string, AskUserQuestionAnnotation>,
+  ): void {
+    const resolver = this.pendingAskUserQuestion.get(askId);
+    if (!resolver) return;
+    // Delete BEFORE calling so a second resolve races cleanly (no-op).
+    this.pendingAskUserQuestion.delete(askId);
+    resolver({ answers, annotations });
+  }
+
   async interrupt(): Promise<void> {
     if (!this.sdkHandle) return;
     await this.sdkHandle.interrupt();
@@ -288,6 +336,13 @@ export class AgentRunner implements Runner {
       resolver({ behavior: "deny", reason: "runner disposed" });
     }
     this.pendingPermissions.clear();
+    // Resolve any pending AskUserQuestion with empty answers — the SDK doesn't
+    // accept a "deny" shape for allow-only tools, and leaving these hanging
+    // would keep the query loop alive past dispose().
+    for (const [id, resolver] of this.pendingAskUserQuestion) {
+      resolver({ answers: {} });
+    }
+    this.pendingAskUserQuestion.clear();
     try {
       await this.sdkHandle?.interrupt();
     } catch {
@@ -325,6 +380,45 @@ function mapPermissionMode(mode: PermissionMode): NonNullable<Options["permissio
 }
 
 type SDKUserMessageShape = SDKUserMessage;
+
+/**
+ * Narrow the AskUserQuestion tool input into the shape the rest of claudex
+ * uses. The SDK's `AskUserQuestionInput` type is strict (tuples of 2-4
+ * options), but at runtime we accept whatever arrives and let the UI render
+ * it. Unknown fields pass through verbatim.
+ */
+function extractAskUserQuestions(
+  input: Record<string, unknown>,
+): AskUserQuestionItem[] {
+  const raw = (input as { questions?: unknown }).questions;
+  if (!Array.isArray(raw)) return [];
+  const out: AskUserQuestionItem[] = [];
+  for (const q of raw) {
+    if (!q || typeof q !== "object") continue;
+    const qo = q as Record<string, unknown>;
+    const question = typeof qo.question === "string" ? qo.question : "";
+    if (!question) continue;
+    const header = typeof qo.header === "string" ? qo.header : undefined;
+    const multiSelect =
+      typeof qo.multiSelect === "boolean" ? qo.multiSelect : undefined;
+    const options: AskUserQuestionItem["options"] = [];
+    if (Array.isArray(qo.options)) {
+      for (const opt of qo.options) {
+        if (!opt || typeof opt !== "object") continue;
+        const oo = opt as Record<string, unknown>;
+        if (typeof oo.label !== "string") continue;
+        options.push({
+          label: oo.label,
+          description:
+            typeof oo.description === "string" ? oo.description : undefined,
+          preview: typeof oo.preview === "string" ? oo.preview : undefined,
+        });
+      }
+    }
+    out.push({ question, header, multiSelect, options });
+  }
+  return out;
+}
 
 function userMessage(text: string): SDKUserMessageShape {
   return {

@@ -4,8 +4,10 @@ import { openDb } from "./db/index.js";
 import { loadOrCreateJwtSecret } from "./auth/index.js";
 import { buildApp, defaultWebDist } from "./transport/app.js";
 import { SessionStore } from "./sessions/store.js";
+import { ProjectStore } from "./sessions/projects.js";
 import { backfillSessionTitles } from "./sessions/backfill-titles.js";
 import { loadOrCreateVapidKeys } from "./push/vapid.js";
+import { startCliSyncWatcher, type CliSyncWatcher } from "./cli-sync/watcher.js";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -41,10 +43,15 @@ async function main() {
     stateDir: config.stateDir,
   });
 
+  // Declared ahead of `shutdown` so the closure below can `.close()` it.
+  // Assignment happens a few lines down, after the scheduler block.
+  let cliSync: CliSyncWatcher | null = null;
+
   const shutdown = async (signal: string) => {
     log.info({ signal }, "shutting down");
     try {
       scheduler.dispose();
+      if (cliSync) await cliSync.close();
       await manager.disposeAll();
       await app.close();
     } finally {
@@ -54,6 +61,34 @@ async function main() {
   };
   process.on("SIGINT", () => void shutdown("SIGINT"));
   process.on("SIGTERM", () => void shutdown("SIGTERM"));
+
+  // CLI live sync — watch `~/.claude/projects` for the user's local `claude`
+  // CLI activity and mirror new / updated JSONL transcripts into claudex in
+  // near real time. Disabled under NODE_ENV=test (tests drive their own
+  // file-level resync) and via CLAUDEX_WATCH_CLI=0 as an emergency off-switch.
+  if (
+    process.env.NODE_ENV !== "test" &&
+    process.env.CLAUDEX_WATCH_CLI !== "0"
+  ) {
+    try {
+      cliSync = startCliSyncWatcher({
+        sessions: new SessionStore(db),
+        projects: new ProjectStore(db),
+        manager,
+        logger: log as unknown as {
+          debug?: (obj: unknown, msg?: string) => void;
+          info?: (obj: unknown, msg?: string) => void;
+          warn?: (obj: unknown, msg?: string) => void;
+        },
+      });
+      // Fire-and-forget — we don't gate server ready on the initial scan.
+      void cliSync.ready().then(() => {
+        log.info("cli-sync watcher ready");
+      });
+    } catch (err) {
+      log.error({ err }, "failed to start cli-sync watcher");
+    }
+  }
 
   // One-shot title backfill. See server/src/sessions/backfill-titles.ts —
   // retitles historical sessions whose current title is still a placeholder

@@ -11,6 +11,7 @@ import { ToolGrantStore, signatureFor } from "./grants.js";
 import { summarizePermission } from "./permission-summary.js";
 import type { AuditStore } from "../audit/store.js";
 import type { AttachmentStore } from "../uploads/store.js";
+import type { AskUserQuestionAnnotation } from "@claudex/shared";
 
 type Broadcaster = (sessionId: string, event: RunnerEvent) => void;
 
@@ -353,6 +354,26 @@ export class SessionManager {
           this.firePermissionPush(sessionId, event.toolName, event.input);
           return;
         }
+        case "ask_user_question": {
+          // Persist as append-only — sibling `ask_user_answer` event lands
+          // when the user submits. Flip status to `awaiting` so the chat
+          // header and session list both surface that claude is blocked on
+          // user input (same treatment as a permission_request).
+          this.deps.sessions.appendEvent({
+            sessionId,
+            kind: "ask_user_question",
+            payload: {
+              askId: event.askId,
+              questions: event.questions,
+            },
+          });
+          this.deps.sessions.setStatus(sessionId, "awaiting");
+          // Forward the event to the WS layer — ws.ts will translate it into
+          // a `ServerAskUserQuestion` frame. Short-circuit the generic
+          // broadcast at the bottom of handleEvent so we don't double-send.
+          this.deps.broadcast(sessionId, event);
+          return;
+        }
         case "turn_end":
           this.deps.sessions.appendEvent({
             sessionId,
@@ -625,6 +646,20 @@ export class SessionManager {
   }
 
   /**
+   * Broadcast a synthesized `status` RunnerEvent so the WS bridge emits a
+   * `session_update` frame. Used by the CLI file-watcher which derives
+   * status from the JSONL's mtime + tail and never goes through
+   * AgentRunner. The DB status is expected to already be stamped by the
+   * caller — this method is pure broadcast.
+   */
+  broadcastStatus(
+    sessionId: string,
+    status: "running" | "idle" | "terminated" | "starting",
+  ): void {
+    this.deps.broadcast(sessionId, { type: "status", status });
+  }
+
+  /**
    * Broadcast a `queue_update` frame to every authenticated tab via the
    * global WS channel. The queue runner and HTTP routes call this through
    * the QueueStore `onChange` hook; callers here pass the current timestamp
@@ -703,6 +738,34 @@ export class SessionManager {
       target: sessionId,
       detail: `${pending?.toolName ?? "tool"} ${decision}`,
     });
+  }
+
+  /**
+   * Resolve a pending `AskUserQuestion` interaction with the user's answers.
+   * Append-only: we persist a sibling `ask_user_answer` event rather than
+   * mutating the question row, mirroring the rest of the event log.
+   * Double-submit is harmless — the runner's own map guards against a second
+   * resolve, and we skip the append when the runner didn't know the askId.
+   */
+  resolveAskUserQuestion(
+    sessionId: string,
+    askId: string,
+    answers: Record<string, string>,
+    annotations?: Record<string, AskUserQuestionAnnotation>,
+  ): void {
+    const entry = this.runners.get(sessionId);
+    if (!entry) return;
+    entry.runner.resolveAskUserQuestion(askId, answers, annotations);
+    this.deps.sessions.appendEvent({
+      sessionId,
+      kind: "ask_user_answer",
+      payload: {
+        askId,
+        answers,
+        ...(annotations ? { annotations } : {}),
+      },
+    });
+    this.deps.sessions.setStatus(sessionId, "running");
   }
 
   async disposeAll(): Promise<void> {

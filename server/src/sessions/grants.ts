@@ -108,6 +108,27 @@ export class ToolGrantStore {
       .all(sessionId) as GrantRow[];
   }
 
+  /**
+   * Every grant on the machine, joined with the owning session's title when
+   * the row is session-scoped. Used by Settings → Security's Granted-tools
+   * card so the user can review and revoke grants without first drilling
+   * into each session. Global rows sort first (they apply everywhere and
+   * are the most consequential to revoke), then session rows, each group
+   * sorted by `created_at DESC`.
+   */
+  listAllGrants(): Array<GrantRow & { session_title: string | null }> {
+    return this.db
+      .prepare(
+        `SELECT g.*, s.title AS session_title
+         FROM tool_grants g
+         LEFT JOIN sessions s ON s.id = g.session_id
+         ORDER BY
+           CASE WHEN g.session_id IS NULL THEN 0 ELSE 1 END ASC,
+           g.created_at DESC`,
+      )
+      .all() as Array<GrantRow & { session_title: string | null }>;
+  }
+
   revoke(id: string): void {
     this.db.prepare("DELETE FROM tool_grants WHERE id = ?").run(id);
   }

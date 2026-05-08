@@ -23,8 +23,11 @@ import { registerSessionExportRoutes } from "../sessions/export-routes.js";
 import { registerWorktreeRoutes } from "../sessions/worktree-routes.js";
 import { registerMemoryRoutes } from "../sessions/memory-routes.js";
 import { registerSearchRoutes } from "../search/routes.js";
+import { registerLinkPreviewRoutes } from "../link-preview/routes.js";
+import { registerStatsRoutes } from "../stats/routes.js";
 import { AuditStore } from "../audit/store.js";
 import { registerAuditRoutes } from "../audit/routes.js";
+import { registerBackupRoutes } from "../backup/routes.js";
 import { registerWsRoute } from "./ws.js";
 import { registerPtyRoutes } from "./pty.js";
 import { agentRunnerFactory } from "../sessions/agent-runner.js";
@@ -214,7 +217,10 @@ export async function buildApp(
   await registerWorktreeRoutes(app, { db: deps.db });
   await registerMemoryRoutes(app, { db: deps.db });
   await registerSearchRoutes(app, { db: deps.db });
+  await registerLinkPreviewRoutes(app, { db: deps.db });
+  await registerStatsRoutes(app, { db: deps.db });
   await registerAuditRoutes(app, { db: deps.db, audit });
+  await registerBackupRoutes(app, { db: deps.db });
 
   // Routines: periodic cron-driven session spawns. The scheduler owns a single
   // timer chained across all active routines and reloads itself on any CRUD.

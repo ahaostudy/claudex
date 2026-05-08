@@ -236,6 +236,15 @@ async function handleClientFrame(
       );
       return;
     }
+    case "ask_user_answer": {
+      deps.manager.resolveAskUserQuestion(
+        frame.sessionId,
+        frame.askId,
+        frame.answers,
+        frame.annotations,
+      );
+      return;
+    }
   }
 }
 
@@ -304,6 +313,14 @@ function runnerEventToFrame(
         toolInput: event.input,
         summary: event.title,
         blastRadius: null,
+      };
+    case "ask_user_question":
+      return {
+        type: "ask_user_question",
+        sessionId,
+        seq: 0,
+        askId: event.askId,
+        questions: event.questions,
       };
     case "turn_end":
       return {

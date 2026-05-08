@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { Plus, GitBranch, Pencil, Trash2, FolderOpen, Settings2, X, Download, Search } from "lucide-react";
+import { Plus, GitBranch, Pencil, Trash2, FolderOpen, Settings2, X, Download, Search, BarChart3 } from "lucide-react";
 import { useAuth } from "@/state/auth";
 import { useSessions } from "@/state/sessions";
 import { api, ApiError } from "@/api/client";
@@ -9,6 +9,7 @@ import { FolderPicker } from "@/components/FolderPicker";
 import { AppShell } from "@/components/AppShell";
 import { ImportSessionsSheet } from "@/components/ImportSessionsSheet";
 import { GlobalSearchSheet } from "@/components/GlobalSearchSheet";
+import { StatsSheet } from "@/components/StatsSheet";
 import { cn } from "@/lib/cn";
 
 // Status dot colors for the flat row layout. `running` and `awaiting` get a
@@ -110,6 +111,7 @@ export function HomeScreen() {
   const [showWsDiag, setShowWsDiag] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [showSearchSheet, setShowSearchSheet] = useState(false);
+  const [showStats, setShowStats] = useState(false);
   const [projects, setProjects] = useState<Project[]>([]);
   const [archivedSessions, setArchivedSessions] = useState<Session[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
@@ -349,6 +351,13 @@ export function HomeScreen() {
             <Download className="w-4 h-4 text-ink-soft" />
           </button>
           <button
+            onClick={() => setShowStats(true)}
+            title="Statistics"
+            className="h-8 w-8 rounded-[8px] border border-line bg-canvas flex items-center justify-center hover:bg-paper"
+          >
+            <BarChart3 className="w-4 h-4 text-ink-soft" />
+          </button>
+          <button
             onClick={() => setShowProjects(true)}
             title="Manage projects"
             className="h-8 w-8 rounded-[8px] border border-line bg-canvas flex items-center justify-center hover:bg-paper"
@@ -461,6 +470,7 @@ export function HomeScreen() {
           }}
         />
       )}
+      {showStats && <StatsSheet onClose={() => setShowStats(false)} />}
     </AppShell>
   );
 }

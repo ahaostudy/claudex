@@ -8,6 +8,7 @@ import type {
   CreateRoutineRequest,
   CreateSessionRequest,
   CreateSideSessionRequest,
+  ImportAllResponse,
   PendingDiffsResponse,
   Project,
   QueuedPrompt,
@@ -28,6 +29,7 @@ import type {
   UserEnvResponse,
   SearchResponse,
   MemoryResponse,
+  StatsResponse,
 } from "@claudex/shared";
 
 export class ApiError extends Error {
@@ -223,10 +225,37 @@ export const api = {
       { method: "POST", json: { text } },
     );
   },
+  /**
+   * Fork a session at a specific event into a brand-new session under the
+   * same project. The fork inherits `projectId`, `model`, and `mode`, and
+   * copies every event with `seq <= upToSeq` verbatim (with a normalized
+   * 1..N seq). It does NOT inherit `sdkSessionId` — the fork is a fresh SDK
+   * conversation, so the assistant has no memory of being forked.
+   *
+   * `upToSeq` omitted → fork at the latest event in the source. `title`
+   * omitted → `"Fork of <source.title>"`, truncated at 60 chars. Server
+   * refuses with 409 `archived` when the source session is archived.
+   */
+  forkSession(id: string, opts?: { upToSeq?: number; title?: string }) {
+    return request<{ session: Session }>(`/api/sessions/${id}/fork`, {
+      method: "POST",
+      json: opts ?? {},
+    });
+  },
   listGrants(sessionId: string) {
     return request<{ grants: ToolGrant[] }>(
       `/api/sessions/${sessionId}/grants`,
     );
+  },
+  /**
+   * Every tool grant on the machine, flattened. Used by Settings → Security
+   * so the user can audit + revoke grants globally without drilling into
+   * each session. Global grants come first, then session grants, each
+   * group sorted by `createdAt` DESC. Session rows carry `sessionId` +
+   * `sessionTitle` so the UI can label which session owns each grant.
+   */
+  listAllGrants() {
+    return request<{ grants: ToolGrant[] }>("/api/grants");
   },
   revokeGrant(grantId: string) {
     return request<{ ok: true }>(`/api/grants/${grantId}`, {
@@ -350,6 +379,14 @@ export const api = {
     return request<UsageRangeResponse>(`/api/usage/range?days=${days}`);
   },
   /**
+   * Snapshot aggregation backing the Home → Statistics sheet. Single honest
+   * SQL pass over sessions + session_events (see `server/src/stats/routes.ts`);
+   * returns zeros / nulls / empty arrays on an empty DB rather than 404.
+   */
+  getStats() {
+    return request<StatsResponse>("/api/stats");
+  },
+  /**
    * Full-text search across session titles + message bodies.
    *
    * The server 400s on empty / whitespace-only `q`; callers should
@@ -470,6 +507,44 @@ export const api = {
       method: "POST",
       json: { worktrees: items },
     });
+  },
+  /**
+   * Full-data backup download. The server returns a JSON bundle
+   * (Content-Disposition: attachment) containing every project, session,
+   * event, routine, queued prompt, grant, attachment metadata, and the last
+   * 1000 audit rows. Secrets (password hashes, TOTP / VAPID / JWT) are never
+   * included. We just return the plain download URL here — the UI wires it
+   * to an `<a href>` so the browser's native download handling kicks in.
+   */
+  exportAllUrl(): string {
+    return "/api/export/all";
+  },
+  /**
+   * Import a previously-exported bundle. Merges into the current database:
+   * projects dedupe on path; sessions are always inserted as new rows;
+   * events are re-sequenced per session; grants, attachments, and push
+   * subscriptions are skipped. Returns per-table counts + skip reasons so
+   * the UI can render an honest success toast.
+   */
+  async importAll(file: File): Promise<ImportAllResponse> {
+    const form = new FormData();
+    form.append("bundle", file, file.name);
+    const res = await fetch("/api/import/all", {
+      method: "POST",
+      credentials: "same-origin",
+      body: form,
+    });
+    if (!res.ok) {
+      let code = `http_${res.status}`;
+      try {
+        const body = (await res.json()) as { error?: string };
+        if (body?.error) code = body.error;
+      } catch {
+        /* ignore */
+      }
+      throw new ApiError(res.status, code);
+    }
+    return (await res.json()) as ImportAllResponse;
   },
 };
 

@@ -242,6 +242,119 @@ export class SessionStore {
       .run(now, now, id);
   }
 
+  /**
+   * Fork a session at `upToSeq` into a brand-new session row under the same
+   * project. The new row inherits `project_id`, `model`, and `mode` from the
+   * source; it does NOT inherit `sdk_session_id` (the fork is a fresh SDK
+   * conversation — the model has no idea it was forked) or `parent_session_id`
+   * (forks aren't side chats, they're top-level siblings). Status starts
+   * `idle` and stats start at zero.
+   *
+   * Events with `seq <= upToSeq` are copied verbatim (payload, kind,
+   * created_at) with fresh ids and a normalized 1..N seq sequence so the
+   * fork reads top-to-bottom without holes. If `upToSeq` is omitted we fork
+   * at the latest event in the source. Title falls back to
+   * `"Fork of <source.title>"`, truncated to 60 chars with an ellipsis when
+   * the source title is long.
+   *
+   * Returns the new Session, or null when the source doesn't exist. Archived
+   * sources are left to the caller to reject — the store only knows about
+   * rows.
+   */
+  forkSession(
+    sourceId: string,
+    upToSeq?: number,
+    newTitle?: string,
+  ): Session | null {
+    const source = this.findById(sourceId);
+    if (!source) return null;
+
+    // Resolve the cutoff seq. When no upToSeq is given, fork at the latest
+    // event; when the source has no events at all, cutoff stays at -1 so the
+    // INSERT-SELECT below copies nothing (the fork starts empty).
+    let cutoff: number;
+    if (upToSeq === undefined) {
+      const row = this.db
+        .prepare(
+          "SELECT COALESCE(MAX(seq), -1) AS s FROM session_events WHERE session_id = ?",
+        )
+        .get(sourceId) as { s: number };
+      cutoff = row.s;
+    } else {
+      cutoff = upToSeq;
+    }
+
+    const title = (() => {
+      if (newTitle && newTitle.trim().length > 0) return newTitle;
+      const base = `Fork of ${source.title}`;
+      if (base.length <= 60) return base;
+      // Truncate-with-ellipsis at 60 chars total, matching the pattern used
+      // in auto-title so forks don't produce 200-char breadcrumbs.
+      return `${base.slice(0, 59)}…`;
+    })();
+
+    const fork = this.create({
+      title,
+      projectId: source.projectId,
+      model: source.model,
+      mode: source.mode,
+      // No parentSessionId: forks are top-level, unlike /btw side chats.
+      // No worktreePath/branch: forks reuse the project root. A future
+      // version could mirror the source's worktree but that'd need a real
+      // git-level branch-off and is out of scope here.
+    });
+
+    if (cutoff >= 0) {
+      // Copy every event with seq <= cutoff, rewriting seq to 1..N in order.
+      // We stream rows rather than doing a single INSERT-SELECT because we
+      // need to mint fresh event ids and the seq rewrite is easier in JS.
+      const rows = this.db
+        .prepare(
+          `SELECT kind, seq, created_at, payload FROM session_events
+           WHERE session_id = ? AND seq <= ?
+           ORDER BY seq ASC`,
+        )
+        .all(sourceId, cutoff) as Array<{
+        kind: string;
+        seq: number;
+        created_at: string;
+        payload: string;
+      }>;
+      const insert = this.db.prepare(
+        `INSERT INTO session_events (id, session_id, kind, seq, created_at, payload)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+      );
+      // Normalize seq to 1..N in the fork. Starting from 1 matches how
+      // `appendEvent` numbers events once the fork receives its first new
+      // message (nextSeq() returns MAX+1).
+      let nextSeq = 1;
+      const copied = this.db.transaction(() => {
+        for (const r of rows) {
+          insert.run(
+            nanoid(16),
+            fork.id,
+            r.kind,
+            nextSeq,
+            r.created_at,
+            r.payload,
+          );
+          // Keep the FTS index in sync so the forked transcript is
+          // searchable from day one. Best-effort — SearchStore swallows.
+          this.search.indexMessage({
+            sessionId: fork.id,
+            seq: nextSeq,
+            kind: r.kind as EventKind,
+            payload: JSON.parse(r.payload),
+          });
+          nextSeq++;
+        }
+      });
+      copied();
+    }
+
+    return fork;
+  }
+
   archive(id: string): void {
     const now = new Date().toISOString();
     this.db
