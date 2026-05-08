@@ -13,6 +13,7 @@ import { SessionManager } from "../sessions/manager.js";
 import { ToolGrantStore } from "../sessions/grants.js";
 import { registerSessionRoutes } from "../sessions/routes.js";
 import { registerBrowseRoutes } from "../sessions/browse.js";
+import { registerSlashCommandRoutes } from "../sessions/slash-commands.js";
 import { registerWsRoute } from "./ws.js";
 import { agentRunnerFactory } from "../sessions/agent-runner.js";
 import type { RunnerFactory } from "../sessions/runner.js";
@@ -23,6 +24,12 @@ export interface AppDeps {
   logger: FastifyBaseLogger | false;
   isProduction: boolean;
   runnerFactory?: RunnerFactory;
+  /**
+   * Override the Claude config directory used for slash-command scans.
+   * Defaults to `~/.claude`. Tests pass a tmp dir so they never read the
+   * host user's real commands.
+   */
+  userClaudeDir?: string;
   /**
    * Absolute path to the built web/dist directory. If set, the server
    * mounts those files at `/` and falls through to index.html for SPA
@@ -72,6 +79,10 @@ export async function buildApp(
 
   await registerSessionRoutes(app, { db: deps.db, manager });
   await registerBrowseRoutes(app);
+  await registerSlashCommandRoutes(app, {
+    db: deps.db,
+    userClaudeDir: deps.userClaudeDir,
+  });
   await registerWsRoute(app, {
     manager,
     db: deps.db,

@@ -4,6 +4,7 @@ import type {
   Project,
   Session,
   SessionEvent,
+  SlashCommand,
   ToolGrant,
   UpdateProjectRequest,
   UpdateSessionRequest,
@@ -131,5 +132,13 @@ export const api = {
     return request<{ ok: true }>(`/api/grants/${grantId}`, {
       method: "DELETE",
     });
+  },
+  listSlashCommands(projectId?: string) {
+    const q = projectId
+      ? `?projectId=${encodeURIComponent(projectId)}`
+      : "";
+    return request<{ commands: SlashCommand[] }>(
+      `/api/slash-commands${q}`,
+    );
   },
 };

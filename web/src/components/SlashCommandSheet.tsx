@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from "react";
 import { X } from "lucide-react";
 import { cn } from "@/lib/cn";
 import {
-  BUILTIN_SLASH_COMMANDS,
   filterSlashCommands,
   type SlashCommand,
 } from "@/lib/slash-commands";
@@ -17,12 +16,18 @@ import {
  * anything ourselves. On desktop the same sheet still floats up from the
  * bottom; that keeps the code path single and is close enough to the mockup
  * for MVP.
+ *
+ * The `commands` list is provided by the parent: today it comes from
+ * `GET /api/slash-commands`, which merges the CLI built-ins, the user's
+ * `~/.claude/commands/*.md`, and the project's `.claude/commands/*.md`.
  */
 export function SlashCommandSheet({
+  commands,
   initialQuery,
   onPick,
   onClose,
 }: {
+  commands: SlashCommand[];
   /** Text typed after the leading `/`, used to pre-filter. */
   initialQuery: string;
   /** Called with the bare command name (no leading slash). */
@@ -36,15 +41,14 @@ export function SlashCommandSheet({
     setQuery(initialQuery);
   }, [initialQuery]);
 
-  useEffect(() => {
-    // Autofocus so the user can keep typing without re-tapping the input on
-    // desktop. On mobile this may pop the keyboard which is the right call —
-    // the sheet is a search UI first.
-    const t = window.setTimeout(() => inputRef.current?.focus(), 0);
-    return () => window.clearTimeout(t);
-  }, []);
+  // We intentionally don't autofocus the search input. Focus stays in the
+  // Chat composer textarea so typing `@foo` after the trigger keeps going
+  // to the textarea (and the parent passes `foo` back as `initialQuery`).
+  // Users who want to refine the query via this sheet can tap the search
+  // pill. That keeps delete / backspace / ESC behavior intuitive — the
+  // textarea stays responsive whether the picker is open or not.
 
-  const matches = filterSlashCommands(query);
+  const matches = filterSlashCommands(query, commands);
 
   return (
     <div
@@ -109,7 +113,7 @@ export function SlashCommandSheet({
           ) : (
             matches.map((cmd, i) => (
               <button
-                key={cmd.name}
+                key={`${cmd.kind}:${cmd.name}`}
                 onClick={() => onPick(cmd)}
                 className={cn(
                   "w-full flex items-center gap-3 px-3 py-2.5 rounded-[8px] text-left",
@@ -134,15 +138,15 @@ export function SlashCommandSheet({
                       /{cmd.name}
                     </span>
                   </div>
-                  <div className="text-[12px] text-ink-muted truncate">
-                    {cmd.description}
-                  </div>
+                  {cmd.description && (
+                    <div className="text-[12px] text-ink-muted truncate">
+                      {cmd.description}
+                    </div>
+                  )}
                 </div>
-                {cmd.badge && (
-                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[4px] border border-line bg-paper text-[10px] uppercase tracking-[0.1em] shrink-0">
-                    {cmd.badge}
-                  </span>
-                )}
+                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[4px] border border-line bg-paper text-[10px] uppercase tracking-[0.1em] shrink-0">
+                  {cmd.kind}
+                </span>
               </button>
             ))
           )}
@@ -157,5 +161,3 @@ export function SlashCommandSheet({
     </div>
   );
 }
-
-export { BUILTIN_SLASH_COMMANDS };

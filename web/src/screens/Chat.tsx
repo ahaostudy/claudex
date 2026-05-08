@@ -12,6 +12,7 @@ import { SlashCommandSheet } from "@/components/SlashCommandSheet";
 import { FileMentionSheet } from "@/components/FileMentionSheet";
 import { ViewModePicker } from "@/components/ViewModePicker";
 import type { SlashCommand } from "@/lib/slash-commands";
+import { BUILTIN_FALLBACK_SLASH_COMMANDS } from "@/lib/slash-commands";
 import type { UIPiece, ViewMode } from "@/state/sessions";
 
 export function ChatScreen() {
@@ -319,9 +320,38 @@ function Composer({
 }) {
   const [text, setText] = useState("");
   const [trigger, setTrigger] = useState<Trigger | null>(null);
+  // Slash commands are fetched from the server so the picker reflects the
+  // user's `~/.claude/commands/*.md` and project-level commands, not just a
+  // hardcoded fixture. We fall back to a tiny built-in list if the request
+  // fails so the picker is never empty.
+  const [slashCommands, setSlashCommands] = useState<SlashCommand[]>(
+    BUILTIN_FALLBACK_SLASH_COMMANDS,
+  );
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await api.listSlashCommands(project?.id);
+        if (!cancelled && res.commands.length > 0) {
+          setSlashCommands(res.commands);
+        }
+      } catch {
+        // Network / auth blip — stick with the fallback list we already have.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [project?.id]);
+  // When the user explicitly dismisses a picker (Esc / tap backdrop /
+  // insert a token), we remember the position of the dismissed sigil so
+  // moving the caret back over it doesn't re-pop the picker. Cleared the
+  // moment the user types a *new* `@` or `/`.
+  const [suppressedAt, setSuppressedAt] = useState<number | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  // Detect / update the active trigger from (text, cursor).
+  // Detect / update the active trigger from (text, cursor). Pure — only
+  // reads from state, never writes.
   function detectTrigger(nextText: string, cursor: number): Trigger | null {
     // If a trigger was active and its start character is still the right
     // sigil, keep it alive and update the query — even if the user types
@@ -345,12 +375,17 @@ function Composer({
     // cursor.
     if (cursor <= 0) return null;
     const last = nextText[cursor - 1];
+    const sigilPos = cursor - 1;
+    // If the user just dismissed a picker at this exact position, don't
+    // re-open it. They'll need to delete this character and retype, or
+    // place a fresh sigil somewhere else.
+    if (suppressedAt === sigilPos) return null;
     if (last === "/") {
       // Only fire if everything before the `/` is whitespace — matches
       // Claude CLI's convention that slash commands are the first token.
       const before = nextText.slice(0, cursor - 1);
       if (/^\s*$/.test(before)) {
-        return { kind: "slash", start: cursor - 1, query: "" };
+        return { kind: "slash", start: sigilPos, query: "" };
       }
       return null;
     }
@@ -358,16 +393,31 @@ function Composer({
       // `@` is valid anywhere after whitespace or at the start of input.
       const prev = cursor >= 2 ? nextText[cursor - 2] : "";
       if (cursor === 1 || /\s/.test(prev)) {
-        return { kind: "mention", start: cursor - 1, query: "" };
+        return { kind: "mention", start: sigilPos, query: "" };
       }
       return null;
     }
     return null;
   }
 
-  function updateFromEvent(nextText: string, cursor: number) {
+  // Only called on real *input* — typing a character or pasting. Caret
+  // movement (click, arrows) does NOT run this, so moving your cursor back
+  // across an old `@` will not yank the picker open unexpectedly.
+  function onInputChange(nextText: string, cursor: number) {
+    // Clear the "recently dismissed" flag the moment the user changes the
+    // character at that position (deletes it, or retypes it somewhere else).
+    if (suppressedAt != null && nextText[suppressedAt] !== text[suppressedAt]) {
+      setSuppressedAt(null);
+    }
     setText(nextText);
     setTrigger(detectTrigger(nextText, cursor));
+  }
+
+  function dismissPicker() {
+    // Remember which sigil the user just dismissed so re-entering the
+    // textarea or moving the caret doesn't immediately re-pop the picker.
+    if (trigger) setSuppressedAt(trigger.start);
+    setTrigger(null);
   }
 
   function insertToken(token: string) {
@@ -380,6 +430,9 @@ function Composer({
     const next = text.slice(0, start) + token + " " + text.slice(end);
     setText(next);
     setTrigger(null);
+    // The inserted token replaced the sigil, so we definitely don't want
+    // the "suppress this sigil position" flag hanging around.
+    setSuppressedAt(null);
     // Put the cursor right after the inserted token + space.
     const newPos = start + token.length + 1;
     requestAnimationFrame(() => {
@@ -478,22 +531,19 @@ function Composer({
             ref={textareaRef}
             value={text}
             onChange={(e) =>
-              updateFromEvent(e.target.value, e.target.selectionEnd ?? 0)
+              onInputChange(e.target.value, e.target.selectionEnd ?? 0)
             }
-            onKeyUp={(e) => {
-              // Track caret moves via arrow keys too — otherwise moving left
-              // across an `@` doesn't reopen the sheet.
-              const el = e.currentTarget;
-              setTrigger(detectTrigger(el.value, el.selectionEnd ?? 0));
-            }}
-            onClick={(e) => {
-              const el = e.currentTarget;
-              setTrigger(detectTrigger(el.value, el.selectionEnd ?? 0));
-            }}
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();
                 send();
+                return;
+              }
+              if (e.key === "Escape" && trigger) {
+                // Give the user a keyboard-level escape hatch from the picker
+                // without losing the typed text.
+                e.preventDefault();
+                dismissPicker();
               }
             }}
             rows={1}
@@ -532,9 +582,10 @@ function Composer({
 
       {trigger?.kind === "slash" && (
         <SlashCommandSheet
+          commands={slashCommands}
           initialQuery={trigger.query}
           onPick={handlePickSlash}
-          onClose={() => setTrigger(null)}
+          onClose={dismissPicker}
         />
       )}
       {trigger?.kind === "mention" && project && (
@@ -542,7 +593,7 @@ function Composer({
           projectRoot={project.path}
           initialQuery={trigger.query}
           onPick={handlePickMention}
-          onClose={() => setTrigger(null)}
+          onClose={dismissPicker}
         />
       )}
     </>

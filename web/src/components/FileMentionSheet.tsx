@@ -134,7 +134,10 @@ export function FileMentionSheet({
           <div className="flex items-center gap-2 h-10 px-3 rounded-[8px] bg-paper border border-line">
             <span className="mono text-klein text-[15px] leading-none">@</span>
             <input
-              autoFocus
+              // No autoFocus: focus stays in the Chat composer textarea so
+              // the user can keep typing / backspacing through the `@` token.
+              // The parent mirrors textarea content into `initialQuery` so
+              // the list still filters as they type.
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={(e) => {

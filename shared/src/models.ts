@@ -214,3 +214,38 @@ export const BrowseResponse = z.object({
   entries: z.array(BrowseEntry),
 });
 export type BrowseResponse = z.infer<typeof BrowseResponse>;
+
+// ============================================================================
+// Slash commands (composer `/` picker)
+// ============================================================================
+
+// Where a slash command came from. `built-in` is hard-coded in the server
+// (the `claude` CLI owns the actual behavior); `user` comes from
+// `~/.claude/commands/`; `project` from `<project>/.claude/commands/`;
+// `plugin` is reserved for a future scanner — not emitted today.
+export const SlashCommandKind = z.enum([
+  "built-in",
+  "user",
+  "project",
+  "plugin",
+]);
+export type SlashCommandKind = z.infer<typeof SlashCommandKind>;
+
+export const SlashCommand = z.object({
+  // Bare command name, without the leading `/`.
+  name: z.string(),
+  // One-line description; null when we couldn't extract one from the file.
+  description: z.string().nullable(),
+  kind: SlashCommandKind,
+  // Absolute path to the source file for user/project/plugin entries; omitted
+  // for built-ins.
+  source: z.string().optional(),
+});
+export type SlashCommand = z.infer<typeof SlashCommand>;
+
+export const ListSlashCommandsResponse = z.object({
+  commands: z.array(SlashCommand),
+});
+export type ListSlashCommandsResponse = z.infer<
+  typeof ListSlashCommandsResponse
+>;

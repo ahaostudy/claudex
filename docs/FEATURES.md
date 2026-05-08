@@ -11,8 +11,8 @@ Three status tiers:
   use from the API; users won't see it yet.
 - ⬜ **Planned** — listed so nobody re-plans it from scratch, but not started.
 
-Last updated: see the git log of this file. Current revision lists **71 shipped
-behaviors** and **155 backend tests**.
+Last updated: see the git log of this file. Current revision lists **72 shipped
+behaviors** and **169 backend tests**.
 
 ---
 
@@ -76,6 +76,14 @@ behaviors** and **155 backend tests**.
 | ✅ | `GET /api/browse/home` — returns `{path: os.homedir()}` for a "back to home" shortcut | same |
 | ✅ | Errors: `400 not_absolute`, `404 not_found`, `403 not_a_directory`, `403 permission_denied` (EACCES/EPERM). Never reads file contents | same |
 | ✅ | Login-gated alongside the rest of `/api/*` | same |
+
+## Slash commands
+
+| Status | Feature | Where |
+|---|---|---|
+| ✅ | `GET /api/slash-commands?projectId=<id>` — returns the merged list that powers the composer's `/` picker: curated CLI built-ins, then `~/.claude/commands/*.md` (kind `user`), then `<project>/.claude/commands/*.md` (kind `project`, only when `projectId` is given). Each entry is `{name, description, kind, source?}`. Descriptions are parsed from YAML frontmatter (`description:`), a leading `# Heading`, or the first non-empty line — whichever lands first in the first 1 KB / 10 lines. Top-level `.md` only; dotfiles skipped; unreadable files are quietly skipped rather than 500-ing. Unknown `projectId` is soft-ignored (still returns built-in + user) | `server/src/sessions/slash-commands.ts` |
+| ✅ | Built-ins are a curated list (`add-dir`, `bug`, `clear`, `compact`, `config`, `continue`, `cost`, `doctor`, `help`, `init`, `login`, `logout`, `mcp`, `model`, `plugin`, `pr-comments`, `resume`, `review`, `status`) — the `claude` CLI owns the real behavior, we just surface the token so the picker isn't empty | same |
+| ⚠ | Plugin commands (`~/.claude/plugins/cache/<marketplace>/<plugin>/<version>/commands/*.md`) are **not** scanned — the versioned cache layout has multiple valid entries per plugin and we don't guess. Revisit once the CLI exposes a canonical listing | — |
 
 ## Sessions
 
@@ -154,7 +162,7 @@ behaviors** and **155 backend tests**.
 | ✅ | Optimistic echo of user messages (shown before the WS ack) | `web/src/state/sessions.ts` |
 | ✅ | Transcript is reconstructed from both persisted events (initial load via `/api/sessions/:id/events`) and live WS frames, unified into a single UI piece list | same |
 | ✅ | Sign out clears the session cookie and returns to the login screen | `web/src/screens/Home.tsx` |
-| ✅ | **Composer pickers** — typing `@` after whitespace pops a file-mention sheet (reuses `/api/browse`, defaults to the session's project root, inserts `@<relative>` or `@<abs>` fallback outside the root); typing `/` at the start of a line pops a slash-command sheet (`/review`, `/compact`, `/btw`, `/plan` — hardcoded built-ins, claude CLI interprets them). Both sheets share the s-09 bottom-sheet language. Side-rail icons also open the pickers explicitly | `web/src/screens/Chat.tsx`, `web/src/components/SlashCommandSheet.tsx`, `web/src/components/FileMentionSheet.tsx`, `web/src/lib/slash-commands.ts` |
+| ✅ | **Composer pickers** — typing `@` after whitespace pops a file-mention sheet (reuses `/api/browse`, defaults to the session's project root, inserts `@<relative>` or `@<abs>` fallback outside the root); typing `/` at the start of a line pops a slash-command sheet populated at mount from `GET /api/slash-commands?projectId=<id>` — merges the CLI built-ins, the user's `~/.claude/commands/*.md`, and the active project's `.claude/commands/*.md`, each entry tagged with its `kind` shown as a badge. Network/auth failure falls back to a tiny built-in list (`help / clear / compact / review`) so the picker is never empty. Both sheets share the s-09 bottom-sheet language. Side-rail icons also open the pickers explicitly | `web/src/screens/Chat.tsx`, `web/src/components/SlashCommandSheet.tsx`, `web/src/components/FileMentionSheet.tsx`, `web/src/lib/slash-commands.ts`, `web/src/api/client.ts` |
 | ✅ | Session settings side sheet (gear button in the Chat header) — edit title, swap model (Opus 4.7 / Sonnet 4.6 / Haiku 4.5), switch permission mode (Ask / Accept / Plan / Bypass), read-only workspace panel (branch + worktree path placeholder for P4), and "Approved in this session" list with per-grant Revoke. Model change mid-run shows a yellow "applies to next turn" notice | `web/src/components/SessionSettingsSheet.tsx` + `web/src/screens/Chat.tsx` |
 | 🟡 | `/btw` side chat — not implemented |  |
 | ✅ | **View modes (Normal / Verbose / Summary)** — dropdown picker in the Chat header (next to the gear). `normal` hides `thinking` blocks entirely (no inline expander yet — deferred); `verbose` shows every piece including thinking; `summary` keeps only user messages + the final `assistant_text` of each assistant turn and appends an **Outcome** card (driven by `session.status`) and a **Changes** card that aggregates `Edit`/`Write`/`MultiEdit` tool calls into per-file `+`/`−` line totals (PR card from mockup s-07 is still planned — no git integration yet). Session-scoped, no persistence across reloads | `web/src/screens/Chat.tsx`, `web/src/components/ViewModePicker.tsx`, `web/src/state/sessions.ts` |
@@ -165,7 +173,7 @@ behaviors** and **155 backend tests**.
 
 | Status | Feature | Where |
 |---|---|---|
-| ✅ | 155 backend tests, vitest, all green | `server/tests/` |
+| ✅ | 169 backend tests, vitest, all green | `server/tests/` |
 | ✅ | Bind-safety, DB migration + FK cascade | `tests/config.test.ts`, `tests/db.test.ts` |
 | ✅ | Password/TOTP/JWT edge cases (tampering, cross-secret, wrong audience, expiry, file-mode 0600) | `tests/auth.test.ts` |
 | ✅ | Auth HTTP routes including peek-retry TOTP, replay rejection, cookie attributes, user enumeration parity | `tests/auth-routes.test.ts` |
@@ -174,6 +182,7 @@ behaviors** and **155 backend tests**.
 | ✅ | SessionManager lifecycle, status transitions, grant-based auto-approval | `tests/session-manager.test.ts` |
 | ✅ | Session REST routes (path validation, duplicate path 409, archive, events, project rename + delete with sessions-FK guard, PATCH session title/model/mode with live-runner mode propagation, archived 409, empty-body 400, running-model warning, grants list + revoke with scope + 404) | `tests/session-routes.test.ts` |
 | ✅ | Filesystem browse routes: auth gate, abs-path validation, 404 / 403 error paths, sort + flags, parent-null at root, symlinks are not followed | `tests/browse.test.ts` |
+| ✅ | Slash-commands scanner + route: auth gate, built-ins-only when `~/.claude/commands` missing, user-command parsing (frontmatter / heading / plain line / null), project-command opt-in via `projectId`, unknown `projectId` soft-ignored. Uses an injected `userClaudeDir` tmp to avoid touching the host user's real `~/.claude/` | `tests/slash-commands.test.ts` |
 | ✅ | WebSocket end-to-end over a real port (auth gate, hello_ack, broadcast isolation, permission decision round-trip, bad-frame recovery) | `tests/ws.test.ts` |
 | ✅ | Tool grants: signature conventions, session-vs-global scope, idempotent insert, revoke, FK cascade | `tests/grants.test.ts` |
 | ✅ | Permission summary content for every supported tool + missing-field edge cases | `tests/permission-summary.test.ts` |

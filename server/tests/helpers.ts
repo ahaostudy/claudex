@@ -57,6 +57,7 @@ export function tempConfig(overrides?: Partial<Config>): {
  */
 export async function bootstrapAuthedApp(
   runnerFactory?: RunnerFactory,
+  opts?: { userClaudeDir?: string },
 ): Promise<{
   app: FastifyInstance;
   dbh: ClaudexDb;
@@ -74,6 +75,7 @@ export async function bootstrapAuthedApp(
     logger: false,
     isProduction: false,
     runnerFactory,
+    userClaudeDir: opts?.userClaudeDir,
   });
   const users = new UserStore(dbh.db);
   const totpSecret = generateTotpSecret();
