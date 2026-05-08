@@ -11,7 +11,8 @@ import { cn } from "@/lib/cn";
 //   - body copy: 14.5px, leading-[1.6]
 //   - headings: .display serif, stepped down by level
 //   - inline code: mono, paper bg, thin border
-//   - fenced code: mono, ink bg on canvas text, language tag top-right
+//   - fenced code: mono, paper bg on soft-ink text, bordered, language tag
+//     top-right — warm-white to match the rest of the publication-style UI
 //   - blockquote: left rule + muted ink
 //   - links: klein-ink underline; external opens in a new tab
 //   - tables: collapsed borders, header row tinted
@@ -166,8 +167,17 @@ const COMPONENTS: Components = {
     const isBlock =
       typeof className === "string" && /language-/.test(className);
     if (isBlock) {
+      // Block code: reset any inherited pill styling so the inner <code>
+      // inside the <pre> doesn't re-introduce a background / border. The
+      // <pre> renderer owns the visual container.
       return (
-        <code className={cn(className, "mono")} {...rest}>
+        <code
+          className={cn(
+            className,
+            "mono bg-transparent border-0 p-0 rounded-none text-inherit",
+          )}
+          {...rest}
+        >
           {children}
         </code>
       );
@@ -189,11 +199,11 @@ const COMPONENTS: Components = {
     return (
       <div className="relative my-2">
         {lang && (
-          <span className="absolute right-2 top-1.5 text-[10px] uppercase tracking-[0.1em] text-canvas/50 mono pointer-events-none">
+          <span className="absolute right-2 top-1.5 text-[10px] uppercase tracking-[0.14em] text-ink-muted mono pointer-events-none">
             {lang}
           </span>
         )}
-        <pre className="mono text-[12.5px] bg-ink text-canvas rounded-[8px] p-3 overflow-x-auto">
+        <pre className="mono text-[12.5px] bg-paper text-ink-soft border border-line rounded-[8px] p-3 overflow-x-auto">
           {children}
         </pre>
       </div>
