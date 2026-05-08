@@ -316,6 +316,41 @@ export class SessionManager {
               behavior: "allow",
               reason: "auto-approved by saved grant",
             });
+            // Resolve which grant row actually matched so the audit trail
+            // and transcript can point back at it. listForSession returns
+            // both session-scoped and global rows — filter by (toolName, sig)
+            // and pick the newest (first entry is created_at DESC).
+            const matched = this.deps.grants
+              .listForSession(sessionId)
+              .find(
+                (g) =>
+                  g.tool_name === event.toolName && g.input_signature === sig,
+              );
+            // Append a permission_decision event so auto-approvals show up
+            // in the transcript next to the tool_use they authorized. The
+            // `automatic: true` flag lets the UI render them differently
+            // (no Approve/Deny buttons, greyed-out "auto" label).
+            this.deps.sessions.appendEvent({
+              sessionId,
+              kind: "permission_decision",
+              payload: {
+                approvalId: event.toolUseId,
+                toolUseId: event.toolUseId,
+                toolName: event.toolName,
+                decision: "allow_always",
+                automatic: true,
+                matchedGrantId: matched?.id ?? null,
+              },
+            });
+            // And audit, so the Security card shows the invisible grants are
+            // firing. userId is null here — decisions arrive over the runner
+            // bus with no FastifyRequest in scope.
+            this.deps.audit?.append({
+              userId: null,
+              event: "permission_granted",
+              target: sessionId,
+              detail: `auto: ${event.toolName} matched ${matched?.input_signature ?? sig}`,
+            });
             // Don't persist this as a user-facing permission_request.
             return;
           }

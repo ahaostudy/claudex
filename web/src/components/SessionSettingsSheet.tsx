@@ -12,6 +12,7 @@ import type {
   Session,
   ToolGrant,
 } from "@claudex/shared";
+import { useFocusReturn } from "@/hooks/useFocusReturn";
 
 /**
  * Session settings sheet. Rebuilt to match mockup s-10.
@@ -40,6 +41,7 @@ export function SessionSettingsSheet({
   onClose: () => void;
   onUpdated: (next: Session) => void;
 }) {
+  useFocusReturn();
   const [model, setModel] = useState<ModelId>(session.model);
   const [mode, setMode] = useState<PermissionMode>(session.mode);
   const [warnings, setWarnings] = useState<string[]>([]);

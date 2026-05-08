@@ -1699,6 +1699,7 @@ describe("session HTTP routes", () => {
         mode: string;
         sdkSessionId: string | null;
         parentSessionId: string | null;
+        forkedFromSessionId: string | null;
         status: string;
         title: string;
       };
@@ -1708,6 +1709,10 @@ describe("session HTTP routes", () => {
       expect(fork.mode).toBe("acceptEdits");
       expect(fork.sdkSessionId).toBeNull();
       expect(fork.parentSessionId).toBeNull();
+      // Forked sessions carry a back-reference to their source so the chat
+      // header can render a "Forked" badge making the SDK-context-reset
+      // honest to the user.
+      expect(fork.forkedFromSessionId).toBe(s.id);
       expect(fork.status).toBe("idle");
       expect(fork.title).toBe("Fork of origin");
 
@@ -1750,6 +1755,14 @@ describe("session HTTP routes", () => {
         .prepare("SELECT COUNT(*) AS c FROM session_events WHERE session_id = ?")
         .get(s.id) as { c: number };
       expect(srcTotal.c).toBe(10);
+
+      // And the fork row's raw `forked_from_session_id` column is populated —
+      // the DTO check above is the contract; this one guards against a DTO
+      // remapping accidentally decoupling from the underlying storage.
+      const forkRow = ctx.dbh.db
+        .prepare("SELECT forked_from_session_id FROM sessions WHERE id = ?")
+        .get(fork.id) as { forked_from_session_id: string | null };
+      expect(forkRow.forked_from_session_id).toBe(s.id);
     });
 
     it("fork inherits project_id / model / mode but NOT sdk_session_id", async () => {

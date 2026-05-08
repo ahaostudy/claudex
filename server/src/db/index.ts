@@ -406,6 +406,19 @@ const MIGRATIONS: { id: number; name: string; up: string }[] = [
       CREATE INDEX idx_link_previews_fetched ON link_previews(fetched_at);
     `,
   },
+  {
+    id: 14,
+    name: "sessions_forked_from",
+    // Track the source session a fork was branched from so the chat header
+    // can render a "Forked" badge making the SDK-context-reset honest to
+    // the user. Nullable: top-level sessions and CLI-imported sessions
+    // have no parent fork. We intentionally do NOT add a FK ON DELETE
+    // CASCADE — if the source session gets deleted, the fork should
+    // survive (it's a standalone SDK conversation with its own events).
+    up: `
+      ALTER TABLE sessions ADD COLUMN forked_from_session_id TEXT;
+    `,
+  },
 ];
 
 export function openDb(config: Config, log: Logger): ClaudexDb {

@@ -6,6 +6,7 @@ import {
   type SlashCommand,
 } from "@/lib/slash-commands";
 import type { SlashClaudexAction } from "@claudex/shared";
+import { useFocusReturn } from "@/hooks/useFocusReturn";
 
 /**
  * Slash-command picker. Mobile-first bottom sheet that mirrors the mockup's
@@ -112,6 +113,7 @@ export const SlashCommandSheet = forwardRef<
   { commands, initialQuery, onPick, onClaudexAction, onClose },
   ref,
 ) {
+  useFocusReturn();
   const [query, setQuery] = useState(initialQuery);
   const [selected, setSelected] = useState(0);
   const [recentNames, setRecentNames] = useState<string[]>(() => readRecents());

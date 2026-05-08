@@ -5,6 +5,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
 import type { Session } from "@claudex/shared";
 import { cn } from "@/lib/cn";
+import { useFocusReturn } from "@/hooks/useFocusReturn";
 
 /**
  * TerminalDrawer — a PTY attached to the session's cwd (worktree if present,
@@ -41,6 +42,7 @@ export function TerminalDrawer({
   projectPath: string | null;
   onClose: () => void;
 }) {
+  useFocusReturn();
   const hostRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);

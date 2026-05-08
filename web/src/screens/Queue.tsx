@@ -19,6 +19,7 @@ import type {
 } from "@claudex/shared";
 import { api, ApiError } from "@/api/client";
 import { AppShell } from "@/components/AppShell";
+import { useFocusReturn } from "@/hooks/useFocusReturn";
 
 /**
  * Queue screen — the user composes several prompts and the server dispatches
@@ -698,6 +699,7 @@ function QueueEditor({
   onCancel: () => void;
   onSaved: () => Promise<void>;
 }) {
+  useFocusReturn();
   const [projectId, setProjectId] = useState(
     initial?.projectId ?? projects[0]?.id ?? "",
   );

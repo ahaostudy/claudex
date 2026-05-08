@@ -11,6 +11,7 @@ import {
   Palette,
   Plug,
   RefreshCw,
+  ScrollText,
   Server,
   Shield,
   Sliders,
@@ -34,6 +35,7 @@ import {
   subscribeToPush,
   unsubscribeFromPush,
 } from "@/lib/push";
+import { useFocusReturn } from "@/hooks/useFocusReturn";
 
 // ---------------------------------------------------------------------------
 // Settings — mockup s-12 structure.
@@ -202,7 +204,7 @@ export function SettingsScreen() {
                 <path d="M9 22 L16 8 L23 22 Z" fill="#cc785c" />
                 <circle cx="16" cy="18" r="2.2" fill="#faf9f5" />
               </svg>
-              <span className="mono text-[13px]">settings</span>
+              <span className="mono text-[13px]">claudex</span>
             </div>
             <div className="px-4 caps text-ink-muted mb-2">Settings</div>
             <nav className="px-3 space-y-0.5 text-[13px]">
@@ -240,7 +242,7 @@ export function SettingsScreen() {
                   className={cn(
                     "shrink-0 inline-flex items-center gap-1.5 px-2.5 h-7 rounded-full text-[12px] border",
                     active
-                      ? "bg-ink text-canvas border-ink"
+                      ? "bg-klein text-canvas border-klein"
                       : "bg-canvas text-ink-soft border-line",
                   )}
                 >
@@ -301,6 +303,11 @@ function ProfileCard() {
       <div className="min-w-0">
         <div className="font-medium truncate">{user?.username ?? "—"}</div>
         <div className="text-[12px] text-ink-muted">self-hosted</div>
+        {user?.createdAt && (
+          <div className="text-[11px] text-ink-muted mt-0.5">
+            since {new Date(user.createdAt).toLocaleDateString()}
+          </div>
+        )}
       </div>
       <span className="ml-auto inline-flex items-center gap-1.5 px-2 py-0.5 rounded-[6px] border border-success/30 bg-success-wash text-[#1f5f21] text-[10px] font-medium uppercase tracking-[0.1em] shrink-0">
         2FA on
@@ -353,6 +360,7 @@ function AccountPanel() {
 }
 
 function ChangePasswordModal({ onClose }: { onClose: () => void }) {
+  useFocusReturn();
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
   const [confirm, setConfirm] = useState("");
@@ -523,8 +531,8 @@ function SecurityPanel() {
     <div className="space-y-5">
       <div className="rounded-[12px] border border-line bg-canvas overflow-hidden">
         <div className="flex items-center gap-4 px-5 py-4 border-b border-line">
-          <div className="h-9 w-9 rounded-[8px] bg-klein-wash border border-klein/20 flex items-center justify-center shrink-0">
-            <Shield className="w-4 h-4 text-klein" />
+          <div className="h-10 w-10 rounded-[10px] bg-klein-wash flex items-center justify-center text-klein-ink shrink-0">
+            <Shield className="w-5 h-5" />
           </div>
           <div className="min-w-0">
             <div className="display text-[18px] leading-tight">
@@ -540,10 +548,18 @@ function SecurityPanel() {
           </span>
         </div>
 
-        <div className="grid grid-cols-1 text-[13px]">
+        <div className="grid grid-cols-3 divide-x divide-line text-[13px]">
           <div className="px-5 py-4">
             <div className="caps text-ink-muted">Issuer</div>
             <div className="mt-1 mono">claudex</div>
+          </div>
+          <div className="px-5 py-4">
+            <div className="caps text-ink-muted">Recovery codes</div>
+            <div className="mt-1 text-ink-muted">—</div>
+          </div>
+          <div className="px-5 py-4">
+            <div className="caps text-ink-muted">Last used</div>
+            <div className="mt-1 text-ink-muted">—</div>
           </div>
         </div>
 
@@ -738,6 +754,7 @@ function RecoveryCodesModal({
   codes: string[];
   onClose: () => void;
 }) {
+  useFocusReturn();
   const [copied, setCopied] = useState(false);
 
   async function copyAll() {
@@ -1274,9 +1291,16 @@ function AuditLogCard({
 
   return (
     <div className="rounded-[12px] border border-line bg-canvas p-5">
-      <div className="caps text-ink-muted">Audit log</div>
-      <div className="display text-[18px] mt-1">
-        {totalCount} event{totalCount === 1 ? "" : "s"} · past 30 days
+      <div className="flex items-center gap-3">
+        <div className="h-10 w-10 rounded-[10px] bg-paper flex items-center justify-center text-ink-muted shrink-0">
+          <ScrollText className="w-4 h-4" />
+        </div>
+        <div className="min-w-0">
+          <div className="caps text-ink-muted">Audit log</div>
+          <div className="display text-[18px] mt-0.5">
+            {totalCount} event{totalCount === 1 ? "" : "s"} · past 30 days
+          </div>
+        </div>
       </div>
       {visible.length === 0 ? (
         <div className="mt-3 text-[12.5px] text-ink-muted">
@@ -1728,48 +1752,52 @@ function PluginsPanel() {
   const count = env.plugins.length;
   const enabledCount = env.plugins.filter((p) => p.enabled).length;
 
+  if (count === 0) {
+    return (
+      <EmptyCard
+        icon={Plug}
+        title="No plugins installed."
+        body={
+          <>
+            claudex does not install plugins itself — run{" "}
+            <span className="mono">claude plugin install …</span> on this host
+            and they'll show up here.
+          </>
+        }
+      />
+    );
+  }
+
   return (
     <Card
-      header={
-        count === 0
-          ? "No plugins installed. Use `claude plugin install …` in the CLI."
-          : `${enabledCount} enabled · ${count} installed`
-      }
+      header={`${enabledCount} enabled · ${count} installed`}
     >
-      {count === 0 ? (
-        <div className="px-4 py-4 text-[13px] text-ink-muted">
-          claudex does not install plugins itself — run{" "}
-          <span className="mono">claude plugin install …</span> on this host
-          and they'll show up here.
-        </div>
-      ) : (
-        <ul className="divide-y divide-line">
-          {env.plugins.map((p) => (
-            <li
-              key={p.key}
-              className="flex items-center gap-3 px-4 py-3 text-[13.5px]"
-            >
-              <div className="min-w-0 flex-1">
-                <div className="font-medium truncate">{p.name}</div>
-                <div className="mono text-[11px] text-ink-muted truncate">
-                  {p.marketplace ?? "—"}
-                  {p.version ? ` · ${p.version}` : ""}
-                </div>
+      <ul className="divide-y divide-line">
+        {env.plugins.map((p) => (
+          <li
+            key={p.key}
+            className="flex items-center gap-3 px-4 py-3 text-[13.5px]"
+          >
+            <div className="min-w-0 flex-1">
+              <div className="font-medium truncate">{p.name}</div>
+              <div className="mono text-[11px] text-ink-muted truncate">
+                {p.marketplace ?? "—"}
+                {p.version ? ` · ${p.version}` : ""}
               </div>
-              <span
-                className={cn(
-                  "inline-flex items-center gap-1.5 px-2 py-0.5 rounded-[6px] border text-[10px] font-medium uppercase tracking-[0.1em]",
-                  p.enabled
-                    ? "border-success/30 bg-success-wash text-[#1f5f21]"
-                    : "border-line bg-paper text-ink-muted",
-                )}
-              >
-                {p.enabled ? "enabled" : "disabled"}
-              </span>
-            </li>
-          ))}
-        </ul>
-      )}
+            </div>
+            <span
+              className={cn(
+                "inline-flex items-center gap-1.5 px-2 py-0.5 rounded-[6px] border text-[10px] font-medium uppercase tracking-[0.1em]",
+                p.enabled
+                  ? "border-success/30 bg-success-wash text-[#1f5f21]"
+                  : "border-line bg-paper text-ink-muted",
+              )}
+            >
+              {p.enabled ? "enabled" : "disabled"}
+            </span>
+          </li>
+        ))}
+      </ul>
     </Card>
   );
 }
@@ -1897,6 +1925,24 @@ function AdvancedWorktreesCard() {
 
   const orphans = (worktrees ?? []).filter((w) => w.status === "orphaned");
 
+  if (worktrees !== null && worktrees.length === 0) {
+    return (
+      <EmptyCard
+        icon={FolderOpen}
+        title="No claudex-managed worktrees."
+        body={
+          <>
+            When you create a session with{" "}
+            <span className="mono">worktree: true</span>, git branches under{" "}
+            <span className="mono">claude/</span> and directories under{" "}
+            <span className="mono">.claude/worktrees/</span> show up here so you
+            can clean up anything left behind.
+          </>
+        }
+      />
+    );
+  }
+
   return (
     <Card
       header="Claudex-managed git worktrees across your projects."
@@ -1904,14 +1950,6 @@ function AdvancedWorktreesCard() {
       {worktrees === null ? (
         <div className="px-4 py-6 text-[13px] mono text-ink-muted">
           loading…
-        </div>
-      ) : worktrees.length === 0 ? (
-        <div className="px-4 py-4 text-[13px] text-ink-muted">
-          No claudex-managed worktrees found. When you create a session with{" "}
-          <span className="mono">worktree: true</span>, git branches under{" "}
-          <span className="mono">claude/</span> and directories under{" "}
-          <span className="mono">.claude/worktrees/</span> show up here so you
-          can clean up anything left behind.
         </div>
       ) : (
         <ul className="divide-y divide-line">

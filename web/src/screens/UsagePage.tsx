@@ -12,17 +12,19 @@ import {
   computeSessionUsage,
   contextWindowTokens,
   formatTokens,
+  formatUsd,
   type SessionUsage,
 } from "@/lib/usage";
-import { MODEL_LABEL } from "@/lib/pricing";
+import { estimateCostUsd, MODEL_LABEL } from "@/lib/pricing";
 
 // ---------------------------------------------------------------------------
-// Usage analytics — full-screen `/usage` page. Desktop-first layout adapted
-// from mockup s-08 (lines referenced in the task spec). Mobile keeps the
-// bottom-sheet `UsagePanel` and shows a "go to desktop" empty state here,
-// because the mockup was designed for a 2-col + 3-col grid that can't
-// collapse gracefully to a 390px viewport without sacrificing half the
-// information.
+// Usage analytics — full-screen `/usage` page. Desktop layout adapted from
+// mockup s-08 desktop (a 4-col top row + 3-col second row). Mobile layout
+// adapted from s-08 iPhone (lines 1512–1557): compact stacked cards with a
+// back chevron header, big ring, plan-period empty-state, per-model rows,
+// and a cost-estimate card. Both surfaces pull the same data —
+// `/api/usage/today` + `/api/usage/range` + a replay of the active session's
+// events through `computeSessionUsage`.
 //
 // Tiles shipped (everything else is an honest empty state — we don't fake
 // quota / plan data that claudex doesn't have):
@@ -33,8 +35,10 @@ import { MODEL_LABEL } from "@/lib/pricing";
 //      Chat context ring shows.
 //   2. Plan period: OMITTED. Rendered as a card with "No plan data" copy.
 //   3. Today · tokens: `/api/usage/today` totals + per-model mini rows.
-//   4. 7-day bar chart: `/api/usage/range?days=7`, stacked by model.
-//   5. Top sessions: from `/api/usage/today` — already sorted server-side.
+//   4. 7-day bar chart: `/api/usage/range?days=7`, stacked by model
+//      (desktop only — the 700×160 SVG doesn't squeeze into 390px legibly).
+//   5. Top sessions: from `/api/usage/today` — already sorted server-side
+//      (desktop only).
 //
 // Time-range chips ("Today / 7 days / 30 days") — only "Today" is wired;
 // the other two are visibly disabled so we don't lie about the data.
@@ -112,24 +116,46 @@ export function UsagePage() {
 
   return (
     <AppShell tab="usage">
-      {/* Below md: UsagePage is desktop-focused. Mobile users keep the bottom-
-          sheet UsagePanel on the Chat screen. We still render a tiny empty
-          state here so deep-links don't 404 on a phone. */}
-      <div className="md:hidden p-6 text-[13px] text-ink-muted">
-        <div className="caps text-ink-muted">Usage</div>
-        <div className="display text-[20px] text-ink mt-1">
-          Open on a larger screen
+      {/* Mobile layout (<md). Adapted from mockup s-08 iPhone: a lightweight
+          header, big context ring, plan-period empty-state, per-model rows,
+          and a cost estimate. The 7-day bar chart + top-sessions list are
+          desktop-only — a 700px SVG bar chart doesn't read at 390px and the
+          equivalent info is already a tap away via the session list. */}
+      <div className="md:hidden flex flex-col h-full">
+        <header className="px-4 py-2.5 border-b border-line flex items-center gap-2 bg-canvas">
+          <Link
+            to="/sessions"
+            aria-label="Back to sessions"
+            className="h-8 w-8 rounded-[8px] bg-paper border border-line flex items-center justify-center shrink-0"
+          >
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.8"
+              className="w-4 h-4"
+            >
+              <path d="M15 6l-6 6 6 6" />
+            </svg>
+          </Link>
+          <div className="min-w-0">
+            <div className="caps text-ink-muted">Usage</div>
+            <div className="display text-[15px] leading-tight mt-0.5 truncate">
+              Today's consumption
+            </div>
+          </div>
+        </header>
+        <div className="flex-1 overflow-y-auto p-4 space-y-4">
+          {error && (
+            <div className="rounded-[8px] border border-danger/30 bg-danger-wash text-[13px] text-[#7a1d21] px-3 py-2">
+              Couldn't load usage: {error}
+            </div>
+          )}
+          <MobileSessionRing session={activeSession} usage={sessionUsage} />
+          <MobilePlanPeriodCard />
+          <MobileByModelCard today={today} />
+          <MobileCostCard today={today} />
         </div>
-        <p className="mt-2 leading-relaxed">
-          The Usage dashboard is designed for desktop. On mobile, tap the
-          context ring in a session to see its usage.
-        </p>
-        <Link
-          to="/sessions"
-          className="mt-4 inline-block h-8 px-3 rounded-[6px] border border-line bg-paper text-[12px]"
-        >
-          Back to sessions
-        </Link>
       </div>
 
       <div className="hidden md:block p-6 overflow-y-auto">
@@ -173,8 +199,11 @@ export function UsagePage() {
           </div>
         )}
 
-        {/* Row 1: current session (2) + plan period (1) + today tokens (1) */}
-        <section className="grid grid-cols-4 gap-4">
+        {/* Row 1: current session (2) + plan period (1) + today tokens (1).
+            At md (768–1280) the 4-col grid compresses painfully, so we drop
+            to 2-col there and only expand to 4-col at lg+. Current-session
+            always spans 2 cols for breathing room around its donut. */}
+        <section className="grid md:grid-cols-2 lg:grid-cols-4 gap-4">
           <CurrentSessionTile session={activeSession} usage={sessionUsage} />
           <PlanPeriodTile />
           <TodayTokensTile today={today} />
@@ -187,6 +216,182 @@ export function UsagePage() {
         </section>
       </div>
     </AppShell>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Mobile tiles — compact stacked cards used by the <md layout. These mirror
+// the iPhone column in mockup s-08: big ring card, plan-period empty-state,
+// per-model rows, and a cost-estimate card. Data comes from the same
+// endpoints as the desktop tiles.
+// ---------------------------------------------------------------------------
+
+function MobileSessionRing({
+  session,
+  usage,
+}: {
+  session: Session | null;
+  usage: SessionUsage | null;
+}) {
+  if (!session) {
+    return (
+      <div className="flex flex-col items-center p-4 border border-line rounded-[10px] bg-canvas">
+        <div className="text-[13px] text-ink-muted text-center">
+          No active session. Open or start a session to see its context
+          usage here.
+        </div>
+      </div>
+    );
+  }
+
+  const window = contextWindowTokens(session.model);
+  const lastTurnInput = usage?.lastTurnInput ?? 0;
+  const known = usage?.lastTurnContextKnown ?? false;
+  const pct = known ? Math.min(1, lastTurnInput / window) : 0;
+  const r = 60;
+  const circumference = 2 * Math.PI * r;
+  const offset = circumference * (1 - pct);
+
+  return (
+    <div className="flex flex-col items-center p-4 border border-line rounded-[10px] bg-canvas">
+      <div className="relative">
+        <svg width={140} height={140}>
+          <circle
+            cx={70}
+            cy={70}
+            r={r}
+            fill="none"
+            stroke="#e8e4d8"
+            strokeWidth={10}
+          />
+          <circle
+            cx={70}
+            cy={70}
+            r={r}
+            fill="none"
+            stroke={known ? "#cc785c" : "#cc785c66"}
+            strokeWidth={10}
+            strokeLinecap="round"
+            strokeDasharray={circumference}
+            strokeDashoffset={offset}
+            transform="rotate(-90 70 70)"
+          />
+        </svg>
+        <div className="absolute inset-0 flex flex-col items-center justify-center">
+          <div className="display text-[32px]">
+            {known ? `${Math.round(pct * 100)}%` : "—"}
+          </div>
+          <div className="caps text-ink-muted">session</div>
+        </div>
+      </div>
+      <div className="mt-2 text-[13px] text-ink-muted">
+        {known ? (
+          <>
+            <span className="mono text-ink">
+              {lastTurnInput.toLocaleString()}
+            </span>{" "}
+            / <span className="mono">{window.toLocaleString()}</span> tokens
+          </>
+        ) : (
+          <>
+            <span className="mono">—</span> /{" "}
+            <span className="mono">{window.toLocaleString()}</span> tokens
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function MobilePlanPeriodCard() {
+  // Same honest stance as the desktop PlanPeriodTile: we don't have plan /
+  // quota data, so we render a "No plan data" empty state instead of faking
+  // a 58% bar.
+  return (
+    <div className="rounded-[10px] border border-line bg-canvas p-4">
+      <div className="caps text-ink-muted">Plan period</div>
+      <div className="display text-[16px] mt-1.5 leading-tight">
+        No plan data
+      </div>
+      <p className="text-[12px] text-ink-muted mt-1.5 leading-relaxed">
+        Claude Code plan usage is reported by the CLI, not claudex. Run{" "}
+        <span className="mono">/cost</span> inside a session to see your
+        plan-period consumption.
+      </p>
+    </div>
+  );
+}
+
+function MobileByModelCard({ today }: { today: UsageTodayResponse | null }) {
+  if (!today) {
+    return (
+      <div className="rounded-[10px] border border-line bg-canvas p-4">
+        <div className="caps text-ink-muted mb-2">By model · today</div>
+        <div className="text-[13px] text-ink-muted">Loading…</div>
+      </div>
+    );
+  }
+  if (today.totalTokens === 0 || today.perModel.length === 0) {
+    return (
+      <div className="rounded-[10px] border border-line bg-canvas p-4">
+        <div className="caps text-ink-muted mb-2">By model · today</div>
+        <div className="text-[13px] text-ink-muted">
+          No token activity recorded yet.
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div className="rounded-[10px] border border-line bg-canvas p-4">
+      <div className="caps text-ink-muted mb-2">By model · today</div>
+      <div className="space-y-2 text-[13px]">
+        {today.perModel.map((row, i) => (
+          <div key={row.model} className="flex items-center gap-2">
+            <span
+              className="h-2 w-2 rounded-full bg-klein shrink-0"
+              style={{ opacity: modelDotOpacity(i) }}
+            />
+            <span className="truncate">
+              {MODEL_LABEL[row.model as keyof typeof MODEL_LABEL] ??
+                row.model}
+            </span>
+            <span className="ml-auto mono text-ink-muted">
+              {formatTokens(row.tokens)} tok
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function MobileCostCard({ today }: { today: UsageTodayResponse | null }) {
+  // Front-end cost estimate from the published per-token rates. Same math
+  // as UsagePanel's "Cost estimate" card, applied to the aggregate token
+  // counts returned by `/api/usage/today`. `/api/usage/today` only reports
+  // aggregate `tokens` per model (not split input/output), so we split the
+  // count 50/50 as a rough proxy — the real numbers live in UsagePanel's
+  // per-session view and the desktop tiles above. We flag this in the fine
+  // print so nobody treats this as a bill.
+  const total = today?.totalTokens ?? 0;
+  const estimate = today
+    ? today.perModel.reduce((n, r) => {
+        const half = Math.round(r.tokens / 2);
+        return n + estimateCostUsd(r.model, half, r.tokens - half);
+      }, 0)
+    : 0;
+  return (
+    <div className="rounded-[10px] border border-line bg-canvas p-4">
+      <div className="caps text-ink-muted mb-1.5">Cost estimate</div>
+      <div className="display text-[28px] leading-none">
+        {total === 0 ? "$0.00" : formatUsd(estimate)}
+      </div>
+      <div className="text-[11px] text-ink-muted mt-1.5 leading-snug">
+        Rough upper-bound estimate from the model's published per-token
+        rates. Doesn't account for prompt-cache discounts or input/output
+        split. Your actual plan billing may differ.
+      </div>
+    </div>
   );
 }
 

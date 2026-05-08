@@ -8,6 +8,7 @@ import type {
   SearchTitleHit,
 } from "@claudex/shared";
 import { cn } from "@/lib/cn";
+import { useFocusReturn } from "@/hooks/useFocusReturn";
 
 // ---------------------------------------------------------------------------
 // GlobalSearchSheet — full-text search over sessions + messages.
@@ -35,6 +36,7 @@ export interface GlobalSearchSheetProps {
 }
 
 export function GlobalSearchSheet({ onClose }: GlobalSearchSheetProps) {
+  useFocusReturn();
   const navigate = useNavigate();
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(false);

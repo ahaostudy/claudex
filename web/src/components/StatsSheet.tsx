@@ -3,6 +3,7 @@ import { X } from "lucide-react";
 import type { StatsResponse } from "@claudex/shared";
 import { api, ApiError } from "@/api/client";
 import { cn } from "@/lib/cn";
+import { useFocusReturn } from "@/hooks/useFocusReturn";
 
 /**
  * Statistics dashboard — single honest snapshot of what claudex has done on
@@ -22,6 +23,7 @@ import { cn } from "@/lib/cn";
  *   - No social / leaderboard metrics. This is a single-user install.
  */
 export function StatsSheet({ onClose }: { onClose: () => void }) {
+  useFocusReturn();
   const [stats, setStats] = useState<StatsResponse | null>(null);
   const [err, setErr] = useState<string | null>(null);
 

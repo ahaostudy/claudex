@@ -14,6 +14,7 @@
 import { useEffect, useState } from "react";
 import { ChevronLeft, ChevronRight, Download, X } from "lucide-react";
 import type { ImageRef } from "@/lib/images";
+import { useFocusReturn } from "@/hooks/useFocusReturn";
 
 export function ImageLightbox({
   images,
@@ -24,6 +25,7 @@ export function ImageLightbox({
   initialIndex: number;
   onClose: () => void;
 }) {
+  useFocusReturn();
   const [index, setIndex] = useState(() =>
     Math.max(0, Math.min(initialIndex, images.length - 1)),
   );

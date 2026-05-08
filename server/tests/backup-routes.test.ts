@@ -524,4 +524,97 @@ describe("backup routes — import", () => {
     expect(roundTrip.sessions.length).toBe(bundle.sessions.length);
     expect(roundTrip.events.length).toBe(bundle.events.length);
   });
+
+  it("invalid individual rows are dropped by coerceBundle; valid siblings still import", async () => {
+    // Regression guard for the per-item zod validation pass in coerceBundle.
+    // Previously every array was cast wholesale (`v as T[]`), meaning a
+    // single bogus `events` row would flow straight into importBackupBundle
+    // and crash it. The fix parses each row with the matching schema and
+    // drops the bad ones silently. Here we feed a bundle where `events[2]`
+    // is garbage (`{bogus: "data"}`) — we expect the two valid events to
+    // import normally, and the garbage one to disappear.
+    const ctx = await bootstrapAuthedApp();
+    disposers.push(ctx.cleanup);
+    const now = new Date();
+    const mixedBundle = {
+      claudexVersion: "0.0.1",
+      exportedAt: now.toISOString(),
+      projects: [
+        {
+          id: "p-mixed",
+          name: "mixed",
+          path: "/tmp/claudex-mixed-path",
+          trusted: true,
+          createdAt: now.toISOString(),
+        },
+      ],
+      sessions: [
+        {
+          id: "s-mixed",
+          title: "mixed-test",
+          projectId: "p-mixed",
+          branch: null,
+          worktreePath: null,
+          status: "idle",
+          model: "claude-opus-4-7",
+          mode: "default",
+          createdAt: now.toISOString(),
+          updatedAt: now.toISOString(),
+          lastMessageAt: null,
+          archivedAt: null,
+          sdkSessionId: null,
+          parentSessionId: null,
+          forkedFromSessionId: null,
+          cliJsonlSeq: 0,
+          stats: {
+            messages: 0,
+            filesChanged: 0,
+            linesAdded: 0,
+            linesRemoved: 0,
+            contextPct: 0,
+          },
+        },
+      ],
+      events: [
+        {
+          id: "e-good-1",
+          sessionId: "s-mixed",
+          kind: "user_message",
+          seq: 1,
+          createdAt: new Date(now.getTime() + 1).toISOString(),
+          payload: { text: "first" },
+        },
+        {
+          id: "e-good-2",
+          sessionId: "s-mixed",
+          kind: "assistant_text",
+          seq: 2,
+          createdAt: new Date(now.getTime() + 2).toISOString(),
+          payload: { text: "second" },
+        },
+        // events[2] — intentionally malformed; the per-item parse must drop
+        // this without poisoning the surrounding valid rows.
+        { bogus: "data" } as unknown,
+      ],
+      routines: [],
+      queue: [],
+      grants: [],
+      attachments: [],
+    };
+    const res = await ctx.app.inject({
+      method: "POST",
+      url: "/api/import/all",
+      headers: {
+        cookie: ctx.cookie,
+        "content-type": `multipart/form-data; boundary=${BOUNDARY}`,
+      },
+      payload: multipartBundle(JSON.stringify(mixedBundle)),
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.imported.projects).toBe(1);
+    expect(body.imported.sessions).toBe(1);
+    // Two of three events survive; the bogus entry is silently dropped.
+    expect(body.imported.events).toBe(2);
+  });
 });

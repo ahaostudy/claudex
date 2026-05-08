@@ -273,6 +273,69 @@ describe("SessionManager", () => {
     expect(s.sessions.findById(s.session.id)!.status).toBe("running");
   });
 
+  it("auto-approved permission (matched grant) appends a permission_decision with automatic:true and audits", () => {
+    const s = setupManager();
+    cleanups.push(s.cleanup);
+    // Spy-style audit store: capture every append() call. We stub the whole
+    // AuditStore surface the manager touches — it only uses .append.
+    const audits: Array<{ event: string; target: string | null; detail: string | null }> = [];
+    const stubAudit = {
+      append(input: { event: string; target?: string | null; detail?: string | null }) {
+        audits.push({
+          event: input.event,
+          target: input.target ?? null,
+          detail: input.detail ?? null,
+        });
+      },
+    };
+    // Re-wire the manager's audit dep via the same store instances — easier
+    // than re-instantiating everything.
+    (s.manager as unknown as { deps: { audit: typeof stubAudit } }).deps.audit =
+      stubAudit;
+
+    // Seed a GLOBAL grant matching a Bash command, then emit a matching
+    // permission_request — should auto-resolve without persisting a
+    // permission_request event but WITH a permission_decision event +
+    // audit row carrying `automatic: true` / `auto: Bash matched …`.
+    s.grants.addGlobalGrant("Bash", "pnpm vitest run");
+
+    s.manager.getOrCreate(s.session.id);
+    const mock = s.last()!;
+    mock.emit({
+      type: "permission_request",
+      toolUseId: "tu-auto",
+      toolName: "Bash",
+      input: { command: "pnpm vitest run" },
+      title: "use Bash",
+    });
+
+    // Runner got the allow without the user doing anything.
+    expect(mock.permissions).toEqual([{ id: "tu-auto", behavior: "allow" }]);
+
+    const events = s.sessions.listEvents(s.session.id);
+    // No user-facing permission_request row because it was auto-handled.
+    expect(events.filter((e) => e.kind === "permission_request")).toHaveLength(0);
+    // But exactly one permission_decision row with automatic: true and the
+    // matched grant id threaded through.
+    const decisions = events.filter((e) => e.kind === "permission_decision");
+    expect(decisions).toHaveLength(1);
+    expect(decisions[0].payload).toMatchObject({
+      approvalId: "tu-auto",
+      decision: "allow_always",
+      automatic: true,
+    });
+    expect(typeof (decisions[0].payload as { matchedGrantId: unknown }).matchedGrantId).toBe(
+      "string",
+    );
+
+    // And the audit trail got one permission_granted row identifying this as
+    // an auto-grant.
+    expect(audits).toHaveLength(1);
+    expect(audits[0].event).toBe("permission_granted");
+    expect(audits[0].target).toBe(s.session.id);
+    expect(audits[0].detail).toMatch(/^auto: Bash matched/);
+  });
+
   it("deny decision still resolves and does not grant", () => {
     const s = setupManager();
     cleanups.push(s.cleanup);

@@ -583,17 +583,35 @@ export const useSessions = create<SessionState>((set, get) => {
         frame.type === "tool_result" ||
         frame.type === "permission_request" ||
         frame.type === "ask_user_question" ||
-        frame.type === "turn_end" ||
-        frame.type === "error"
+        frame.type === "turn_end"
       ) {
-        const sid = (frame as any).sessionId as string | undefined;
-        if (sid) dropFirstPending(sid);
+        // Every variant above carries a non-null `sessionId` per protocol.ts —
+        // narrowing via the discriminated union means no cast is needed.
+        dropFirstPending(frame.sessionId);
+      } else if (frame.type === "error") {
+        // `error` uniquely carries `sessionId: string | null` — a null means
+        // the failure wasn't session-scoped (e.g. a handshake-level rejection)
+        // and we must skip session-routed effects entirely.
+        if (frame.sessionId) dropFirstPending(frame.sessionId);
       }
       const piece = frameToPiece(frame);
       if (piece) {
-        const sid =
-          (frame as any).sessionId as string | undefined;
-        if (!sid) return;
+        // `frameToPiece` only returns non-null for frame types that carry a
+        // required string `sessionId` (assistant_text_delta, thinking,
+        // tool_use, tool_result, permission_request, ask_user_question).
+        // None of those allow a null sessionId, so a discriminant check
+        // picks the correct narrowing without a cast.
+        if (
+          frame.type !== "assistant_text_delta" &&
+          frame.type !== "thinking" &&
+          frame.type !== "tool_use" &&
+          frame.type !== "tool_result" &&
+          frame.type !== "permission_request" &&
+          frame.type !== "ask_user_question"
+        ) {
+          return;
+        }
+        const sid = frame.sessionId;
         set((s) => ({
           transcripts: {
             ...s.transcripts,

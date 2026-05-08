@@ -25,6 +25,7 @@ interface SessionRow {
   archived_at: string | null;
   sdk_session_id: string | null;
   parent_session_id: string | null;
+  forked_from_session_id: string | null;
   stats_messages: number;
   stats_files_changed: number;
   stats_lines_added: number;
@@ -49,6 +50,7 @@ function toSession(row: SessionRow): Session {
     archivedAt: row.archived_at,
     sdkSessionId: row.sdk_session_id,
     parentSessionId: row.parent_session_id,
+    forkedFromSessionId: row.forked_from_session_id,
     cliJsonlSeq: row.cli_jsonl_seq ?? 0,
     stats: {
       messages: row.stats_messages,
@@ -69,6 +71,7 @@ export interface SessionCreateInput {
   worktreePath?: string | null;
   branch?: string | null;
   parentSessionId?: string | null;
+  forkedFromSessionId?: string | null;
 }
 
 export class SessionStore {
@@ -161,6 +164,7 @@ export class SessionStore {
       archived_at: null,
       sdk_session_id: null,
       parent_session_id: input.parentSessionId ?? null,
+      forked_from_session_id: input.forkedFromSessionId ?? null,
       stats_messages: 0,
       stats_files_changed: 0,
       stats_lines_added: 0,
@@ -173,14 +177,14 @@ export class SessionStore {
         `INSERT INTO sessions (
            id, title, project_id, branch, worktree_path, status, model, mode,
            created_at, updated_at, last_message_at, archived_at, sdk_session_id,
-           parent_session_id,
+           parent_session_id, forked_from_session_id,
            stats_messages, stats_files_changed, stats_lines_added,
            stats_lines_removed, stats_context_pct,
            cli_jsonl_seq
          ) VALUES (
            @id, @title, @project_id, @branch, @worktree_path, @status, @model, @mode,
            @created_at, @updated_at, @last_message_at, @archived_at, @sdk_session_id,
-           @parent_session_id,
+           @parent_session_id, @forked_from_session_id,
            @stats_messages, @stats_files_changed, @stats_lines_added,
            @stats_lines_removed, @stats_context_pct,
            @cli_jsonl_seq
@@ -302,6 +306,9 @@ export class SessionStore {
       // No worktreePath/branch: forks reuse the project root. A future
       // version could mirror the source's worktree but that'd need a real
       // git-level branch-off and is out of scope here.
+      // forkedFromSessionId: set so the chat header can render a "Forked"
+      // badge making the SDK-context-reset honest to the user.
+      forkedFromSessionId: sourceId,
     });
 
     if (cutoff >= 0) {

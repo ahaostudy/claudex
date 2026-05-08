@@ -6,6 +6,9 @@ import { z } from "zod";
 import {
   CreateSessionRequest,
   CreateSideSessionRequest,
+  EditLastUserMessageRequest,
+  ForkSessionRequest,
+  TrustProjectRequest,
   UpdateProjectRequest,
   UpdateSessionRequest,
   type ToolGrant,
@@ -48,17 +51,6 @@ export interface SessionsRoutesDeps {
 const AddProject = z.object({
   name: z.string().min(1),
   path: z.string().min(1),
-});
-
-// Body for `POST /api/sessions/:id/edit-last-user-message` — typo-recovery
-// edit of the session's most recent user_message. Kept local to routes.ts
-// because this is a web-only flow (no CLI equivalent, no cross-consumer
-// contract) and defining it next to the handler keeps the two in lockstep.
-const EditLastUserMessage = z.object({
-  // Empty string is valid (the user might want to clear the message before
-  // resending); trailing-only whitespace is fine too. The server won't
-  // trim — transcripts preserve user intent verbatim.
-  text: z.string(),
 });
 
 export async function registerSessionRoutes(
@@ -114,9 +106,7 @@ export async function registerSessionRoutes(
     { preHandler: app.requireAuth as any },
     async (req, reply) => {
       const { id } = req.params as { id: string };
-      const parsed = z
-        .object({ trusted: z.boolean() })
-        .safeParse(req.body);
+      const parsed = TrustProjectRequest.safeParse(req.body);
       if (!parsed.success) return reply.code(400).send({ error: "bad_request" });
       const existing = projects.findById(id);
       if (!existing) return reply.code(404).send({ error: "not_found" });
@@ -637,7 +627,7 @@ export async function registerSessionRoutes(
     { preHandler: app.requireAuth as any },
     async (req, reply) => {
       const { id } = req.params as { id: string };
-      const parsed = EditLastUserMessage.safeParse(req.body);
+      const parsed = EditLastUserMessageRequest.safeParse(req.body);
       if (!parsed.success) return reply.code(400).send({ error: "bad_request" });
 
       const existing = sessions.findById(id);
@@ -724,12 +714,7 @@ export async function registerSessionRoutes(
     { preHandler: app.requireAuth as any },
     async (req, reply) => {
       const { id } = req.params as { id: string };
-      const parsed = z
-        .object({
-          upToSeq: z.number().int().nonnegative().optional(),
-          title: z.string().min(1).optional(),
-        })
-        .safeParse(req.body ?? {});
+      const parsed = ForkSessionRequest.safeParse(req.body ?? {});
       if (!parsed.success) return reply.code(400).send({ error: "bad_request" });
 
       const source = sessions.findById(id);

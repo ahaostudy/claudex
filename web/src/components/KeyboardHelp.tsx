@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { X } from "lucide-react";
+import { useFocusReturn } from "@/hooks/useFocusReturn";
 
 /**
  * Global keyboard shortcut help overlay.
@@ -130,6 +131,7 @@ function KeyAlternatives({ alternatives }: { alternatives: string[][] }) {
 
 export function KeyboardHelp() {
   const [open, setOpen] = useState(false);
+  useFocusReturn(open);
   const mac = useMemo(() => isMac(), []);
   const groups = useMemo(() => buildGroups(mac), [mac]);
 

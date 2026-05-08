@@ -107,6 +107,7 @@ function selectSessions(db: Database.Database): Session[] {
     archived_at: string | null;
     sdk_session_id: string | null;
     parent_session_id: string | null;
+    forked_from_session_id: string | null;
     stats_messages: number;
     stats_files_changed: number;
     stats_lines_added: number;
@@ -129,6 +130,7 @@ function selectSessions(db: Database.Database): Session[] {
     archivedAt: r.archived_at,
     sdkSessionId: r.sdk_session_id,
     parentSessionId: r.parent_session_id,
+    forkedFromSessionId: r.forked_from_session_id,
     cliJsonlSeq: r.cli_jsonl_seq ?? 0,
     stats: {
       messages: r.stats_messages,

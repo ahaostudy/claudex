@@ -11,6 +11,7 @@ import { ImportSessionsSheet } from "@/components/ImportSessionsSheet";
 import { GlobalSearchSheet } from "@/components/GlobalSearchSheet";
 import { StatsSheet } from "@/components/StatsSheet";
 import { cn } from "@/lib/cn";
+import { useFocusReturn } from "@/hooks/useFocusReturn";
 
 // Status dot colors for the flat row layout. `running` and `awaiting` get a
 // soft glow ring (box-shadow) to match the mockup (s-02 lines 513, 533).
@@ -877,6 +878,7 @@ function NewSessionSheet({
   onClose: () => void;
   onCreated: (id: string) => void;
 }) {
+  useFocusReturn();
   const NEW_PROJECT = "__new__";
   const [projects, setProjects] = useState<Project[]>([]);
   const [selected, setSelected] = useState<string>(NEW_PROJECT);
@@ -1218,6 +1220,7 @@ function TrustConfirmCard({
   onCancel: () => void;
   onConfirm: () => void;
 }) {
+  useFocusReturn();
   return (
     <div className="fixed inset-0 z-50 bg-ink/40 flex items-end sm:items-center justify-center">
       <div role="dialog" aria-modal="true" aria-labelledby="trust-folder-modal-title" className="w-full max-w-md bg-canvas border-t sm:border border-line rounded-t-[20px] sm:rounded-[14px] shadow-lift p-5">
@@ -1281,6 +1284,7 @@ function WsDiagPanel({
   diag: import("@/api/ws").WsDiagnostics;
   onClose: () => void;
 }) {
+  useFocusReturn();
   const rows: Array<[string, string]> = [
     ["phase", diag.phase],
     ["attempts", String(diag.attempts)],
@@ -1338,6 +1342,7 @@ function WsDiagPanel({
 }
 
 function ProjectsSheet({ onClose }: { onClose: () => void }) {
+  useFocusReturn();
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   const [editingId, setEditingId] = useState<string | null>(null);

@@ -4,6 +4,7 @@ import { api, ApiError } from "@/api/client";
 import { useSessions, type UIPiece } from "@/state/sessions";
 import type { Session } from "@claudex/shared";
 import { cn } from "@/lib/cn";
+import { useFocusReturn } from "@/hooks/useFocusReturn";
 
 /**
  * Side-chat drawer (`/btw`).
@@ -31,6 +32,7 @@ export function SideChatDrawer({
   parentSession: Session;
   onClose: () => void;
 }) {
+  useFocusReturn();
   const {
     transcripts,
     ensureTranscript,

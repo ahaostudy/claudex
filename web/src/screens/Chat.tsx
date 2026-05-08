@@ -6,6 +6,7 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  GitFork,
   MessageCircle,
   MoreVertical,
   PanelRight,
@@ -503,6 +504,15 @@ export function ChatScreen() {
             <div className="text-[14px] font-medium truncate">
               {session?.title ?? "Session"}
             </div>
+            {session?.forkedFromSessionId ? (
+              <span
+                className="shrink-0 inline-flex items-center gap-1 px-1.5 h-[18px] rounded-[4px] border border-line bg-paper text-ink-muted text-[10px] font-medium"
+                title="This session is a fork — claude has no memory of the parent turns beyond what's shown here."
+              >
+                <GitFork className="w-3 h-3" />
+                Forked
+              </span>
+            ) : null}
           </div>
           <div className="flex items-center gap-1.5 text-[11px] text-ink-muted mt-0.5">
             {metaLine}
@@ -530,8 +540,19 @@ export function ChatScreen() {
       <header className="hidden md:flex shrink-0 px-5 py-3 border-b border-line items-center gap-3 bg-canvas">
         <span className={statusDot} />
         <div className="min-w-0">
-          <div className="text-[14px] font-medium truncate">
-            {session?.title ?? "Session"}
+          <div className="flex items-center gap-2">
+            <div className="text-[14px] font-medium truncate">
+              {session?.title ?? "Session"}
+            </div>
+            {session?.forkedFromSessionId ? (
+              <span
+                className="shrink-0 inline-flex items-center gap-1 px-1.5 h-[18px] rounded-[4px] border border-line bg-paper text-ink-muted text-[10px] font-medium"
+                title="This session is a fork — claude has no memory of the parent turns beyond what's shown here."
+              >
+                <GitFork className="w-3 h-3" />
+                Forked
+              </span>
+            ) : null}
           </div>
           <div className="flex items-center gap-2 text-[11px] text-ink-muted mt-0.5">
             {metaLine}

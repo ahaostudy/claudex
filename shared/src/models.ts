@@ -65,6 +65,13 @@ export const Session = z.object({
   // top-level sessions. Enforced ON DELETE CASCADE so removing the parent
   // cleans up every child.
   parentSessionId: z.string().nullable(),
+  // If this session was created via `POST /api/sessions/:id/fork`, the id of
+  // the source session. Null for top-level / side-chat / CLI-imported
+  // sessions. Surfaced in the chat header as a "Forked" badge so users know
+  // the SDK side has no memory of the parent turns beyond the copied events.
+  // Deliberately NOT ON DELETE CASCADE — if the source gets deleted the
+  // fork should survive as a standalone conversation.
+  forkedFromSessionId: z.string().nullable(),
   // Number of `claude` CLI JSONL transcript lines we've already imported into
   // this session's `session_events`. Incremented by the resync-on-open path
   // in `server/src/sessions/cli-resync.ts`. Zero when this session wasn't
@@ -1251,3 +1258,30 @@ export const ListSubagentsResponse = z.object({
   stats: SubagentStats,
 });
 export type ListSubagentsResponse = z.infer<typeof ListSubagentsResponse>;
+
+// ============================================================================
+// Small request bodies lifted out of server routes so the web client can
+// import the types rather than restating them. Kept at the bottom of the file
+// because they don't belong to any of the larger thematic groups above.
+// ============================================================================
+
+// Body of `POST /api/projects/:id/trust`.
+export const TrustProjectRequest = z.object({ trusted: z.boolean() });
+export type TrustProjectRequest = z.infer<typeof TrustProjectRequest>;
+
+// Body of `POST /api/sessions/:id/fork`. Both fields optional — server defaults
+// are "fork at the latest event" and `"Fork of <source.title>"` (truncated at
+// 60 chars) respectively. See the route handler for the authoritative contract.
+export const ForkSessionRequest = z.object({
+  upToSeq: z.number().int().nonnegative().optional(),
+  title: z.string().max(200).optional(),
+});
+export type ForkSessionRequest = z.infer<typeof ForkSessionRequest>;
+
+// Body of `POST /api/sessions/:id/edit-last-user-message`. Min length 1 so
+// the endpoint refuses empty-string edits — clearing the message isn't a
+// supported flow; the user should archive instead.
+export const EditLastUserMessageRequest = z.object({ text: z.string().min(1) });
+export type EditLastUserMessageRequest = z.infer<
+  typeof EditLastUserMessageRequest
+>;

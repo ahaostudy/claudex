@@ -1,15 +1,17 @@
 import type Database from "better-sqlite3";
 import { nanoid } from "nanoid";
-import type {
+import {
   BackupAttachmentMeta,
-  BackupBundle,
-  ImportAllResponse,
+  type BackupBundle,
+  type ImportAllResponse,
   Project,
   QueuedPrompt,
   Routine,
   Session,
   SessionEvent,
+  ToolGrant,
 } from "@claudex/shared";
+import type { ZodType } from "zod";
 import { SearchStore } from "../search/store.js";
 
 // -----------------------------------------------------------------------------
@@ -68,8 +70,10 @@ export interface ImportResult extends ImportAllResponse {}
 /**
  * Narrow the incoming JSON to a `BackupBundle` as best we can without full
  * zod parsing (that would reject any extra/future field and make the
- * operation brittle across versions). We check only the fields this import
- * path actually uses; missing optional fields default to `[]`.
+ * operation brittle across versions). We per-item validate each array with
+ * the row's zod schema — invalid rows are dropped silently, and we log a
+ * `warn` when any array lost more than 5% of its entries (likely a corrupt
+ * or cross-version bundle). Missing optional fields default to `[]`.
  */
 export function coerceBundle(raw: unknown): BackupBundle {
   if (raw == null || typeof raw !== "object") {
@@ -79,17 +83,58 @@ export function coerceBundle(raw: unknown): BackupBundle {
   const ver = typeof obj.claudexVersion === "string" ? obj.claudexVersion : "";
   const exportedAt =
     typeof obj.exportedAt === "string" ? obj.exportedAt : new Date().toISOString();
-  const arr = <T>(v: unknown): T[] => (Array.isArray(v) ? (v as T[]) : []);
+
+  // Per-item parse: keep rows that validate, drop the rest. Returning the
+  // count of dropped rows lets us emit a single-line warn per array when
+  // the loss rate crosses 5% — enough signal to catch a bad bundle without
+  // spamming for every corrupt row.
+  const parseArray = <T>(
+    name: string,
+    schema: ZodType<T>,
+    v: unknown,
+  ): T[] => {
+    if (!Array.isArray(v)) return [];
+    const kept: T[] = [];
+    let dropped = 0;
+    for (const item of v) {
+      const res = schema.safeParse(item);
+      if (res.success) kept.push(res.data);
+      else dropped += 1;
+    }
+    if (dropped > 0) {
+      const total = v.length;
+      // >5% loss on a non-trivial array is the sniff test for "this bundle
+      // came from a different major version / was hand-edited / is corrupt".
+      // We log through console.warn rather than pino because coerceBundle
+      // runs outside any request context; routes.ts logs its own line when
+      // the whole import later succeeds or fails.
+      if (total > 0 && dropped / total > 0.05) {
+        console.warn(
+          `[backup/import] ${name}: dropped ${dropped}/${total} invalid entries during coerceBundle`,
+        );
+      }
+    }
+    return kept;
+  };
+
   return {
     claudexVersion: ver,
     exportedAt,
-    projects: arr<Project>(obj.projects),
-    sessions: arr<Session>(obj.sessions),
-    events: arr<SessionEvent>(obj.events),
-    routines: arr<Routine>(obj.routines),
-    queue: arr<QueuedPrompt>(obj.queue),
-    grants: arr(obj.grants),
-    attachments: arr<BackupAttachmentMeta>(obj.attachments),
+    projects: parseArray("projects", Project, obj.projects),
+    sessions: parseArray("sessions", Session, obj.sessions),
+    events: parseArray("events", SessionEvent, obj.events),
+    routines: parseArray("routines", Routine, obj.routines),
+    queue: parseArray("queue", QueuedPrompt, obj.queue),
+    // ToolGrant rows are already skipped on import by policy, but we still
+    // shape-check here so the `counts.skipped.grants` tally reflects a real
+    // count of well-formed grant rows rather than whatever garbage the
+    // bundle shipped.
+    grants: parseArray("grants", ToolGrant, obj.grants),
+    attachments: parseArray(
+      "attachments",
+      BackupAttachmentMeta,
+      obj.attachments,
+    ),
     audit: Array.isArray(obj.audit) ? (obj.audit as BackupBundle["audit"]) : undefined,
   };
 }
@@ -196,14 +241,14 @@ export function importBackupBundle(
       `INSERT INTO sessions (
          id, title, project_id, branch, worktree_path, status, model, mode,
          created_at, updated_at, last_message_at, archived_at, sdk_session_id,
-         parent_session_id,
+         parent_session_id, forked_from_session_id,
          stats_messages, stats_files_changed, stats_lines_added,
          stats_lines_removed, stats_context_pct,
          cli_jsonl_seq
        ) VALUES (
          @id, @title, @project_id, @branch, @worktree_path, @status, @model, @mode,
          @created_at, @updated_at, @last_message_at, @archived_at, @sdk_session_id,
-         @parent_session_id,
+         @parent_session_id, @forked_from_session_id,
          @stats_messages, @stats_files_changed, @stats_lines_added,
          @stats_lines_removed, @stats_context_pct,
          @cli_jsonl_seq
@@ -245,6 +290,11 @@ export function importBackupBundle(
         archived_at: s.archivedAt,
         sdk_session_id: s.sdkSessionId,
         parent_session_id: null, // patched in pass 2
+        // forked_from_session_id intentionally stays null on import: the
+        // source session id in the bundle belongs to the exporting machine's
+        // id space and isn't remapped here. The fork is still a valid
+        // standalone row; the "Forked" badge just won't render.
+        forked_from_session_id: null,
         stats_messages: s.stats.messages,
         stats_files_changed: s.stats.filesChanged,
         stats_lines_added: s.stats.linesAdded,

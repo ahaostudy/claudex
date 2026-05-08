@@ -8,6 +8,7 @@ import type {
   CreateRoutineRequest,
   CreateSessionRequest,
   CreateSideSessionRequest,
+  ForkSessionRequest,
   ImportAllResponse,
   PendingDiffsResponse,
   Project,
@@ -237,7 +238,7 @@ export const api = {
    * omitted → `"Fork of <source.title>"`, truncated at 60 chars. Server
    * refuses with 409 `archived` when the source session is archived.
    */
-  forkSession(id: string, opts?: { upToSeq?: number; title?: string }) {
+  forkSession(id: string, opts?: Partial<ForkSessionRequest>) {
     return request<{ session: Session }>(`/api/sessions/${id}/fork`, {
       method: "POST",
       json: opts ?? {},

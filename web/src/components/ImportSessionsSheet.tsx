@@ -3,6 +3,7 @@ import { X, FolderGit2, Check, RefreshCcw } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { api, ApiError } from "@/api/client";
 import type { CliSessionSummary, Session } from "@claudex/shared";
+import { useFocusReturn } from "@/hooks/useFocusReturn";
 
 /**
  * Adopt `claude` CLI sessions from `~/.claude/projects/...` into claudex.
@@ -24,6 +25,7 @@ export function ImportSessionsSheet({
   onClose: () => void;
   onImported?: (imported: Session[]) => void;
 }) {
+  useFocusReturn();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [candidates, setCandidates] = useState<CliSessionSummary[]>([]);

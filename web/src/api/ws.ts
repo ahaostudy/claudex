@@ -1,4 +1,4 @@
-import type { ClientFrame, ServerFrame } from "@claudex/shared";
+import { ServerFrame, type ClientFrame } from "@claudex/shared";
 
 export type WsListener = (frame: ServerFrame) => void;
 export type WsStateListener = (state: WsDiagnostics) => void;
@@ -146,19 +146,26 @@ export function createWsClient(url: string): WsClient {
     });
     socket.addEventListener("message", (ev) => {
       diag.lastFrameAt = Date.now();
-      let frame: ServerFrame;
+      let raw: unknown;
       try {
-        frame = JSON.parse(ev.data as string) as ServerFrame;
+        raw = JSON.parse(ev.data as string);
       } catch {
         return;
       }
+      // Validate against the discriminated union so downstream handlers get
+      // a precisely-typed frame and malformed server output can't crash the
+      // store reducer. Drop on failure — there's nothing useful the client
+      // can do with a frame it can't identify.
+      const parsed = ServerFrame.safeParse(raw);
+      if (!parsed.success) {
+        console.warn("[ws] malformed server frame", parsed.error);
+        return;
+      }
+      const frame = parsed.data;
       // Auth-failure error frame. The server sends this immediately before
       // calling socket.close() when the handshake is rejected; we may or may
       // not also see close code 4401 depending on the server config.
-      if (
-        frame.type === "error" &&
-        (frame as { code?: string }).code === "unauthenticated"
-      ) {
+      if (frame.type === "error" && frame.code === "unauthenticated") {
         markAuthLost("unauthenticated");
         return;
       }
