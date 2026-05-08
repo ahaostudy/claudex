@@ -15,6 +15,7 @@ import { registerSessionRoutes } from "../sessions/routes.js";
 import { registerBrowseRoutes } from "../sessions/browse.js";
 import { registerSlashCommandRoutes } from "../sessions/slash-commands.js";
 import { registerUserEnvRoutes } from "../sessions/user-env.js";
+import { registerCliRoutes } from "../sessions/cli-routes.js";
 import { registerWsRoute } from "./ws.js";
 import { registerPtyRoutes } from "./pty.js";
 import { agentRunnerFactory } from "../sessions/agent-runner.js";
@@ -35,6 +36,12 @@ export interface AppDeps {
    * host user's real commands.
    */
   userClaudeDir?: string;
+  /**
+   * Override the CLI projects root used by the /api/cli/sessions discovery
+   * endpoint. Defaults to `~/.claude/projects`. Tests pass a tmp dir so
+   * they never read / mutate the developer's real CLI session history.
+   */
+  cliProjectsRoot?: string;
   /**
    * Absolute path to the built web/dist directory. If set, the server
    * mounts those files at `/` and falls through to index.html for SPA
@@ -95,6 +102,10 @@ export async function buildApp(
   await registerUserEnvRoutes(app, {
     db: deps.db,
     userClaudeDir: deps.userClaudeDir,
+  });
+  await registerCliRoutes(app, {
+    db: deps.db,
+    cliProjectsRoot: deps.cliProjectsRoot,
   });
 
   // Routines: periodic cron-driven session spawns. The scheduler owns a single

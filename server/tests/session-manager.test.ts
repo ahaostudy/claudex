@@ -389,4 +389,100 @@ describe("SessionManager", () => {
     mock.emit({ type: "sdk_session_id", sdkSessionId: "sdk-second" });
     expect(s.sessions.findById(s.session.id)!.sdkSessionId).toBe("sdk-first");
   });
+
+  // ---- Auto-title from first user message ---------------------------------
+
+  it("auto-retitles a placeholder-titled session from the first user_message", async () => {
+    // Default setupManager creates a session with title "t" (≤3 words,
+    // placeholder-ish) — exactly the case we want to catch.
+    const s = setupManager();
+    cleanups.push(s.cleanup);
+    await s.manager.sendUserMessage(s.session.id, "Fix the hydration bug");
+    expect(s.sessions.findById(s.session.id)!.title).toBe(
+      "Fix the hydration bug",
+    );
+  });
+
+  it("auto-retitle truncates long first messages with an ellipsis at a word boundary", async () => {
+    const s = setupManager();
+    cleanups.push(s.cleanup);
+    const long =
+      "implement this feature in a way that doesn't break anything and also handles edge cases";
+    await s.manager.sendUserMessage(s.session.id, long);
+    const title = s.sessions.findById(s.session.id)!.title;
+    // Ends with the single-char ellipsis when we truncated.
+    expect(title.endsWith("…")).toBe(true);
+    // Underlying pre-ellipsis length must be ≤ the cap.
+    expect(title.length).toBeLessThanOrEqual(61); // 60 + "…"
+    // Should have snapped to a word boundary, not sliced mid-word.
+    const body = title.slice(0, -1);
+    expect(body).toBe(body.trimEnd());
+    expect(long.startsWith(body)).toBe(true);
+  });
+
+  it("auto-retitle uses only the first line of a multi-line message", async () => {
+    const s = setupManager();
+    cleanups.push(s.cleanup);
+    await s.manager.sendUserMessage(
+      s.session.id,
+      "Add login page\n\nShould have TOTP support and a remember-me checkbox.",
+    );
+    expect(s.sessions.findById(s.session.id)!.title).toBe("Add login page");
+  });
+
+  it("does NOT auto-retitle once the session has prior user_message events", async () => {
+    const s = setupManager();
+    cleanups.push(s.cleanup);
+    // Send first message — this triggers the auto-retitle.
+    await s.manager.sendUserMessage(s.session.id, "First prompt about X");
+    // Manually reset the title to a placeholder to simulate a user who
+    // blanked it out mid-conversation; the second message must NOT retitle.
+    s.sessions.setTitle(s.session.id, "");
+    await s.manager.sendUserMessage(s.session.id, "Follow-up question");
+    expect(s.sessions.findById(s.session.id)!.title).toBe("");
+  });
+
+  it("does NOT auto-retitle a side chat (parentSessionId set)", async () => {
+    const s = setupManager();
+    cleanups.push(s.cleanup);
+    // Create a child session with the deliberate "Side chat" title.
+    const child = s.sessions.create({
+      title: "Side chat",
+      projectId: s.project.id,
+      model: "claude-opus-4-7",
+      mode: "default",
+      parentSessionId: s.session.id,
+    });
+    await s.manager.sendUserMessage(child.id, "quick lateral question here");
+    expect(s.sessions.findById(child.id)!.title).toBe("Side chat");
+  });
+
+  it("does NOT auto-retitle a session with a substantive existing title", async () => {
+    const s = setupManager();
+    cleanups.push(s.cleanup);
+    // A 4+ word title is treated as "user-chosen" and left alone.
+    const kept = s.sessions.create({
+      title: "Refactor the auth middleware today",
+      projectId: s.project.id,
+      model: "claude-opus-4-7",
+      mode: "default",
+    });
+    await s.manager.sendUserMessage(kept.id, "actually let's do something else");
+    expect(s.sessions.findById(kept.id)!.title).toBe(
+      "Refactor the auth middleware today",
+    );
+  });
+
+  it("auto-retitle overrides the server-default 'Untitled' placeholder", async () => {
+    const s = setupManager();
+    cleanups.push(s.cleanup);
+    const defaulted = s.sessions.create({
+      title: "Untitled",
+      projectId: s.project.id,
+      model: "claude-opus-4-7",
+      mode: "default",
+    });
+    await s.manager.sendUserMessage(defaulted.id, "Add a dark-mode toggle");
+    expect(s.sessions.findById(defaulted.id)!.title).toBe("Add a dark-mode toggle");
+  });
 });

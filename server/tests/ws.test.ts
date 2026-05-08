@@ -447,6 +447,60 @@ describe("WebSocket transport", () => {
     expect(Number.isNaN(Date.parse((fromA as any).createdAt))).toBe(false);
   });
 
+  it("delivers cross-session frames (session_update, user_message) to tabs that never subscribed", async () => {
+    // Home/list screens need live status dots without pinning a specific
+    // sessionId. Every authed socket lands in the global sessions channel
+    // on hello_ack and receives these cross-session frames.
+    const ctx = await harness();
+    disposers.push(ctx.cleanup);
+    const listTab = await openSocket(ctx.url, ctx.cookie);
+    const chatTab = await openSocket(ctx.url, ctx.cookie);
+    disposers.push(() => listTab.close());
+    disposers.push(() => chatTab.close());
+
+    await Promise.all([
+      listTab.waitFor((f) => f.type === "hello_ack"),
+      chatTab.waitFor((f) => f.type === "hello_ack"),
+    ]);
+
+    // Only the chat tab subscribes to the session. listTab never does.
+    chatTab.send({ type: "subscribe", sessionId: ctx.sessionId });
+    chatTab.send({
+      type: "user_message",
+      sessionId: ctx.sessionId,
+      content: "kick the runner",
+    });
+    await new Promise((r) => setTimeout(r, 100));
+    expect(ctx.hub.runners).toHaveLength(1);
+
+    // listTab should still see the user_message broadcast even though it
+    // didn't subscribe.
+    const listEcho = await listTab.waitFor((f) => f.type === "user_message");
+    expect((listEcho as any).sessionId).toBe(ctx.sessionId);
+    expect((listEcho as any).content).toBe("kick the runner");
+
+    // And a runner status change should reach the unsubscribed listTab too.
+    ctx.hub.runners[0].emit({ type: "status", status: "running" });
+    const statusFrame = await listTab.waitFor(
+      (f) => f.type === "session_update",
+    );
+    expect((statusFrame as any).status).toBe("running");
+
+    // Sanity: non-cross-session frames (assistant_text_delta) must NOT leak
+    // to the unsubscribed tab. Only chatTab gets them.
+    ctx.hub.runners[0].emit({
+      type: "assistant_text",
+      messageId: "m1",
+      text: "hi",
+      done: true,
+    });
+    await chatTab.waitFor((f) => f.type === "assistant_text_delta");
+    await new Promise((r) => setTimeout(r, 50));
+    expect(
+      listTab.frames.some((f) => f.type === "assistant_text_delta"),
+    ).toBe(false);
+  });
+
   it("rejects malformed frames with an error response, socket stays open", async () => {
     const ctx = await harness();
     disposers.push(ctx.cleanup);

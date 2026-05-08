@@ -7,12 +7,15 @@ import {
   ChevronRight,
   MessageCircle,
   MoreVertical,
+  PanelRight,
   Paperclip,
   Send,
   Settings2,
   StopCircle,
   Terminal,
 } from "lucide-react";
+import { ChatSessionsRail } from "@/components/ChatSessionsRail";
+import { ChatTasksRail } from "@/components/ChatTasksRail";
 import { useSessions } from "@/state/sessions";
 import { api } from "@/api/client";
 import type {
@@ -35,6 +38,7 @@ import { Markdown } from "@/components/Markdown";
 import type { SlashCommand } from "@/lib/slash-commands";
 import { BUILTIN_FALLBACK_SLASH_COMMANDS } from "@/lib/slash-commands";
 import type { UIPiece, ViewMode } from "@/state/sessions";
+import { computeSessionUsage, contextWindowTokens } from "@/lib/usage";
 
 // ---------------------------------------------------------------------------
 // Model / mode label tables shared by the desktop header pills and the chat
@@ -81,6 +85,29 @@ export function ChatScreen() {
   const [showTerminal, setShowTerminal] = useState(false);
   // Mobile three-dot menu. Desktop uses header pills instead.
   const [showMore, setShowMore] = useState(false);
+  // Desktop tasks rail visibility. Persisted across navigations so users
+  // who prefer the condensed layout stay condensed. Mobile ignores this —
+  // the rail itself is `hidden md:flex`.
+  const [showTasks, setShowTasks] = useState<boolean>(() => {
+    if (typeof window === "undefined") return true;
+    const stored = window.localStorage.getItem("claudex.chat.tasksRail");
+    if (stored === "0") return false;
+    if (stored === "1") return true;
+    // Default: open at md+ (desktop), closed at narrower viewports. We
+    // sample `matchMedia` once at mount; the rail component itself is
+    // still hidden under md via Tailwind so this is just for desktop.
+    return window.matchMedia("(min-width: 768px)").matches;
+  });
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(
+        "claudex.chat.tasksRail",
+        showTasks ? "1" : "0",
+      );
+    } catch {
+      /* private browsing etc. — ignore */
+    }
+  }, [showTasks]);
   const {
     transcripts,
     init,
@@ -141,6 +168,26 @@ export function ChatScreen() {
     });
   }, [visiblePieces.length]);
 
+  const [headerContextPct, setHeaderContextPct] = useState(0);
+  useEffect(() => {
+    if (!session) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await api.listEvents(session.id);
+        if (cancelled) return;
+        const u = computeSessionUsage(res.events, session.model);
+        const w = contextWindowTokens(session.model);
+        setHeaderContextPct(w > 0 ? Math.min(1, u.lastTurnInput / w) : 0);
+      } catch {
+        /* leave at last value */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [session?.id, session?.model, pieces.length]);
+
   // Helper: update a field on the session via the REST patch endpoint and
   // reflect the result in local state. Used by both the desktop header
   // pills and the mobile overflow sheet so they share one code path.
@@ -187,10 +234,14 @@ export function ChatScreen() {
   );
 
   return (
-    // Full-viewport flex column so the messages list scrolls internally and
-    // the composer stays pinned. `h-[100dvh]` respects the mobile URL bar
-    // (safari), unlike `h-screen` which leaves the composer under it.
-    <main className="flex flex-col h-[100dvh] bg-canvas">
+    // Full-viewport layout. On mobile it's a single flex column (the
+    // existing behavior). On desktop (md+) the three-column grid from
+    // mockup s-04 kicks in: 220px sessions rail · fluid center · 300px
+    // tasks rail. The center column keeps its own flex-col so messages
+    // scroll internally and the composer stays pinned.
+    <div className="flex h-[100dvh] bg-canvas">
+      <ChatSessionsRail currentId={id} />
+      <main className="flex flex-col flex-1 min-w-0 h-full">
       {/* Mobile header — shown below md breakpoint (mockup 860-868). */}
       <header className="md:hidden shrink-0 px-4 py-2.5 border-b border-line flex items-center gap-2 bg-canvas">
         <button
@@ -213,8 +264,8 @@ export function ChatScreen() {
           </div>
         </div>
         <ContextRingButton
-          pct={session?.stats.contextPct ?? 0}
-          known={false}
+          pct={headerContextPct}
+          known={headerContextPct > 0}
           disabled={!session}
           onClick={() => setShowUsage(true)}
         />
@@ -271,8 +322,8 @@ export function ChatScreen() {
             onPick={(m) => patchSession({ mode: m as PermissionMode })}
           />
           <ContextRingButton
-            pct={session?.stats.contextPct ?? 0}
-            known={false}
+            pct={headerContextPct}
+            known={headerContextPct > 0}
             disabled={!session}
             onClick={() => setShowUsage(true)}
           />
@@ -303,6 +354,20 @@ export function ChatScreen() {
             className="h-8 w-8 rounded-[8px] border border-line bg-canvas flex items-center justify-center hover:bg-paper disabled:opacity-40"
           >
             <Terminal className="w-4 h-4 text-ink-soft" />
+          </button>
+          <button
+            onClick={() => setShowTasks((v) => !v)}
+            title={showTasks ? "Hide tasks rail" : "Show tasks rail"}
+            aria-label="Toggle tasks rail"
+            aria-pressed={showTasks}
+            className={cn(
+              "h-8 w-8 rounded-[8px] border flex items-center justify-center hover:bg-paper",
+              showTasks
+                ? "border-klein/30 bg-klein-wash/40 text-klein-ink"
+                : "border-line bg-canvas text-ink-soft",
+            )}
+          >
+            <PanelRight className="w-4 h-4" />
           </button>
         </div>
       </header>
@@ -393,7 +458,18 @@ export function ChatScreen() {
       {showUsage && session && (
         <UsagePanel session={session} onClose={() => setShowUsage(false)} />
       )}
-    </main>
+      </main>
+      {showTasks && (
+        <ChatTasksRail
+          session={session}
+          pieces={pieces}
+          pendingApprovalCount={pieces.filter(
+            (p) => p.kind === "permission_request",
+          ).length}
+          onClose={() => setShowTasks(false)}
+        />
+      )}
+    </div>
   );
 }
 

@@ -431,7 +431,11 @@ describe("RoutineScheduler", () => {
 
     const sessions = s.sessions.list();
     expect(sessions).toHaveLength(1);
-    expect(sessions[0].title).toContain("r");
+    // SessionManager auto-retitles a placeholder-looking title from the
+    // first user_message. The routine's default "<name> · <ts>" title
+    // is ≤3 tokens so it qualifies as a placeholder → retitled to the
+    // prompt text ("hello").
+    expect(sessions[0].title).toBe("hello");
     expect(sessions[0].projectId).toBe(s.project.id);
     expect(s.runners.some((rr) => rr.sent.includes("hello"))).toBe(true);
 

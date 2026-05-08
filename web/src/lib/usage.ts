@@ -20,6 +20,46 @@ export interface SessionUsage {
   perModel: PerModelUsage[];
   /** Count of turn_end events that contributed usage (debug + sanity check). */
   turnCount: number;
+  /**
+   * Input tokens reported on the most recent `turn_end` event. Unlike
+   * `totalInput` (which sums every turn and over-counts because prior turns'
+   * input overlaps), this is a reasonable proxy for "current context size":
+   * each turn resends the full conversation to the model, so the latest
+   * turn's `inputTokens` ≈ how much context is live right now. Zero when no
+   * `turn_end` with usage has been seen.
+   */
+  lastTurnInput: number;
+}
+
+/**
+ * Known context window sizes (in tokens) per model id. Used by the Usage
+ * panel to render the "context %" ring as `lastTurnInput / contextWindow`.
+ *
+ * These numbers come from Anthropic's published model specs. If you add a
+ * new model here, double-check the window size rather than guessing — a
+ * wrong value will silently mislead the ring. When the shipped model list
+ * changes, update `shared/src/models.ts` first, then mirror it here.
+ */
+const CONTEXT_WINDOW_TOKENS: Record<ModelId, number> = {
+  "claude-opus-4-7": 200_000,
+  "claude-sonnet-4-6": 200_000,
+  "claude-haiku-4-5": 200_000,
+};
+
+/** Default window used when the model id is unknown to this table. */
+const CONTEXT_WINDOW_FALLBACK = 200_000;
+
+/**
+ * Context window size (tokens) for a given model id. Returns
+ * `CONTEXT_WINDOW_FALLBACK` (200k) for unknown models — every currently
+ * shipping Claude 4.x model is a 200k window, so this is a safe default
+ * rather than a guess. Revisit if Anthropic ships a non-200k model.
+ */
+export function contextWindowTokens(model: ModelId | string): number {
+  return (
+    (CONTEXT_WINDOW_TOKENS as Record<string, number>)[String(model)] ??
+    CONTEXT_WINDOW_FALLBACK
+  );
 }
 
 /**
@@ -46,6 +86,7 @@ export function computeSessionUsage(
     { model: ModelId | string; inputTokens: number; outputTokens: number }
   >();
   let turnCount = 0;
+  let lastTurnInput = 0;
 
   for (const ev of events) {
     if (ev.kind !== "turn_end") continue;
@@ -68,6 +109,9 @@ export function computeSessionUsage(
       perModelMap.set(key, { model, inputTokens: inp, outputTokens: out });
     }
     turnCount += 1;
+    // Events are assumed to be in insertion order (server returns them
+    // ordered by id asc); the final turn_end's inputTokens wins.
+    lastTurnInput = inp;
   }
 
   const perModel: PerModelUsage[] = Array.from(perModelMap.values())
@@ -81,7 +125,7 @@ export function computeSessionUsage(
   const totalOutput = perModel.reduce((n, r) => n + r.outputTokens, 0);
   const costUsd = perModel.reduce((n, r) => n + r.costUsd, 0);
 
-  return { totalInput, totalOutput, costUsd, perModel, turnCount };
+  return { totalInput, totalOutput, costUsd, perModel, turnCount, lastTurnInput };
 }
 
 /** Format a token count as "12.3M", "612k", or "1,234". */

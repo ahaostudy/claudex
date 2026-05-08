@@ -32,18 +32,46 @@ export async function registerWsRoute(
     subs: Set<string>;
     send: (frame: ServerFrame) => void;
   }
-  // Map of sessionId → set of connections, so broadcasts are O(subscribers).
+  // Map of sessionId → set of connections, so per-session broadcasts are
+  // O(subscribers).
   const subscribers = new Map<string, Set<ConnState>>();
+  // Every authenticated connection also lands in this "global" set. Used to
+  // deliver cross-session frames (`session_update`, `user_message`) to tabs
+  // that haven't explicitly subscribed to a specific sessionId — notably the
+  // Home/sessions-list screen, which needs live status dots without pinning
+  // one conversation. Turn payloads (assistant_text_delta, thinking,
+  // tool_use, tool_result, permission_request, turn_end) still go only to
+  // per-session subscribers so that idle tabs don't get firehosed.
+  const globalSessionSubs = new Set<ConnState>();
+
+  // Frame types that describe *cross-session* state (identity of a session
+  // as it appears in a list view). Everything else is turn-scoped and stays
+  // gated on an explicit `subscribe`.
+  const GLOBAL_FRAME_TYPES = new Set<ServerFrame["type"]>([
+    "session_update",
+    "user_message",
+  ]);
 
   // Wire the runner-event broadcast into the ws layer. This is a one-time
   // bridge: the SessionManager broadcasts already carries event.type. We
   // translate each event to a ServerFrame.
   const bridgeBroadcast = (sessionId: string, event: RunnerEvent): void => {
-    const bucket = subscribers.get(sessionId);
-    if (!bucket || bucket.size === 0) return;
     const frame = runnerEventToFrame(sessionId, event);
     if (!frame) return;
-    for (const conn of bucket) conn.send(frame);
+    const bucket = subscribers.get(sessionId);
+    const sent = new Set<ConnState>();
+    if (bucket) {
+      for (const conn of bucket) {
+        conn.send(frame);
+        sent.add(conn);
+      }
+    }
+    if (GLOBAL_FRAME_TYPES.has(frame.type)) {
+      for (const conn of globalSessionSubs) {
+        if (sent.has(conn)) continue;
+        conn.send(frame);
+      }
+    }
   };
 
   // Patch the broadcast target. SessionManager was created before WS was
@@ -92,6 +120,10 @@ export async function registerWsRoute(
       };
 
       state.send({ type: "hello_ack", serverVersion: "0.0.1" });
+      // Every authed tab joins the global sessions channel so Home/list
+      // screens receive `session_update` + `user_message` without needing
+      // to subscribe to each sessionId individually.
+      globalSessionSubs.add(state);
       req.log?.info({ userId }, "ws handshake ok, hello_ack sent");
 
       socket.on("message", (raw: Buffer | string) => {
@@ -132,6 +164,7 @@ export async function registerWsRoute(
           subscribers.get(id)?.delete(state);
         }
         subs.clear();
+        globalSessionSubs.delete(state);
       });
     },
   );

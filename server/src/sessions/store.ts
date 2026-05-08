@@ -122,6 +122,18 @@ export class SessionStore {
     return row ? toSession(row) : null;
   }
 
+  /**
+   * Look up a session by its Agent SDK / CLI session_id. Used by the CLI
+   * import path to keep adoption idempotent — re-importing a session that's
+   * already adopted should return the existing row rather than duplicate it.
+   */
+  findBySdkSessionId(sdkSessionId: string): Session | null {
+    const row = this.db
+      .prepare("SELECT * FROM sessions WHERE sdk_session_id = ?")
+      .get(sdkSessionId) as SessionRow | undefined;
+    return row ? toSession(row) : null;
+  }
+
   create(input: SessionCreateInput): Session {
     const now = new Date().toISOString();
     const row: SessionRow = {

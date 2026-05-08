@@ -1,12 +1,13 @@
-import { useEffect, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
-import { Plus, GitBranch, Pencil, Trash2, FolderOpen, Settings2 } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { Plus, GitBranch, Pencil, Trash2, FolderOpen, Settings2, X, Download } from "lucide-react";
 import { useAuth } from "@/state/auth";
 import { useSessions } from "@/state/sessions";
 import { api, ApiError } from "@/api/client";
-import type { Project, ModelId, PermissionMode } from "@claudex/shared";
+import type { Project, Session, ModelId, PermissionMode } from "@claudex/shared";
 import { FolderPicker } from "@/components/FolderPicker";
 import { AppShell } from "@/components/AppShell";
+import { ImportSessionsSheet } from "@/components/ImportSessionsSheet";
 import { cn } from "@/lib/cn";
 
 const statusTone: Record<string, string> = {
@@ -28,14 +29,85 @@ export function HomeScreen() {
     wsDiag,
   } = useSessions();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const activeProjectId = searchParams.get("project");
   const [showNew, setShowNew] = useState(false);
   const [showProjects, setShowProjects] = useState(false);
   const [showWsDiag, setShowWsDiag] = useState(false);
+  const [showImport, setShowImport] = useState(false);
+  const [projects, setProjects] = useState<Project[]>([]);
 
   useEffect(() => {
     init();
     refreshSessions();
   }, [init, refreshSessions]);
+
+  // Projects list is its own fetch — sessions carry projectId but no name,
+  // and we want the group header to show the project's display name even if
+  // there are no sessions yet under it (though empty groups are hidden).
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .listProjects()
+      .then((r) => {
+        if (!cancelled) setProjects(r.projects);
+      })
+      .catch(() => {
+        /* best-effort */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Build ordered groups: bucket sessions by projectId, drop empty buckets,
+  // sort sessions inside each bucket newest-first, sort groups by their
+  // newest session's timestamp. Wrapped in useMemo so the layout is stable
+  // across renders caused by WS status ticks.
+  const groups = useMemo(() => {
+    const byProject = new Map<string, Session[]>();
+    for (const s of sessions) {
+      const list = byProject.get(s.projectId);
+      if (list) list.push(s);
+      else byProject.set(s.projectId, [s]);
+    }
+    const sortKey = (s: Session) =>
+      Date.parse(s.lastMessageAt ?? s.updatedAt) || 0;
+    const projectLookup = new Map(projects.map((p) => [p.id, p] as const));
+    const out: Array<{ project: Project | null; projectId: string; sessions: Session[] }> = [];
+    for (const [projectId, list] of byProject) {
+      list.sort((a, b) => sortKey(b) - sortKey(a));
+      out.push({
+        project: projectLookup.get(projectId) ?? null,
+        projectId,
+        sessions: list,
+      });
+    }
+    out.sort(
+      (a, b) => sortKey(b.sessions[0]) - sortKey(a.sessions[0]),
+    );
+    return out;
+  }, [sessions, projects]);
+
+  const filteredGroups = useMemo(() => {
+    if (!activeProjectId) return groups;
+    return groups.filter((g) => g.projectId === activeProjectId);
+  }, [groups, activeProjectId]);
+
+  const activeProject = activeProjectId
+    ? projects.find((p) => p.id === activeProjectId) ?? null
+    : null;
+
+  const clearFilter = () => {
+    const next = new URLSearchParams(searchParams);
+    next.delete("project");
+    setSearchParams(next, { replace: true });
+  };
+
+  const visibleSessionCount = filteredGroups.reduce(
+    (n, g) => n + g.sessions.length,
+    0,
+  );
 
   return (
     <AppShell tab="sessions">
@@ -43,7 +115,7 @@ export function HomeScreen() {
         <div>
           <div className="caps text-ink-muted">Sessions</div>
           <h1 className="display text-[1.25rem] leading-tight mt-0.5">
-            All projects
+            {activeProject ? activeProject.name : "All projects"}
           </h1>
         </div>
         <button
@@ -70,6 +142,13 @@ export function HomeScreen() {
         </span>
         <div className="ml-auto flex items-center gap-2">
           <button
+            onClick={() => setShowImport(true)}
+            title="Import existing CLI sessions"
+            className="h-8 w-8 rounded-[8px] border border-line bg-canvas flex items-center justify-center hover:bg-paper"
+          >
+            <Download className="w-4 h-4 text-ink-soft" />
+          </button>
+          <button
             onClick={() => setShowProjects(true)}
             title="Manage projects"
             className="h-8 w-8 rounded-[8px] border border-line bg-canvas flex items-center justify-center hover:bg-paper"
@@ -87,49 +166,46 @@ export function HomeScreen() {
         </div>
       </header>
 
-      <section className="flex-1 min-h-0 overflow-y-auto px-5 pt-4 pb-6">
-        <div className="flex items-baseline gap-3 mb-4">
+      <section className="flex-1 min-h-0 overflow-y-auto pb-6">
+        <div className="px-5 pt-4 flex items-center gap-3 mb-4">
           <span className="mono text-[11px] text-ink-muted">
-            {loadingSessions ? "loading…" : `${sessions.length} total`}
+            {loadingSessions
+              ? "loading…"
+              : activeProjectId
+                ? `${visibleSessionCount} in this project · ${sessions.length} total`
+                : `${sessions.length} total`}
           </span>
+          {activeProjectId && (
+            <button
+              type="button"
+              onClick={clearFilter}
+              className="inline-flex items-center gap-1 px-2 h-6 rounded-full border border-line bg-paper text-[11px] text-ink-soft hover:bg-canvas"
+            >
+              <X className="w-3 h-3" />
+              clear filter
+            </button>
+          )}
         </div>
 
         {sessions.length === 0 && !loadingSessions ? (
-          <EmptyState onNew={() => setShowNew(true)} />
+          <div className="px-5">
+            <EmptyState onNew={() => setShowNew(true)} />
+          </div>
+        ) : filteredGroups.length === 0 ? (
+          <div className="px-5 text-[13px] text-ink-muted">
+            No sessions in this project yet.
+          </div>
         ) : (
-          <ul className="space-y-2">
-            {sessions.map((s) => (
-              <li key={s.id}>
-                <Link
-                  to={`/session/${s.id}`}
-                  className="block rounded-[10px] border border-line bg-canvas px-4 py-3 hover:bg-paper/60 transition-colors"
-                >
-                  <div className="flex items-center gap-2">
-                    <span
-                      className={`h-2 w-2 rounded-full ${statusTone[s.status]}`}
-                    />
-                    <span className="text-[11px] uppercase tracking-[0.12em] text-ink-muted">
-                      {s.status}
-                    </span>
-                    <span className="ml-auto text-[11px] text-ink-muted">
-                      {formatRel(s.lastMessageAt ?? s.updatedAt)}
-                    </span>
-                  </div>
-                  <div className="text-[15px] font-medium leading-snug mt-1.5">
-                    {s.title}
-                  </div>
-                  <div className="flex items-center gap-3 text-[11px] text-ink-muted mt-1.5">
-                    <span className="mono flex items-center gap-1">
-                      <GitBranch className="w-3 h-3" />
-                      {s.branch ?? "main"}
-                    </span>
-                    <span className="mono">{s.model}</span>
-                    <span>· {s.mode}</span>
-                  </div>
-                </Link>
-              </li>
+          <div>
+            {filteredGroups.map((g) => (
+              <ProjectGroup
+                key={g.projectId}
+                project={g.project}
+                projectId={g.projectId}
+                sessions={g.sessions}
+              />
             ))}
-          </ul>
+          </div>
         )}
       </section>
 
@@ -145,10 +221,79 @@ export function HomeScreen() {
       {showProjects && (
         <ProjectsSheet onClose={() => setShowProjects(false)} />
       )}
+      {showImport && (
+        <ImportSessionsSheet
+          onClose={() => setShowImport(false)}
+          onImported={() => {
+            setShowImport(false);
+            refreshSessions();
+          }}
+        />
+      )}
       {showWsDiag && (
         <WsDiagPanel diag={wsDiag} onClose={() => setShowWsDiag(false)} />
       )}
     </AppShell>
+  );
+}
+
+function ProjectGroup({
+  project,
+  projectId,
+  sessions,
+}: {
+  project: Project | null;
+  projectId: string;
+  sessions: Session[];
+}) {
+  // Each group is its own block so its header `sticky top-0` is scoped to
+  // the group's vertical run — when you scroll past, the next project's
+  // header takes over. The parent `<section>` is the scroll container.
+  return (
+    <div>
+      <div className="sticky top-0 z-[5] bg-paper/80 backdrop-blur border-b border-line px-5 py-2 flex items-center gap-2">
+        <span className="h-1.5 w-1.5 rounded-full bg-klein" />
+        <span className="mono text-[12px] font-medium">
+          {project?.name ?? projectId.slice(0, 8)}
+        </span>
+        <span className="ml-auto text-[11px] text-ink-muted">
+          {sessions.length} session{sessions.length === 1 ? "" : "s"}
+        </span>
+      </div>
+      <ul className="space-y-2 px-5 pt-3 pb-1">
+        {sessions.map((s) => (
+          <li key={s.id}>
+            <Link
+              to={`/session/${s.id}`}
+              className="block rounded-[10px] border border-line bg-canvas px-4 py-3 hover:bg-paper/60 transition-colors"
+            >
+              <div className="flex items-center gap-2">
+                <span
+                  className={`h-2 w-2 rounded-full ${statusTone[s.status]}`}
+                />
+                <span className="text-[11px] uppercase tracking-[0.12em] text-ink-muted">
+                  {s.status}
+                </span>
+                <span className="ml-auto text-[11px] text-ink-muted">
+                  {formatRel(s.lastMessageAt ?? s.updatedAt)}
+                </span>
+              </div>
+              <div className="text-[15px] font-medium leading-snug mt-1.5">
+                {s.title}
+              </div>
+              <div className="flex items-center gap-3 text-[11px] text-ink-muted mt-1.5">
+                <span className="mono flex items-center gap-1">
+                  <GitBranch className="w-3 h-3" />
+                  {s.branch ?? "main"}
+                </span>
+                <span className="mono">{s.model}</span>
+                <span>· {s.mode}</span>
+              </div>
+            </Link>
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
 

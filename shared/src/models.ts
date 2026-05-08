@@ -267,6 +267,43 @@ export const BrowseResponse = z.object({
 export type BrowseResponse = z.infer<typeof BrowseResponse>;
 
 // ============================================================================
+// CLI session discovery & import
+// ============================================================================
+
+// Summary of a `claude` CLI session discovered on disk at
+// ~/.claude/projects/<cwd-slug>/<sessionId>.jsonl. We don't parse the whole
+// transcript — just enough metadata to render a "pick which ones to adopt"
+// list. `title` is derived from the first user message (word-boundary
+// truncated to ~60 chars) so the list looks like the other session lists.
+export const CliSessionSummary = z.object({
+  sessionId: z.string(),
+  cwd: z.string(), // decoded from the slug; best-effort (see decodeSlug)
+  title: z.string(),
+  firstUserMessage: z.string().nullable(),
+  lineCount: z.number().int().nonnegative(), // bounded: we only read ~head
+  fileSize: z.number().int().nonnegative(),
+  lastModified: z.string(), // ISO 8601
+});
+export type CliSessionSummary = z.infer<typeof CliSessionSummary>;
+
+export const ListCliSessionsResponse = z.object({
+  sessions: z.array(CliSessionSummary),
+});
+export type ListCliSessionsResponse = z.infer<typeof ListCliSessionsResponse>;
+
+export const ImportCliSessionsRequest = z.object({
+  sessionIds: z.array(z.string().min(1)).min(1),
+});
+export type ImportCliSessionsRequest = z.infer<typeof ImportCliSessionsRequest>;
+
+export const ImportCliSessionsResponse = z.object({
+  imported: z.array(Session),
+});
+export type ImportCliSessionsResponse = z.infer<
+  typeof ImportCliSessionsResponse
+>;
+
+// ============================================================================
 // Slash commands (composer `/` picker)
 // ============================================================================
 

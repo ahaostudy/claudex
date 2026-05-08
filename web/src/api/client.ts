@@ -1,6 +1,7 @@
 import type {
   BrowseResponse,
   ChangePasswordRequest,
+  CliSessionSummary,
   CreateRoutineRequest,
   CreateSessionRequest,
   CreateSideSessionRequest,
@@ -192,5 +193,14 @@ export const api = {
   },
   getUserEnv() {
     return request<UserEnvResponse>("/api/user/env");
+  },
+  listCliSessions() {
+    return request<{ sessions: CliSessionSummary[] }>("/api/cli/sessions");
+  },
+  importCliSessions(sessionIds: string[]) {
+    return request<{ imported: Session[] }>("/api/cli/sessions/import", {
+      method: "POST",
+      json: { sessionIds },
+    });
   },
 };

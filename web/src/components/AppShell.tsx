@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import {
   Bell,
   Calendar,
@@ -72,6 +72,9 @@ function DesktopSidebar({ tab }: { tab: ShellTab }) {
   const { user, logout } = useAuth();
   const { sessions } = useSessions();
   const [projects, setProjects] = useState<Project[]>([]);
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const activeProjectId = searchParams.get("project");
 
   useEffect(() => {
     let cancelled = false;
@@ -93,6 +96,17 @@ function DesktopSidebar({ tab }: { tab: ShellTab }) {
   for (const s of sessions) {
     countsByProject.set(s.projectId, (countsByProject.get(s.projectId) ?? 0) + 1);
   }
+
+  // Clicking a project row filters the Sessions screen to that project via a
+  // `?project=<id>` query param. "All projects" clears the filter. We stay on
+  // whatever route we're already on if the user is on Sessions; otherwise
+  // jump to Sessions. Keeping the nav simple — no drill-in page for projects
+  // yet.
+  const goToProject = (projectId: string | null) => {
+    const target =
+      projectId === null ? "/sessions" : `/sessions?project=${projectId}`;
+    navigate(target);
+  };
 
   return (
     <aside className="hidden md:flex border-r border-line bg-paper/40 w-[260px] flex-col shrink-0">
@@ -138,26 +152,54 @@ function DesktopSidebar({ tab }: { tab: ShellTab }) {
 
       <div className="px-4 caps text-ink-muted mb-2">Projects</div>
       <div className="px-3 space-y-0.5 overflow-y-auto flex-1 min-h-0">
+        <button
+          type="button"
+          onClick={() => goToProject(null)}
+          className={cn(
+            "w-full flex items-center gap-2 px-2.5 h-7 rounded-[6px] text-left",
+            tab === "sessions" && !activeProjectId
+              ? "bg-canvas shadow-card border border-line text-ink"
+              : "hover:bg-canvas/60 border border-transparent",
+          )}
+        >
+          <span className="h-1.5 w-1.5 rounded-full bg-ink-faint shrink-0" />
+          <span className="mono text-[13px] text-ink-soft truncate">
+            All projects
+          </span>
+          <span className="ml-auto text-[11px] text-ink-muted mono">
+            {sessions.length}
+          </span>
+        </button>
         {projects.length === 0 ? (
           <div className="px-2.5 text-[12px] text-ink-muted">
             No projects yet.
           </div>
         ) : (
-          projects.map((p) => (
-            <div
-              key={p.id}
-              className="w-full flex items-center gap-2 px-2.5 h-7 rounded-[6px] hover:bg-canvas/60"
-              title={p.path}
-            >
-              <span className="h-1.5 w-1.5 rounded-full bg-klein shrink-0" />
-              <span className="mono text-[13px] text-ink-soft truncate">
-                {p.name}
-              </span>
-              <span className="ml-auto text-[11px] text-ink-muted mono">
-                {countsByProject.get(p.id) ?? 0}
-              </span>
-            </div>
-          ))
+          projects.map((p) => {
+            const active = tab === "sessions" && activeProjectId === p.id;
+            return (
+              <button
+                key={p.id}
+                type="button"
+                onClick={() => goToProject(p.id)}
+                className={cn(
+                  "w-full flex items-center gap-2 px-2.5 h-7 rounded-[6px] text-left",
+                  active
+                    ? "bg-canvas shadow-card border border-line text-ink"
+                    : "hover:bg-canvas/60 border border-transparent",
+                )}
+                title={p.path}
+              >
+                <span className="h-1.5 w-1.5 rounded-full bg-klein shrink-0" />
+                <span className="mono text-[13px] text-ink-soft truncate">
+                  {p.name}
+                </span>
+                <span className="ml-auto text-[11px] text-ink-muted mono">
+                  {countsByProject.get(p.id) ?? 0}
+                </span>
+              </button>
+            );
+          })
         )}
       </div>
 

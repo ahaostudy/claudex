@@ -45,6 +45,22 @@ export class ProjectStore {
     return row ? toProject(row) : null;
   }
 
+  /**
+   * Return the existing project for `absPath` or create one with the given
+   * name + `trusted: true`. Used by the CLI-session import path to anchor
+   * adopted sessions against the cwd they were recorded under without
+   * duplicating a project row the user may have added manually.
+   */
+  upsertByPath(input: { name: string; path: string }): Project {
+    const existing = this.findByPath(input.path);
+    if (existing) return existing;
+    return this.create({
+      name: input.name,
+      path: input.path,
+      trusted: true,
+    });
+  }
+
   create(input: { name: string; path: string; trusted: boolean }): Project {
     const row: ProjectRow = {
       id: nanoid(12),

@@ -4,6 +4,7 @@ import type { Session } from "@claudex/shared";
 import { api } from "@/api/client";
 import {
   computeSessionUsage,
+  contextWindowTokens,
   formatTokens,
   formatUsd,
   type SessionUsage,
@@ -18,15 +19,20 @@ import { MODEL_LABEL } from "@/lib/pricing";
  * `turn_end` payload's `usage.{inputTokens,outputTokens}`. Nothing is sent
  * back — this is read-only. Closed by backdrop, Esc, or the × button.
  *
+ * Context %: computed client-side as `lastTurnInput / contextWindow(model)`.
+ * We use the most recent `turn_end`'s `inputTokens` (not the cumulative
+ * `totalInput`) because each turn resends the full conversation to the
+ * model, so prior turns' input overlaps — summing would wildly over-count.
+ * The context window is a static per-model table in `lib/usage.ts` (every
+ * current Claude 4.x model is 200k). This is an estimate, not a runtime
+ * report, but it's honest and actionable.
+ *
  * What we intentionally do NOT show (kept explicit so future reviewers know
  * it's a known gap rather than an oversight):
  *
  *  - **Plan-period usage** (mockup shows "58% used · resets Mon 16:00"):
  *    requires cross-session + subscription-plan data we don't have. Skipped.
  *  - **Last-7-days chart / top sessions** (desktop mockup): same reason.
- *  - **Context %**: `session.stats.contextPct` exists but the server never
- *    populates it today (always 0). We surface it as "—" with a TODO so we
- *    don't mislead the user with a fake ring.
  */
 export function UsagePanel({
   session,
@@ -64,11 +70,16 @@ export function UsagePanel({
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  // TODO(contextPct): server never populates Session.stats.contextPct today —
-  // the SDK doesn't expose live context window usage. When it does, swap
-  // this to `session.stats.contextPct` and show the real %.
-  const contextPctKnown = false;
-  const contextPct = contextPctKnown ? session.stats.contextPct : 0;
+  // Context %: latest turn's inputTokens / known model context window. This
+  // is an estimate (we don't get a live context gauge from the SDK), but
+  // it's honest — prior turns' input overlaps with the current turn's, so
+  // only the most recent turn's input is a meaningful proxy.
+  const contextWindow = contextWindowTokens(session.model);
+  const lastTurnInput = usage?.lastTurnInput ?? 0;
+  const contextPctKnown = lastTurnInput > 0;
+  const contextPct = contextPctKnown
+    ? Math.min(1, lastTurnInput / contextWindow)
+    : 0;
 
   return (
     <div
@@ -123,10 +134,10 @@ export function UsagePanel({
               label={contextPctKnown ? `${Math.round(contextPct * 100)}%` : "—"}
               sublabel="context"
             />
-            <div className="mt-2 text-[12px] text-ink-muted">
+            <div className="mt-2 text-[12px] text-ink-muted mono">
               {contextPctKnown
-                ? "of the model's context window"
-                : "context % not reported by the runtime yet"}
+                ? `${formatTokens(lastTurnInput)} / ${formatTokens(contextWindow)} tokens`
+                : "no turns yet — send a message"}
             </div>
           </div>
 

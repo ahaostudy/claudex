@@ -34,6 +34,63 @@ interface SessionEntry {
 
 export type PermissionDecision = "allow_once" | "allow_always" | "deny";
 
+/**
+ * Max length (code units) of an auto-generated session title before we
+ * truncate + ellipsize. 60 is the Claude Code CLI feel: long enough to
+ * recognize a prompt at a glance on mobile, short enough not to wrap.
+ */
+const AUTO_TITLE_MAX_LEN = 60;
+
+/**
+ * Should the session's current title be overwritten by an auto-title
+ * derived from the user's first message?
+ *
+ * Heuristic: empty / whitespace-only, OR a "placeholder" single-word
+ * blob of ≤3 words. Anything with 4+ words we treat as user-chosen
+ * and leave alone. Mirrors how people actually fill the New Session
+ * sheet: they either skip it (→ "Untitled" default), type a few
+ * letters ("t", "demo", "test 1"), or write a real title.
+ */
+function shouldAutoRetitle(current: string): boolean {
+  const trimmed = current.trim();
+  if (trimmed.length === 0) return true;
+  // "Untitled" is the server default when title is omitted on create.
+  if (trimmed === "Untitled") return true;
+  const words = trimmed.split(/\s+/).filter((w) => w.length > 0);
+  return words.length <= 3;
+}
+
+/**
+ * Turn a user's first message into a session title.
+ *
+ * Rules:
+ *   1. trim leading/trailing whitespace
+ *   2. take only up to the first newline (titles are one-line)
+ *   3. if that's ≤ AUTO_TITLE_MAX_LEN chars, use it verbatim
+ *   4. otherwise truncate to AUTO_TITLE_MAX_LEN, back up to the last
+ *      whole-word boundary (whitespace), and append a single-char
+ *      ellipsis "…". We back up at most ~15 chars to avoid
+ *      pathological "one giant word" inputs producing a title of just
+ *      the ellipsis; if no good boundary exists, truncate hard.
+ */
+function deriveTitleFromMessage(raw: string): string {
+  const firstLine = raw.trim().split(/\r?\n/, 1)[0]?.trim() ?? "";
+  if (firstLine.length === 0) return "";
+  if (firstLine.length <= AUTO_TITLE_MAX_LEN) return firstLine;
+
+  const hard = firstLine.slice(0, AUTO_TITLE_MAX_LEN);
+  const lastSpace = hard.lastIndexOf(" ");
+  // Require the word boundary to leave us with at least ~45 chars of
+  // title — otherwise we'd rather truncate mid-word than produce a
+  // uselessly short title.
+  const cut = lastSpace >= AUTO_TITLE_MAX_LEN - 15 ? lastSpace : AUTO_TITLE_MAX_LEN;
+  return hard.slice(0, cut).trimEnd() + "…";
+}
+
+// Exposed for unit tests — these are intentionally pure helpers so they
+// can be tested without spinning up a full SessionManager harness.
+export const __testables = { shouldAutoRetitle, deriveTitleFromMessage };
+
 export class SessionManager {
   private runners = new Map<string, SessionEntry>();
   // Track pending permission requests by toolUseId so we can look up the tool
@@ -260,12 +317,51 @@ export class SessionManager {
       entry.pendingSeed = null;
       await runner.sendUserMessage(seed);
     }
+
+    // Auto-title from the first user message, mirroring Claude Code CLI
+    // behavior. Snapshot the session + count prior user_messages *before*
+    // appending so "is this the very first user message?" is unambiguous.
+    //
+    // Skip retitle when:
+    //   - session is a side chat (parentSessionId set) — those already
+    //     have a deliberate "Side chat" title from routes.ts
+    //   - the session already has a substantive user-chosen title
+    //     (>3 words is our "looks deliberate" heuristic)
+    //   - there are already prior user_message events (retitle is
+    //     strictly a first-message thing)
+    //
+    // Intentionally NOT broadcast: the sibling agent is reshaping ws.ts
+    // and adding a global session channel that will make live title
+    // updates trivial. Until that lands, the new title persists to
+    // SQLite only and surfaces on the next Home refresh.
+    const beforeAppend = this.deps.sessions.findById(sessionId);
+    const priorUserMessages = beforeAppend
+      ? this.countPriorUserMessages(sessionId)
+      : 0;
+
     this.deps.sessions.appendEvent({
       sessionId,
       kind: "user_message",
       payload: { text: content },
     });
     this.deps.sessions.touchLastMessage(sessionId);
+
+    if (
+      beforeAppend &&
+      priorUserMessages === 0 &&
+      beforeAppend.parentSessionId === null &&
+      shouldAutoRetitle(beforeAppend.title)
+    ) {
+      const newTitle = deriveTitleFromMessage(content);
+      if (newTitle.length > 0) {
+        this.deps.sessions.setTitle(sessionId, newTitle);
+        // TODO(ws-refactor): once the sibling agent's global session
+        // channel lands, broadcast a session_update with the new title
+        // so Home updates live. For now Home re-fetches on mount which
+        // is acceptable for the first-message retitle case.
+      }
+    }
+
     // Broadcast the user message to every subscriber — including the tab
     // that sent it. Multi-tab sees the message show up instantly; the
     // sending tab reconciles against its local optimistic echo using
@@ -276,6 +372,20 @@ export class SessionManager {
       at: new Date().toISOString(),
     });
     await runner.sendUserMessage(content);
+  }
+
+  /**
+   * Count how many `user_message` events are already persisted for this
+   * session. Used by auto-title to detect "this is the first user_message
+   * for this session". Linear scan over listEvents — session transcripts
+   * are bounded by human attention span, so not worth a dedicated index.
+   */
+  private countPriorUserMessages(sessionId: string): number {
+    let n = 0;
+    for (const ev of this.deps.sessions.listEvents(sessionId)) {
+      if (ev.kind === "user_message") n += 1;
+    }
+    return n;
   }
 
   async interrupt(sessionId: string): Promise<void> {
