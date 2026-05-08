@@ -1,8 +1,10 @@
 import type {
+  BrowseResponse,
   CreateSessionRequest,
   Project,
   Session,
   SessionEvent,
+  UpdateProjectRequest,
 } from "@claudex/shared";
 
 export class ApiError extends Error {
@@ -66,6 +68,23 @@ export const api = {
       method: "POST",
       json: body,
     });
+  },
+  updateProject(id: string, body: UpdateProjectRequest) {
+    return request<{ project: Project }>(`/api/projects/${id}`, {
+      method: "PATCH",
+      json: body,
+    });
+  },
+  deleteProject(id: string) {
+    return request<{ ok: true }>(`/api/projects/${id}`, { method: "DELETE" });
+  },
+  browseHome() {
+    return request<{ path: string }>("/api/browse/home");
+  },
+  browse(absPath: string) {
+    return request<BrowseResponse>(
+      `/api/browse?path=${encodeURIComponent(absPath)}`,
+    );
   },
   listSessions(opts?: { project?: string; archived?: boolean }) {
     const qs = new URLSearchParams();
