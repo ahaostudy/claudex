@@ -11,7 +11,7 @@ Three status tiers:
   use from the API; users won't see it yet.
 - ⬜ **Planned** — listed so nobody re-plans it from scratch, but not started.
 
-Last updated: see the git log of this file. Current revision lists **65 shipped
+Last updated: see the git log of this file. Current revision lists **66 shipped
 behaviors** and **136 backend tests**.
 
 ---
@@ -23,6 +23,7 @@ behaviors** and **136 backend tests**.
 | ✅ | First-run admin creation via `pnpm init`, interactive or env-driven (`CLAUDEX_INIT_USERNAME` / `CLAUDEX_INIT_PASSWORD` / `--username=` / `--password=`) | `server/src/bin/init.ts` |
 | ✅ | Generates TOTP secret, prints ASCII-art QR code and the secret string, sets the Issuer/Account to `claudex / <username>` | same |
 | ✅ | Refuses to re-run if a user already exists (manual DB delete required to reset) | same |
+| ✅ | `pnpm reset-credentials` — rotate username and/or password in place while keeping the TOTP secret (so the authenticator entry keeps working). Flags: `--username=`, `--password=`, `--match=<current-username>` for multi-user disambiguation; env vars `CLAUDEX_RESET_USERNAME` / `CLAUDEX_RESET_PASSWORD` / `CLAUDEX_RESET_MATCH` work too | `server/src/bin/reset-credentials.ts` |
 | ✅ | All runtime state under `~/.claudex/` (DB, logs, JWT secret); override via `CLAUDEX_STATE_DIR` | `server/src/lib/config.ts` |
 | ✅ | SQLite DB with hand-rolled migrations, WAL mode, foreign keys on, cascade on session delete | `server/src/db/index.ts` |
 | ✅ | Refuses to bind anything other than `127.0.0.1` / `::1` / `localhost` — public exposure is the user's responsibility (frp / Cloudflare Tunnel / Tailscale / Caddy) | `server/src/lib/config.ts` |
