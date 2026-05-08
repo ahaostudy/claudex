@@ -30,6 +30,7 @@ import type {
   SearchResponse,
   MemoryResponse,
   StatsResponse,
+  ListSubagentsResponse,
 } from "@claudex/shared";
 
 export class ApiError extends Error {
@@ -385,6 +386,23 @@ export const api = {
    */
   getStats() {
     return request<StatsResponse>("/api/stats");
+  },
+  /**
+   * Read-only observability feed for subagent tool invocations (the SDK's
+   * `Task` / `Agent` / `Explore` family). Backs the `/agents` screen. Scoped
+   * via `status=active|done|all` (default `all`); items are `toolUseId`-keyed
+   * runs ordered newest first and capped at `limit` (default 100, max 500).
+   * The `stats` block is unconditional — the four cards read the same
+   * regardless of which filter the caller applied.
+   */
+  listAgents(opts?: { status?: "active" | "done" | "all"; limit?: number }) {
+    const qs = new URLSearchParams();
+    if (opts?.status && opts.status !== "all") qs.set("status", opts.status);
+    if (opts?.limit !== undefined) qs.set("limit", String(opts.limit));
+    const q = qs.toString();
+    return request<ListSubagentsResponse>(
+      `/api/agents${q ? `?${q}` : ""}`,
+    );
   },
   /**
    * Full-text search across session titles + message bodies.

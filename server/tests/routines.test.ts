@@ -15,6 +15,7 @@ import { ToolGrantStore } from "../src/sessions/grants.js";
 import { RoutineStore } from "../src/routines/store.js";
 import { RoutineScheduler, computeNextRun, isValidCron } from "../src/routines/scheduler.js";
 import { tempConfig } from "./helpers.js";
+import { trustProject } from "./helpers.js";
 
 // Minimal no-op runner so the SessionManager can kick off sessions without
 // actually spawning claude. Captures sent messages for assertions.
@@ -262,6 +263,10 @@ describe("routines HTTP routes", () => {
     const ctx = await bootstrap();
     disposers.push(ctx.cleanup);
     const projectId = await seedProject(ctx);
+    // Projects created via POST /api/projects arrive untrusted — the scheduler
+    // now respects the trust gate (parity with POST /api/sessions), so trust
+    // it explicitly for this happy-path test.
+    trustProject(ctx.dbh, projectId);
     const created = await ctx.app.inject({
       method: "POST",
       url: "/api/routines",
@@ -554,6 +559,33 @@ describe("RoutineScheduler", () => {
     expect(fresh.lastRunAt).toBeTruthy();
     expect(fresh.nextRunAt).toBeTruthy();
     expect(new Date(fresh.nextRunAt!).getTime()).toBeGreaterThan(now);
+  });
+
+  it("skips firing when the project was untrusted after schedule creation", async () => {
+    // QA blocker: a user trusts a project, schedules a routine, then revokes
+    // trust. The routine must NOT spawn a session — the HTTP POST
+    // /api/sessions trust gate is meaningless if the scheduler bypasses it.
+    const s = setup();
+    const r = s.routines.create({
+      name: "untrusted",
+      projectId: s.project.id,
+      prompt: "should not fire",
+      cronExpr: "0 9 * * *",
+      model: "claude-opus-4-7",
+      mode: "default",
+    });
+    // Revoke trust after the routine was created.
+    s.projects.setTrusted(s.project.id, false);
+
+    const sessionId = await s.scheduler.fire(r);
+    expect(sessionId).toBeNull();
+    expect(s.sessions.list()).toHaveLength(0);
+
+    // Schedule should still advance (so we don't busy-loop on every tick),
+    // but lastRunAt must remain null because the routine didn't actually run.
+    const fresh = s.routines.findById(r.id)!;
+    expect(fresh.lastRunAt).toBeNull();
+    expect(fresh.nextRunAt).toBeTruthy();
   });
 });
 

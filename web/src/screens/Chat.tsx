@@ -528,13 +528,6 @@ export function ChatScreen() {
       {/* Desktop header — shown at md+ (mockup 967-979). Pills are live
           dropdowns bound to PATCH /api/sessions/:id. */}
       <header className="hidden md:flex shrink-0 px-5 py-3 border-b border-line items-center gap-3 bg-canvas">
-        <Link
-          to="/sessions"
-          className="h-8 w-8 rounded-[8px] bg-paper border border-line flex items-center justify-center shrink-0"
-          aria-label="Back to sessions"
-        >
-          <ChevronLeft className="w-4 h-4" />
-        </Link>
         <span className={statusDot} />
         <div className="min-w-0">
           <div className="text-[14px] font-medium truncate">
@@ -638,7 +631,7 @@ export function ChatScreen() {
       <div
         ref={scroller}
         onScroll={onScrollerScroll}
-        className="flex-1 min-h-0 overflow-y-auto px-4 py-4 space-y-4"
+        className="flex-1 min-h-0 overflow-y-auto px-4 py-4 space-y-4 md:px-6 md:py-6 md:space-y-6"
       >
         {meta?.loadingOlder && (
           <div className="text-center text-[11px] text-ink-muted mono py-2">
@@ -1149,7 +1142,9 @@ function Piece({
             </svg>
             <span className="mono text-[11px] text-ink-muted">claude</span>
           </div>
-          <Markdown source={p.text} />
+          <div className="md:[&_.markdown]:text-[15px] md:[&_.markdown]:leading-[1.65]">
+            <Markdown source={p.text} />
+          </div>
           {(() => {
             const previewUrl = firstHttpUrl(p.text);
             return previewUrl ? <LinkPreview url={previewUrl} /> : null;
@@ -1677,7 +1672,7 @@ function UserBubble({
       data-show-actions={revealed ? "true" : "false"}
     >
       <div
-        className="relative max-w-[88%] bg-ink text-canvas rounded-[14px] rounded-br-[4px] px-3.5 py-2.5 shadow-card text-[14px] leading-[1.55]"
+        className="relative max-w-[88%] bg-ink text-canvas rounded-[14px] rounded-br-[4px] px-3.5 py-2.5 shadow-card text-[14px] leading-[1.55] md:max-w-[75%] md:text-[15px] md:leading-[1.55] md:px-4 md:py-3"
         onClick={() => onToggleReveal?.()}
       >
         {editable && (
@@ -2864,7 +2859,7 @@ function Composer({
       )}
 
       <div
-        className="shrink-0 border-t border-line bg-canvas px-3 pt-2 pb-3 mt-2"
+        className="shrink-0 border-t border-line bg-canvas px-3 pt-2 pb-3 mt-2 md:px-5 md:pt-3 md:pb-4"
         onDragOver={(e) => {
           if (!session) return;
           e.preventDefault();
@@ -2886,7 +2881,7 @@ function Composer({
       >
         <div
           className={cn(
-            "rounded-[12px] border bg-paper/60 p-2 focus-within:border-klein focus-within:ring-2 focus-within:ring-klein/15 transition-colors",
+            "rounded-[12px] border bg-paper/60 p-2 md:rounded-[10px] md:p-2.5 md:bg-paper/50 focus-within:border-klein focus-within:ring-2 focus-within:ring-klein/15 transition-colors",
             isDragging ? "border-klein border-dashed" : "border-line",
           )}
         >
@@ -3007,34 +3002,65 @@ function Composer({
             }
           />
           <div className="flex items-center justify-between px-1 mt-1">
-            {/* Mobile: show model · mode here (mockup 929). Desktop already
-                has them as pills in the header, so on md+ we just reserve
-                the spacer. */}
-            <div className="mono text-[11px] text-ink-muted md:opacity-0">
-              {session
-                ? `${MODEL_LABEL[session.model] ?? session.model} · ${MODE_LABEL[session.mode] ?? session.mode}`
-                : "—"}
+            {/* Mobile: show model · mode here (mockup 929). Desktop (mockup
+                1066) shows model · mode · {ctx}k ctx on the composer foot. */}
+            <div className="mono text-[11px] text-ink-muted">
+              {session ? (
+                <>
+                  {MODEL_LABEL[session.model] ?? session.model} ·{" "}
+                  {MODE_LABEL[session.mode] ?? session.mode} ·{" "}
+                  <span className="mono">
+                    {Math.round(contextWindowTokens(session.model) / 1000)}k ctx
+                  </span>
+                </>
+              ) : (
+                "—"
+              )}
             </div>
             {busy ? (
-              <button
-                type="button"
-                onClick={onStop}
-                title="Stop claude"
-                aria-label="Stop claude"
-                className="h-8 w-8 rounded-full bg-danger text-canvas flex items-center justify-center shadow-card"
-              >
-                <StopCircle className="w-4 h-4" />
-              </button>
+              <>
+                <button
+                  type="button"
+                  onClick={onStop}
+                  title="Stop claude"
+                  aria-label="Stop claude"
+                  className="md:hidden h-8 w-8 rounded-full bg-danger text-canvas flex items-center justify-center shadow-card"
+                >
+                  <StopCircle className="w-4 h-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={onStop}
+                  title="Stop claude"
+                  aria-label="Stop claude"
+                  className="hidden md:inline-flex h-8 px-3 rounded-[8px] bg-danger text-canvas text-[13px] font-medium items-center gap-1.5 shadow-card"
+                >
+                  <StopCircle className="w-4 h-4" />
+                  Stop
+                </button>
+              </>
             ) : (
-              <button
-                type="button"
-                onClick={send}
-                disabled={!text.trim() && attachments.length === 0}
-                className="h-8 w-8 rounded-full bg-klein text-canvas flex items-center justify-center shadow-card disabled:opacity-40"
-                aria-label="Send message"
-              >
-                <Send className="w-4 h-4" />
-              </button>
+              <>
+                <button
+                  type="button"
+                  onClick={send}
+                  disabled={!text.trim() && attachments.length === 0}
+                  className="md:hidden h-8 w-8 rounded-full bg-klein text-canvas flex items-center justify-center shadow-card disabled:opacity-40"
+                  aria-label="Send message"
+                >
+                  <Send className="w-4 h-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={send}
+                  disabled={!text.trim() && attachments.length === 0}
+                  className="hidden md:inline-flex h-8 px-3 rounded-[8px] bg-klein text-canvas text-[13px] font-medium items-center gap-1.5 shadow-card disabled:opacity-40"
+                  aria-label="Send message"
+                >
+                  Send
+                  <Send className="w-4 h-4" />
+                </button>
+              </>
             )}
           </div>
         </div>

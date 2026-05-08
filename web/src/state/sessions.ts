@@ -488,10 +488,23 @@ export const useSessions = create<SessionState>((set, get) => {
       // so the transcript reflects whatever the CLI added. Only act on the
       // currently-cached session to avoid surprise fetches for sessions the
       // user isn't looking at.
+      //
+      // We also fan this out as a window event so screens that aggregate
+      // across sessions (e.g. the Subagent monitor at /agents) can refresh
+      // themselves without caring which session changed.
       if (frame.type === "refresh_transcript") {
         const sid = frame.sessionId;
         if (get().transcripts[sid]) {
           void get().refetchTail(sid);
+        }
+        try {
+          window.dispatchEvent(
+            new CustomEvent("claudex:refresh_transcript", {
+              detail: { sessionId: sid },
+            }),
+          );
+        } catch {
+          // SSR / no-window: ignore.
         }
         return;
       }

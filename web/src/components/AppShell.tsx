@@ -3,6 +3,7 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import {
   Bell,
   BarChart3,
+  Bot,
   Calendar,
   ListOrdered,
   MessageSquare,
@@ -31,6 +32,7 @@ export type ShellTab =
   | "sessions"
   | "routines"
   | "queue"
+  | "agents"
   | "alerts"
   | "usage"
   | "settings";
@@ -45,20 +47,26 @@ interface NavItem {
 // "Usage" sits below Alerts and above Settings — a secondary navigation slot.
 // Mobile keeps the four-tab bar as-is (Usage is desktop-focused); see the
 // MobileTabBar below.
+//
+// "Subagents" (Bot icon) is a read-only observability feed of the SDK's
+// `Task` / `Agent` / `Explore` tool invocations — it sits between Queue and
+// Alerts so "what claude is delegating" reads next to "what's queued" and
+// "what needs me".
 const NAV: NavItem[] = [
   { id: "sessions", label: "Sessions", icon: MessageSquare, href: "/sessions" },
   { id: "routines", label: "Routines", icon: Calendar, href: "/routines" },
   { id: "queue", label: "Queue", icon: ListOrdered, href: "/queue" },
+  { id: "agents", label: "Subagents", icon: Bot, href: "/agents" },
   { id: "alerts", label: "Alerts", icon: Bell, href: "/alerts" },
   { id: "usage", label: "Usage", icon: BarChart3, href: "/usage" },
   { id: "settings", label: "Settings", icon: SettingsIcon, href: "/settings" },
 ];
 
-// Mobile tab bar keeps the original four tabs — Usage is omitted because the
-// full-screen analytics page is desktop-only. Queue is also desktop-focused
-// (long-form batch composition on a phone is awkward) — but we keep it on the
-// mobile bar because the whole point is "start a batch from your couch".
-const MOBILE_NAV = NAV.filter((n) => n.id !== "usage");
+// Mobile tab bar keeps a compact set — Usage and Subagents are desktop-focused
+// (analytics / observability surfaces where horizontal space helps a lot), so
+// they drop off the thumb-reachable bottom rail. Queue stays because the whole
+// point of Queue is "start a batch from your couch".
+const MOBILE_NAV = NAV.filter((n) => n.id !== "usage" && n.id !== "agents");
 
 export function AppShell({
   tab,

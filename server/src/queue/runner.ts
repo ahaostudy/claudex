@@ -227,6 +227,27 @@ export class QueueRunner {
       });
       return;
     }
+    // Trust gate parity with `POST /api/sessions`: a queued row whose
+    // project was subsequently untrusted must not spawn a session. Mark
+    // the row `failed` (rather than leaving it queued) so the queue keeps
+    // draining — leaving it queued would wedge every subsequent row
+    // behind it until the project is re-trusted, and `pickNextQueued`
+    // would re-pick the same row on every tick.
+    if (!project.trusted) {
+      this.deps.logger?.warn(
+        {
+          event: "queue_skipped_untrusted",
+          queueId: next.id,
+          projectId: project.id,
+          projectName: project.name,
+        },
+        "queued prompt skipped — project not trusted",
+      );
+      this.deps.queue.setStatus(next.id, "failed", {
+        finishedAt: this.nowFn().toISOString(),
+      });
+      return;
+    }
 
     const title =
       next.title && next.title.trim().length > 0 ? next.title.trim() : "Queued";

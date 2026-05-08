@@ -278,7 +278,7 @@ export function HomeScreen() {
       <header className="sticky top-0 z-10 bg-canvas/90 backdrop-blur border-b border-line px-5 py-3 flex items-center gap-3">
         <div>
           <div className="caps text-ink-muted">Sessions</div>
-          <h1 className="display text-[1.25rem] leading-tight mt-0.5">
+          <h1 className="display text-[1.25rem] md:text-[22px] leading-tight mt-0.5">
             {activeProject ? activeProject.name : "All projects"}
           </h1>
         </div>
@@ -507,13 +507,13 @@ function ProjectGroup({
     <div>
       {/* Chip rail is the first sticky at top-0 z-20 (see FilterChipRail).
           This group header sticks BELOW it: its top offset equals the
-          rail's rendered height (py-2 = 16px + h-7 button = 28px + border = 1px
-          ≈ 45px). z-10 keeps it under the rail so it slides beneath as you
-          scroll past. */}
-      <div className="sticky top-[45px] z-10 flex items-center gap-3 px-4 md:px-6 py-2 bg-paper/80 backdrop-blur border-b border-line">
+          rail's rendered height. Mobile rail is py-2 (16 + 28 h-7 + 1 border
+          ≈ 45px); desktop rail is py-3 (24 + 28 + 1 ≈ 53px). z-10 keeps it
+          under the rail so it slides beneath as you scroll past. */}
+      <div className="sticky top-[45px] md:top-[53px] z-10 flex items-center gap-3 px-4 md:px-6 py-2 bg-paper/80 backdrop-blur border-b border-line">
         <span className="display text-[15px] md:text-[16px]">{displayName}</span>
         {path && (
-          <span className="mono text-[11px] text-ink-muted truncate hidden sm:inline">
+          <span className="mono text-[11px] text-ink-muted truncate hidden md:inline">
             {path}
           </span>
         )}
@@ -579,17 +579,61 @@ function SessionRow({ session: s }: { session: Session }) {
         archived && "opacity-75",
       )}
     >
-      {/* Mobile stacked layout */}
+      {/* Mobile stacked layout — mirrors mockup s-02 rows (lines 370-403):
+          CAPS status line (dot + label + relative time) on top, title with
+          context ring aligned to its right, optional subtitle, meta row. */}
       <div className="md:hidden px-4 py-3">
         <div className="flex items-center gap-2">
           <span
             className={cn("h-2 w-2 rounded-full shrink-0", dotTone, s.status === "running" && "animate-pulse")}
             style={dotGlow ? { boxShadow: dotGlow } : undefined}
           />
-          <div className="text-[14px] font-medium truncate flex-1">
+          <span className="text-[11px] caps text-ink-muted">
+            {statusPillLabel(s.status)}
+          </span>
+          <span className="ml-auto text-[11px] text-ink-faint">{rel}</span>
+        </div>
+        <div className="mt-1 flex items-center gap-2">
+          <div className="text-[15px] font-medium leading-snug truncate flex-1 min-w-0">
             {s.title || "Untitled"}
           </div>
-          <span className="text-[11px] text-ink-muted shrink-0">{rel}</span>
+          <span className="shrink-0">
+            {showRing ? (
+              <svg width="20" height="20">
+                <circle
+                  cx="10"
+                  cy="10"
+                  r="8"
+                  fill="none"
+                  stroke="#e8e4d8"
+                  strokeWidth="2.5"
+                />
+                <circle
+                  cx="10"
+                  cy="10"
+                  r="8"
+                  fill="none"
+                  stroke="#cc785c"
+                  strokeWidth="2.5"
+                  strokeLinecap="round"
+                  strokeDasharray="50.26"
+                  strokeDashoffset={(50.26 * (1 - pct)).toString()}
+                  transform="rotate(-90 10 10)"
+                />
+              </svg>
+            ) : (
+              <svg width="20" height="20">
+                <circle
+                  cx="10"
+                  cy="10"
+                  r="8"
+                  fill="none"
+                  stroke="#e8e4d8"
+                  strokeWidth="2.5"
+                />
+              </svg>
+            )}
+          </span>
         </div>
         {hasDiffs && (
           <div className="mono text-[12px] text-ink-muted truncate mt-0.5">
@@ -622,8 +666,15 @@ function SessionRow({ session: s }: { session: Session }) {
             style={dotGlow ? { boxShadow: dotGlow } : undefined}
           />
           <div className="min-w-0">
-            <div className="text-[15px] font-medium truncate">
-              {s.title || "Untitled"}
+            <div className="flex items-center gap-2">
+              <span className="text-[15px] font-medium truncate">
+                {s.title || "Untitled"}
+              </span>
+              {s.worktreePath && (
+                <span className="text-[11px] caps text-ink-muted shrink-0">
+                  worktree
+                </span>
+              )}
             </div>
           </div>
           <div className="mono text-[12px] text-ink-soft truncate flex items-center gap-1.5">
@@ -758,7 +809,7 @@ function FilterChipRail({
   ];
 
   return (
-    <div className="sticky top-0 z-20 bg-canvas/95 backdrop-blur border-b border-line px-4 md:px-6 py-2">
+    <div className="sticky top-0 z-20 bg-canvas/95 backdrop-blur border-b border-line px-4 md:px-6 py-2 md:py-3">
       <div className="flex items-center gap-2 overflow-x-auto whitespace-nowrap -mx-1 px-1">
         {chips.map((c) => {
           const isActive = active === c.id;

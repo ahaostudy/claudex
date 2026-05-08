@@ -8,6 +8,7 @@ import { DiffReviewScreen } from "@/screens/DiffReview";
 import { SettingsScreen } from "@/screens/Settings";
 import { RoutinesScreen } from "@/screens/Routines";
 import { QueueScreen } from "@/screens/Queue";
+import { AgentsScreen } from "@/screens/Agents";
 import { AlertsScreen } from "@/screens/Alerts";
 import { UsagePage } from "@/screens/UsagePage";
 import { KeyboardHelp } from "@/components/KeyboardHelp";
@@ -57,6 +58,14 @@ export default function App() {
         element={
           <Guard>
             <QueueScreen />
+          </Guard>
+        }
+      />
+      <Route
+        path="/agents"
+        element={
+          <Guard>
+            <AgentsScreen />
           </Guard>
         }
       />

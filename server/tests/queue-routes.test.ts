@@ -645,6 +645,29 @@ describe("QueueRunner", () => {
     expect(s.sessions.list().length).toBe(countAfterFirst);
   });
 
+  it("marks a queued row failed when its project was untrusted after queueing", async () => {
+    // QA blocker: the project trust gate enforced on POST /api/sessions
+    // must also hold here — a user who trusts a project, queues a row,
+    // then revokes trust, should NOT see a session spawn on the next tick.
+    // We flip the row to `failed` (rather than leaving it queued) so the
+    // queue keeps draining; otherwise `pickNextQueued` would repick the
+    // same row every tick and wedge the whole queue behind it.
+    const s = setup();
+    const row = s.queue.create({ projectId: s.project.id, prompt: "nope" });
+
+    // Revoke trust after the prompt was queued.
+    s.projects.setTrusted(s.project.id, false);
+
+    await s.runner.tick();
+    await new Promise((r) => setImmediate(r));
+
+    const after = s.queue.findById(row.id)!;
+    expect(after.status).toBe("failed");
+    expect(after.finishedAt).toBeTruthy();
+    expect(after.sessionId).toBeNull();
+    expect(s.sessions.list()).toHaveLength(0);
+  });
+
   it("marks a row done when its session transitions to idle", async () => {
     const s = setup();
     const row = s.queue.create({ projectId: s.project.id, prompt: "x" });

@@ -1190,3 +1190,64 @@ export const ImportAllResponse = z.object({
   versionMismatch: z.boolean(),
 });
 export type ImportAllResponse = z.infer<typeof ImportAllResponse>;
+
+// ============================================================================
+// Subagent monitor
+//
+// Aggregates the SDK's subagent-family `tool_use` events (`Task`, `Agent`,
+// `Explore`) across every session into a single read-only observability feed.
+// A run is keyed on `toolUseId`: the `tool_use` event is when the parent
+// delegated to a subagent; a matching `tool_result` (JOINed in JS by
+// `toolUseId`) carries its final output and the terminal status. Missing
+// match → still `running`.
+//
+// Scope note: today we only recognize the SDK's built-in subagent tool names
+// (see `SUBAGENT_TOOL_NAMES` in `server/src/agents/routes.ts`). User-defined
+// prompt-template subagents would need to be added to that list — the wire
+// schema does not need to change.
+// ============================================================================
+
+export const SubagentRunStatus = z.enum(["running", "done", "failed"]);
+export type SubagentRunStatus = z.infer<typeof SubagentRunStatus>;
+
+export const SubagentSummary = z.object({
+  /** Primary key — the `tool_use.toolUseId` that launched this subagent run. */
+  id: z.string(),
+  sessionId: z.string(),
+  sessionTitle: z.string(),
+  projectName: z.string().nullable(),
+  /** Recognized subagent tool name (`Task` / `Agent` / `Explore` / other). */
+  toolName: z.string(),
+  /** Short human-readable label derived from the tool_use input payload. */
+  description: z.string(),
+  /** Seq of the `tool_use` event in its session — lets the UI deep-link via
+   * `/session/:id#seq-<seq>`. */
+  seq: z.number().int().nonnegative(),
+  startedAt: z.string(),
+  finishedAt: z.string().nullable(),
+  /** finishedAt − startedAt in ms; null while still running. */
+  durationMs: z.number().int().nonnegative().nullable(),
+  status: SubagentRunStatus,
+  isError: z.boolean(),
+  /** First 200 chars of the matching `tool_result.content`; null while still
+   * running (or when the content was non-text). */
+  resultPreview: z.string().nullable(),
+});
+export type SubagentSummary = z.infer<typeof SubagentSummary>;
+
+export const SubagentStats = z.object({
+  activeCount: z.number().int().nonnegative(),
+  completedToday: z.number().int().nonnegative(),
+  /** Mean duration of completed (done + failed) runs today; null when zero
+   * completed. */
+  avgDurationMs: z.number().int().nonnegative().nullable(),
+  /** `failed_today / (failed_today + done_today)`; null when zero completed. */
+  failureRate: z.number().min(0).max(1).nullable(),
+});
+export type SubagentStats = z.infer<typeof SubagentStats>;
+
+export const ListSubagentsResponse = z.object({
+  items: z.array(SubagentSummary),
+  stats: SubagentStats,
+});
+export type ListSubagentsResponse = z.infer<typeof ListSubagentsResponse>;

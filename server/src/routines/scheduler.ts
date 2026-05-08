@@ -171,6 +171,36 @@ export class RoutineScheduler {
       );
       return null;
     }
+    // Trust gate parity with `POST /api/sessions`: a routine whose project
+    // was subsequently untrusted must not spawn a session. We advance the
+    // schedule so the routine doesn't re-fire immediately on every tick —
+    // if the user re-trusts the project, the next scheduled slot will run
+    // normally. (If we left next_run_at in the past, `reload()` would loop
+    // rolling it forward every tick — same end state, noisier logs.)
+    if (!project.trusted) {
+      this.deps.logger?.warn(
+        {
+          event: "routine_skipped_untrusted",
+          routineId: routine.id,
+          routineName: routine.name,
+          projectId: project.id,
+          projectName: project.name,
+          detail: `${routine.name} → ${project.name}`,
+        },
+        "routine fire skipped — project not trusted",
+      );
+      const now = this.nowFn();
+      let next: string | null = null;
+      try {
+        const nextDate = computeNextRun(routine.cronExpr, now);
+        next = nextDate ? nextDate.toISOString() : null;
+      } catch {
+        next = null;
+      }
+      // Do not set lastRunAt — the routine didn't actually run.
+      this.deps.routines.setSchedule(routine.id, next);
+      return null;
+    }
     const now = this.nowFn();
     const title = `${routine.name} · ${now.toISOString()}`;
     const session = this.deps.sessions.create({

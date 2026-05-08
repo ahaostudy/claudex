@@ -121,13 +121,6 @@ async function main() {
     totpSecret,
   });
 
-  // Seed the 10 one-time recovery codes at setup so a user who loses their
-  // authenticator on day one isn't locked out. The server only stores
-  // hashes — what we print below is the ONLY chance to capture them.
-  const recoveryCodes = generateRecoveryCodes(RECOVERY_CODE_BATCH_SIZE);
-  const recoveryHashes = await hashRecoveryCodes(recoveryCodes);
-  users.setRecoveryCodeHashes(user.id, recoveryHashes);
-
   output.write(`\nScan this QR code with your authenticator app:\n\n`);
   output.write(qr);
   output.write(`\nOr enter this secret manually: ${totpSecret}\n`);
@@ -135,9 +128,23 @@ async function main() {
   output.write(`\n✓ Admin user "${inputs.username}" created.\n`);
   output.write(`  State directory: ${config.stateDir}\n`);
   output.write(`  DB: ${config.dbPath}\n`);
+
+  // Recovery codes: generate-then-print-then-persist. The old order (persist
+  // before print) meant a Ctrl-C between the two would leave the user with a
+  // working 2FA whose recovery codes they never saw. We now only write the
+  // hashes after the user has had a chance to copy the plaintext — and in the
+  // interactive path, after they've pressed Enter to confirm.
+  //
+  // Trade-off on Ctrl-C: if the user aborts the confirmation prompt, TOTP
+  // setup is already complete (user row + totp_secret persisted above) but
+  // the recovery-code hashes are NOT written. They can log in, and can mint a
+  // fresh batch later from Settings → Security via the Regenerate flow (or
+  // re-run `pnpm reset-credentials` + `claudex init` semantics in the
+  // future). We accept that over the current silent footgun.
+  const recoveryCodes = generateRecoveryCodes(RECOVERY_CODE_BATCH_SIZE);
   output.write(
-    `\nRecovery codes — save these somewhere safe. Each one works ONCE if you\n` +
-      `lose your authenticator app. They are NOT shown again.\n\n`,
+    `\n⚠ Save these recovery codes — shown once, never again.\n` +
+      `  Each one works ONCE if you lose your authenticator app.\n\n`,
   );
   for (const code of recoveryCodes) {
     output.write(`  ${code}\n`);
@@ -146,8 +153,70 @@ async function main() {
     `\nYou can regenerate these later from Settings → Security (this invalidates\n` +
       `the current batch).\n`,
   );
+
+  // Force-flush before we block on the prompt (or bail in the non-interactive
+  // path) so the codes actually hit the terminal/pipe even if stdout is
+  // buffered.
+  await flushStdout();
+
+  // Decide whether to prompt. We only prompt when BOTH stdin is a TTY (we can
+  // actually read a keypress) AND we were running interactively to begin with
+  // (no env-var / flag overrides). In the non-interactive path we print and
+  // immediately persist — the operator has no way to press Enter anyway, and
+  // the caller (automation, tests) expects the run to finish without input.
+  const nonInteractive =
+    !!(process.env.CLAUDEX_INIT_USERNAME || process.env.CLAUDEX_INIT_PASSWORD) ||
+    process.argv.slice(2).some((a) => a.startsWith("--username=") || a.startsWith("--password="));
+  const canPrompt = process.stdin.isTTY && process.stdout.isTTY && !nonInteractive;
+
+  if (canPrompt) {
+    const rl = readline.createInterface({ input, output });
+    // Ctrl-C during readline raises SIGINT which, left to default, kills the
+    // process with exit(130) before we touch the DB. That's exactly the
+    // desired "abort without persisting" behavior — we just want to emit a
+    // clean-ish line first so the terminal doesn't stop mid-sentence.
+    const onSigint = () => {
+      output.write(
+        `\n\nAborted before recovery codes were persisted. TOTP setup is complete;\n` +
+          `log in and regenerate recovery codes from Settings → Security when ready.\n`,
+      );
+      close();
+      process.exit(130);
+    };
+    process.once("SIGINT", onSigint);
+    try {
+      await rl.question(
+        `\nPress Enter once you've saved the codes above to finish setup...`,
+      );
+    } finally {
+      process.removeListener("SIGINT", onSigint);
+      rl.close();
+    }
+  }
+
+  // Only now do we hash and persist. A failure here (disk full, DB locked,
+  // etc.) is surfaced to the user — we do NOT swallow it, because the
+  // alternative is a TOTP-only account with no recovery path and no warning.
+  const recoveryHashes = await hashRecoveryCodes(recoveryCodes);
+  users.setRecoveryCodeHashes(user.id, recoveryHashes);
+
   output.write(`\nNext: run \`pnpm dev\` and visit http://127.0.0.1:5173/.\n`);
   close();
+}
+
+/**
+ * Wait for stdout's kernel buffer to drain. Matters when stdout is a pipe
+ * (e.g. `claudex init | tee setup.log`) — without this the process can exit
+ * before the recovery codes are actually delivered downstream.
+ */
+function flushStdout(): Promise<void> {
+  return new Promise((resolve) => {
+    if (output.writableNeedDrain) {
+      output.once("drain", () => resolve());
+    } else {
+      resolve();
+    }
+  });
 }
 
 main().catch((err) => {
