@@ -103,7 +103,12 @@ export function TerminalDrawer({
       fontSize: 13,
       lineHeight: 1.25,
       cursorBlink: true,
-      convertEol: true,
+      // convertEol MUST be false for PTY-backed terminals: node-pty already
+      // emits CRLF, and vim's alt-screen cursor sequences can contain bare
+      // \n that this flag would rewrite to \r\n, injecting phantom carriage
+      // returns that corrupt the redraw — symptom is "vim looks frozen"
+      // even though input is flowing.
+      convertEol: false,
       // Desktop-only improvement: let Option-x on macOS emit Meta-x so vim
       // M-combos work. Harmless on mobile (no Option key).
       macOptionIsMeta: true,
