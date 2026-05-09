@@ -2141,9 +2141,11 @@ function PermissionCard({
         </div>
       </div>
 
-      {/* Desktop — modal-card shape */}
+      {/* Desktop — modal-card shape. Left-aligned (no mx-auto) so the
+          card sits in the transcript column next to the other pieces
+          instead of pulling the reader's eye to the viewport center. */}
       <div
-        className="hidden md:block w-[560px] max-w-full mx-auto rounded-[14px] bg-canvas border border-line shadow-lift overflow-hidden"
+        className="hidden md:block w-[560px] max-w-full rounded-[14px] bg-canvas border border-line shadow-lift overflow-hidden"
         ref={cardRef}
         tabIndex={-1}
       >

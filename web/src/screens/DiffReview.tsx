@@ -193,8 +193,10 @@ export function DiffReviewScreen() {
 
       {/* Desktop + mobile grid. The `md:grid` activation kicks in at the
           desktop breakpoint; on mobile we let the center panel flow full
-          width. */}
-      <div className="flex-1 min-w-0 flex md:grid md:grid-cols-[260px_minmax(0,1fr)_320px]">
+          width. `min-h-0` + `h-full` keep the grid bounded to the 100dvh
+          parent so the inner `overflow-y-auto` actually scrolls instead
+          of growing the page. */}
+      <div className="flex-1 min-w-0 min-h-0 h-full flex md:grid md:grid-cols-[260px_minmax(0,1fr)_320px]">
         {/* Left rail — files. Desktop only. */}
         <aside className="hidden md:flex flex-col border-r border-line bg-paper/40 overflow-hidden">
           <div className="px-4 py-3 border-b border-line flex items-center shrink-0">
@@ -229,8 +231,10 @@ export function DiffReviewScreen() {
           </div>
         </aside>
 
-        {/* Center — selected diff. */}
-        <section className="flex flex-col min-w-0 pt-[52px] md:pt-0">
+        {/* Center — selected diff. `min-h-0` is required here so the
+            inner `overflow-y-auto` actually scrolls; without it the flex
+            column grows to its content and the scroll leaks to the page. */}
+        <section className="flex flex-col min-w-0 min-h-0 flex-1 pt-[52px] md:pt-0">
           {/* Sticky header with path / counts / per-file actions. */}
           {selected && (
             <div className="sticky top-0 z-10 bg-canvas border-b border-line px-4 md:px-5 py-3 flex items-center gap-3">
