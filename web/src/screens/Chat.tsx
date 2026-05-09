@@ -1522,15 +1522,15 @@ function ToolPayloadPane({
   return (
     <div
       className={cn(
-        "w-full max-w-[min(80ch,100%)] rounded-[10px] border bg-ink/95",
-        isError ? "border-danger/40" : "border-ink-soft/40",
+        "w-full max-w-[min(80ch,100%)] rounded-[10px] border bg-paper/70",
+        isError ? "border-danger/40" : "border-line",
       )}
     >
       <div className="flex items-center gap-2 px-3 pt-2 pb-1">
         <span
           className={cn(
             "caps text-[10px] tracking-wider",
-            isError ? "text-danger" : "text-canvas/55",
+            isError ? "text-danger" : "text-ink-muted",
           )}
         >
           {isError && label === "output" ? (
@@ -1543,14 +1543,14 @@ function ToolPayloadPane({
         <button
           type="button"
           onClick={onCopy}
-          className="ml-auto inline-flex items-center gap-1 px-1.5 h-5 rounded-[4px] border border-canvas/15 bg-ink-soft/60 mono text-[10px] text-canvas/70 hover:bg-ink-soft"
+          className="ml-auto inline-flex items-center gap-1 px-1.5 h-5 rounded-[4px] border border-line bg-canvas mono text-[10px] text-ink-soft hover:bg-paper"
           title={`Copy ${label}`}
         >
           <Copy className="w-2.5 h-2.5" aria-hidden />
           copy
         </button>
       </div>
-      <pre className="mono text-[12px] leading-[1.55] text-canvas/90 px-3 pb-3 pt-0.5 max-h-[320px] overflow-auto whitespace-pre-wrap [overflow-wrap:anywhere] break-words dark-scroll">
+      <pre className="mono text-[12px] leading-[1.55] text-ink-soft px-3 pb-3 pt-0.5 max-h-[320px] overflow-auto whitespace-pre-wrap [overflow-wrap:anywhere] break-words">
         {text}
       </pre>
     </div>
