@@ -27,11 +27,17 @@ export function ChatSessionsRail({ currentId }: { currentId: string }) {
   return (
     <aside className="hidden md:flex border-r border-line bg-paper/40 flex-col w-[220px] shrink-0">
       <div className="p-4 flex items-center gap-2">
-        <svg viewBox="0 0 32 32" className="w-5 h-5">
-          <path d="M9 22 L16 8 L23 22 Z" fill="#cc785c" />
-          <circle cx="16" cy="18" r="2.2" fill="#faf9f5" />
-        </svg>
-        <span className="mono text-[13px]">claudex</span>
+        <Link
+          to="/sessions"
+          aria-label="Go to sessions"
+          className="flex items-center gap-2 flex-1 min-w-0 -mx-1 px-1 py-0.5 rounded-[6px] hover:bg-canvas/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-klein/40"
+        >
+          <svg viewBox="0 0 32 32" className="w-5 h-5">
+            <path d="M9 22 L16 8 L23 22 Z" fill="#cc785c" />
+            <circle cx="16" cy="18" r="2.2" fill="#faf9f5" />
+          </svg>
+          <span className="mono text-[13px]">claudex</span>
+        </Link>
         <span className="ml-auto mono text-[11px] text-ink-muted">
           {visible.length}
         </span>

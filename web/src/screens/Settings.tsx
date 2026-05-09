@@ -7,6 +7,7 @@ import {
   Copy,
   Download,
   FolderOpen,
+  Info,
   KeyRound,
   Palette,
   Plug,
@@ -228,6 +229,22 @@ export function SettingsScreen() {
                   </button>
                 );
               })}
+              {/* "About" lives at the bottom of the rail but is a separate
+                  route (`/about`), not a Tab. It's a neighbour of Settings
+                  rather than a subtab — navigating instead of flipping the
+                  tab param avoids polluting the Tab union with something
+                  that doesn't share the rail's content-area contract. */}
+              <button
+                type="button"
+                onClick={() => navigate("/about")}
+                className={cn(
+                  "w-full text-left flex items-center gap-2 px-2.5 h-8 rounded-[6px]",
+                  "hover:bg-canvas/60 border border-transparent text-ink-soft",
+                )}
+              >
+                <Info className="w-3.5 h-3.5" />
+                About
+              </button>
             </nav>
           </aside>
 
@@ -252,6 +269,18 @@ export function SettingsScreen() {
                 </button>
               );
             })}
+            {/* "About" navigates to `/about` rather than flipping the tab. */}
+            <button
+              type="button"
+              onClick={() => navigate("/about")}
+              className={cn(
+                "shrink-0 inline-flex items-center gap-1.5 px-2.5 h-7 rounded-full text-[12px] border",
+                "bg-canvas text-ink-soft border-line",
+              )}
+            >
+              <Info className="w-3.5 h-3.5" />
+              About
+            </button>
           </nav>
 
           <section className="min-w-0 p-5 sm:p-8 pb-24 md:pb-10">

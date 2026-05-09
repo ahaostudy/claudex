@@ -1315,3 +1315,24 @@ export const EditLastUserMessageRequest = z.object({ text: z.string().min(1) });
 export type EditLastUserMessageRequest = z.infer<
   typeof EditLastUserMessageRequest
 >;
+
+// ============================================================================
+// Meta / About
+//
+// Response for `GET /api/meta` — powers the `/about` screen. Static info
+// (version, commit, buildTime, platform) is sampled once at server boot;
+// `uptimeSec` is live per request. `commit`/`commitShort` are null when the
+// server wasn't launched from a git checkout (Docker image, archive extract).
+// ============================================================================
+
+export const MetaResponse = z.object({
+  version: z.string(),
+  commit: z.string().nullable(),
+  commitShort: z.string().nullable(),
+  buildTime: z.string(),
+  nodeVersion: z.string(),
+  sqliteVersion: z.string(),
+  platform: z.string(),
+  uptimeSec: z.number().nonnegative(),
+});
+export type MetaResponse = z.infer<typeof MetaResponse>;

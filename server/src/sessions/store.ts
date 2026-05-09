@@ -1,4 +1,5 @@
 import type Database from "better-sqlite3";
+import type { Statement } from "better-sqlite3";
 import { nanoid } from "nanoid";
 import type {
   EventKind,
@@ -96,8 +97,80 @@ export class SessionStore {
   // never block the primary write that caused it.
   private readonly search: SearchStore;
 
+  // Prepared-statement cache. Populated lazily on first use of each method
+  // so we don't pay the prepare() cost on every call to the hottest write
+  // paths (appendEvent, nextSeq, touchLastMessage, setStatus). Methods
+  // whose SQL is assembled from runtime-variable WHERE clauses (e.g.
+  // listEvents' pagination forms) are left uncached.
+  private readonly stmts: {
+    listAll: Statement | null;
+    listByProject: Statement | null;
+    listChildren: Statement | null;
+    findById: Statement | null;
+    findBySdkSessionId: Statement | null;
+    create: Statement | null;
+    setStatus: Statement | null;
+    setTitle: Statement | null;
+    setModel: Statement | null;
+    setMode: Statement | null;
+    setTags: Statement | null;
+    setSdkSessionId: Statement | null;
+    touchLastMessage: Statement | null;
+    forkMaxSeq: Statement | null;
+    forkSelectEvents: Statement | null;
+    archive: Statement | null;
+    deleteById: Statement | null;
+    bumpStats: Statement | null;
+    nextSeq: Statement | null;
+    appendEvent: Statement | null;
+    countEvents: Statement | null;
+    oldestEventSeq: Statement | null;
+    getCliJsonlSeq: Statement | null;
+    setCliJsonlSeq: Statement | null;
+    findLastEventByKind: Statement | null;
+    deleteEventsAboveSeq: Statement | null;
+    updateEventPayload: Statement | null;
+    selectEventKind: Statement | null;
+  } = {
+    listAll: null,
+    listByProject: null,
+    listChildren: null,
+    findById: null,
+    findBySdkSessionId: null,
+    create: null,
+    setStatus: null,
+    setTitle: null,
+    setModel: null,
+    setMode: null,
+    setTags: null,
+    setSdkSessionId: null,
+    touchLastMessage: null,
+    forkMaxSeq: null,
+    forkSelectEvents: null,
+    archive: null,
+    deleteById: null,
+    bumpStats: null,
+    nextSeq: null,
+    appendEvent: null,
+    countEvents: null,
+    oldestEventSeq: null,
+    getCliJsonlSeq: null,
+    setCliJsonlSeq: null,
+    findLastEventByKind: null,
+    deleteEventsAboveSeq: null,
+    updateEventPayload: null,
+    selectEventKind: null,
+  };
+
   constructor(private readonly db: Database.Database) {
     this.search = new SearchStore(db);
+  }
+
+  private lazyStmt<K extends keyof SessionStore["stmts"]>(
+    key: K,
+    sql: string,
+  ): Statement {
+    return (this.stmts[key] ??= this.db.prepare(sql));
   }
 
   // ---- sessions ----------------------------------------------------------
@@ -107,47 +180,45 @@ export class SessionStore {
   // when something (the settings sheet, a debug view) explicitly wants
   // them.
   list(opts?: { includeArchived?: boolean; includeSideChats?: boolean }): Session[] {
-    const rows = this.db
-      .prepare(
-        `SELECT * FROM sessions
+    const rows = this.lazyStmt(
+      "listAll",
+      `SELECT * FROM sessions
          WHERE (? = 1 OR archived_at IS NULL)
            AND (? = 1 OR parent_session_id IS NULL)
          ORDER BY updated_at DESC`,
-      )
-      .all(
-        opts?.includeArchived ? 1 : 0,
-        opts?.includeSideChats ? 1 : 0,
-      ) as SessionRow[];
+    ).all(
+      opts?.includeArchived ? 1 : 0,
+      opts?.includeSideChats ? 1 : 0,
+    ) as SessionRow[];
     return rows.map(toSession);
   }
 
   listByProject(projectId: string): Session[] {
-    const rows = this.db
-      .prepare(
-        `SELECT * FROM sessions
+    const rows = this.lazyStmt(
+      "listByProject",
+      `SELECT * FROM sessions
          WHERE project_id = ? AND parent_session_id IS NULL
          ORDER BY updated_at DESC`,
-      )
-      .all(projectId) as SessionRow[];
+    ).all(projectId) as SessionRow[];
     return rows.map(toSession);
   }
 
   /** List every side chat whose parent is `parentId`, newest first. */
   listChildren(parentId: string): Session[] {
-    const rows = this.db
-      .prepare(
-        `SELECT * FROM sessions
+    const rows = this.lazyStmt(
+      "listChildren",
+      `SELECT * FROM sessions
          WHERE parent_session_id = ?
          ORDER BY created_at DESC`,
-      )
-      .all(parentId) as SessionRow[];
+    ).all(parentId) as SessionRow[];
     return rows.map(toSession);
   }
 
   findById(id: string): Session | null {
-    const row = this.db
-      .prepare("SELECT * FROM sessions WHERE id = ?")
-      .get(id) as SessionRow | undefined;
+    const row = this.lazyStmt(
+      "findById",
+      "SELECT * FROM sessions WHERE id = ?",
+    ).get(id) as SessionRow | undefined;
     return row ? toSession(row) : null;
   }
 
@@ -157,9 +228,10 @@ export class SessionStore {
    * already adopted should return the existing row rather than duplicate it.
    */
   findBySdkSessionId(sdkSessionId: string): Session | null {
-    const row = this.db
-      .prepare("SELECT * FROM sessions WHERE sdk_session_id = ?")
-      .get(sdkSessionId) as SessionRow | undefined;
+    const row = this.lazyStmt(
+      "findBySdkSessionId",
+      "SELECT * FROM sessions WHERE sdk_session_id = ?",
+    ).get(sdkSessionId) as SessionRow | undefined;
     return row ? toSession(row) : null;
   }
 
@@ -189,9 +261,9 @@ export class SessionStore {
       cli_jsonl_seq: 0,
       tags: "[]",
     };
-    this.db
-      .prepare(
-        `INSERT INTO sessions (
+    this.lazyStmt(
+      "create",
+      `INSERT INTO sessions (
            id, title, project_id, branch, worktree_path, status, model, mode,
            created_at, updated_at, last_message_at, archived_at, sdk_session_id,
            parent_session_id, forked_from_session_id,
@@ -206,35 +278,38 @@ export class SessionStore {
            @stats_lines_removed, @stats_context_pct,
            @cli_jsonl_seq, @tags
          )`,
-      )
-      .run(row);
+    ).run(row);
     this.search.upsertTitle(row.id, row.title);
     return toSession(row);
   }
 
   setStatus(id: string, status: SessionStatus): void {
-    this.db
-      .prepare("UPDATE sessions SET status = ?, updated_at = ? WHERE id = ?")
-      .run(status, new Date().toISOString(), id);
+    this.lazyStmt(
+      "setStatus",
+      "UPDATE sessions SET status = ?, updated_at = ? WHERE id = ?",
+    ).run(status, new Date().toISOString(), id);
   }
 
   setTitle(id: string, title: string): void {
-    this.db
-      .prepare("UPDATE sessions SET title = ?, updated_at = ? WHERE id = ?")
-      .run(title, new Date().toISOString(), id);
+    this.lazyStmt(
+      "setTitle",
+      "UPDATE sessions SET title = ?, updated_at = ? WHERE id = ?",
+    ).run(title, new Date().toISOString(), id);
     this.search.upsertTitle(id, title);
   }
 
   setModel(id: string, model: ModelId): void {
-    this.db
-      .prepare("UPDATE sessions SET model = ?, updated_at = ? WHERE id = ?")
-      .run(model, new Date().toISOString(), id);
+    this.lazyStmt(
+      "setModel",
+      "UPDATE sessions SET model = ?, updated_at = ? WHERE id = ?",
+    ).run(model, new Date().toISOString(), id);
   }
 
   setMode(id: string, mode: PermissionMode): void {
-    this.db
-      .prepare("UPDATE sessions SET mode = ?, updated_at = ? WHERE id = ?")
-      .run(mode, new Date().toISOString(), id);
+    this.lazyStmt(
+      "setMode",
+      "UPDATE sessions SET mode = ?, updated_at = ? WHERE id = ?",
+    ).run(mode, new Date().toISOString(), id);
   }
 
   /**
@@ -253,9 +328,10 @@ export class SessionStore {
       seen.add(t);
       deduped.push(t);
     }
-    this.db
-      .prepare("UPDATE sessions SET tags = ?, updated_at = ? WHERE id = ?")
-      .run(JSON.stringify(deduped), new Date().toISOString(), id);
+    this.lazyStmt(
+      "setTags",
+      "UPDATE sessions SET tags = ?, updated_at = ? WHERE id = ?",
+    ).run(JSON.stringify(deduped), new Date().toISOString(), id);
   }
 
   /**
@@ -265,23 +341,21 @@ export class SessionStore {
    * Returns true if the write happened, false if the row already had one.
    */
   setSdkSessionId(id: string, sdkSessionId: string): boolean {
-    const res = this.db
-      .prepare(
-        `UPDATE sessions
+    const res = this.lazyStmt(
+      "setSdkSessionId",
+      `UPDATE sessions
          SET sdk_session_id = ?, updated_at = ?
          WHERE id = ? AND sdk_session_id IS NULL`,
-      )
-      .run(sdkSessionId, new Date().toISOString(), id);
+    ).run(sdkSessionId, new Date().toISOString(), id);
     return res.changes > 0;
   }
 
   touchLastMessage(id: string): void {
     const now = new Date().toISOString();
-    this.db
-      .prepare(
-        "UPDATE sessions SET last_message_at = ?, updated_at = ? WHERE id = ?",
-      )
-      .run(now, now, id);
+    this.lazyStmt(
+      "touchLastMessage",
+      "UPDATE sessions SET last_message_at = ?, updated_at = ? WHERE id = ?",
+    ).run(now, now, id);
   }
 
   /**
@@ -316,11 +390,10 @@ export class SessionStore {
     // INSERT-SELECT below copies nothing (the fork starts empty).
     let cutoff: number;
     if (upToSeq === undefined) {
-      const row = this.db
-        .prepare(
-          "SELECT COALESCE(MAX(seq), -1) AS s FROM session_events WHERE session_id = ?",
-        )
-        .get(sourceId) as { s: number };
+      const row = this.lazyStmt(
+        "forkMaxSeq",
+        "SELECT COALESCE(MAX(seq), -1) AS s FROM session_events WHERE session_id = ?",
+      ).get(sourceId) as { s: number };
       cutoff = row.s;
     } else {
       cutoff = upToSeq;
@@ -353,19 +426,19 @@ export class SessionStore {
       // Copy every event with seq <= cutoff, rewriting seq to 1..N in order.
       // We stream rows rather than doing a single INSERT-SELECT because we
       // need to mint fresh event ids and the seq rewrite is easier in JS.
-      const rows = this.db
-        .prepare(
-          `SELECT kind, seq, created_at, payload FROM session_events
+      const rows = this.lazyStmt(
+        "forkSelectEvents",
+        `SELECT kind, seq, created_at, payload FROM session_events
            WHERE session_id = ? AND seq <= ?
            ORDER BY seq ASC`,
-        )
-        .all(sourceId, cutoff) as Array<{
+      ).all(sourceId, cutoff) as Array<{
         kind: string;
         seq: number;
         created_at: string;
         payload: string;
       }>;
-      const insert = this.db.prepare(
+      const insert = this.lazyStmt(
+        "appendEvent",
         `INSERT INTO session_events (id, session_id, kind, seq, created_at, payload)
          VALUES (?, ?, ?, ?, ?, ?)`,
       );
@@ -402,11 +475,10 @@ export class SessionStore {
 
   archive(id: string): void {
     const now = new Date().toISOString();
-    this.db
-      .prepare(
-        "UPDATE sessions SET archived_at = ?, status = 'archived', updated_at = ? WHERE id = ?",
-      )
-      .run(now, now, id);
+    this.lazyStmt(
+      "archive",
+      "UPDATE sessions SET archived_at = ?, status = 'archived', updated_at = ? WHERE id = ?",
+    ).run(now, now, id);
   }
 
   /**
@@ -421,7 +493,10 @@ export class SessionStore {
     // us), we'd rather re-index on the next backfill than leave stale
     // rows that point to a live session.
     this.search.deleteSession(id);
-    const res = this.db.prepare("DELETE FROM sessions WHERE id = ?").run(id);
+    const res = this.lazyStmt(
+      "deleteById",
+      "DELETE FROM sessions WHERE id = ?",
+    ).run(id);
     return res.changes > 0;
   }
 
@@ -429,9 +504,9 @@ export class SessionStore {
     id: string,
     delta: Partial<Session["stats"]>,
   ): void {
-    this.db
-      .prepare(
-        `UPDATE sessions SET
+    this.lazyStmt(
+      "bumpStats",
+      `UPDATE sessions SET
            stats_messages = stats_messages + ?,
            stats_files_changed = stats_files_changed + ?,
            stats_lines_added = stats_lines_added + ?,
@@ -439,26 +514,24 @@ export class SessionStore {
            stats_context_pct = COALESCE(?, stats_context_pct),
            updated_at = ?
          WHERE id = ?`,
-      )
-      .run(
-        delta.messages ?? 0,
-        delta.filesChanged ?? 0,
-        delta.linesAdded ?? 0,
-        delta.linesRemoved ?? 0,
-        delta.contextPct ?? null,
-        new Date().toISOString(),
-        id,
-      );
+    ).run(
+      delta.messages ?? 0,
+      delta.filesChanged ?? 0,
+      delta.linesAdded ?? 0,
+      delta.linesRemoved ?? 0,
+      delta.contextPct ?? null,
+      new Date().toISOString(),
+      id,
+    );
   }
 
   // ---- events ------------------------------------------------------------
 
   nextSeq(sessionId: string): number {
-    const row = this.db
-      .prepare(
-        "SELECT COALESCE(MAX(seq) + 1, 0) AS next FROM session_events WHERE session_id = ?",
-      )
-      .get(sessionId) as { next: number };
+    const row = this.lazyStmt(
+      "nextSeq",
+      "SELECT COALESCE(MAX(seq) + 1, 0) AS next FROM session_events WHERE session_id = ?",
+    ).get(sessionId) as { next: number };
     return row.next;
   }
 
@@ -476,19 +549,18 @@ export class SessionStore {
       createdAt: new Date().toISOString(),
       payload: input.payload,
     };
-    this.db
-      .prepare(
-        `INSERT INTO session_events (id, session_id, kind, seq, created_at, payload)
+    this.lazyStmt(
+      "appendEvent",
+      `INSERT INTO session_events (id, session_id, kind, seq, created_at, payload)
          VALUES (?, ?, ?, ?, ?, ?)`,
-      )
-      .run(
-        event.id,
-        event.sessionId,
-        event.kind,
-        event.seq,
-        event.createdAt,
-        JSON.stringify(event.payload),
-      );
+    ).run(
+      event.id,
+      event.sessionId,
+      event.kind,
+      event.seq,
+      event.createdAt,
+      JSON.stringify(event.payload),
+    );
     // Keep the full-text search index in sync for text-bearing events.
     // SearchStore.indexMessage is a no-op for other kinds / empty text.
     this.search.indexMessage({
@@ -585,9 +657,10 @@ export class SessionStore {
    * resync path to decide whether a JSONL has grown since last import.
    */
   countEvents(sessionId: string): number {
-    const row = this.db
-      .prepare("SELECT COUNT(*) AS c FROM session_events WHERE session_id = ?")
-      .get(sessionId) as { c: number };
+    const row = this.lazyStmt(
+      "countEvents",
+      "SELECT COUNT(*) AS c FROM session_events WHERE session_id = ?",
+    ).get(sessionId) as { c: number };
     return row.c;
   }
 
@@ -597,26 +670,27 @@ export class SessionStore {
    * history exists to page through.
    */
   oldestEventSeq(sessionId: string): number | null {
-    const row = this.db
-      .prepare(
-        "SELECT MIN(seq) AS s FROM session_events WHERE session_id = ?",
-      )
-      .get(sessionId) as { s: number | null };
+    const row = this.lazyStmt(
+      "oldestEventSeq",
+      "SELECT MIN(seq) AS s FROM session_events WHERE session_id = ?",
+    ).get(sessionId) as { s: number | null };
     return row.s;
   }
 
   /** Last JSONL line index imported for this session's adopted CLI transcript. */
   getCliJsonlSeq(id: string): number {
-    const row = this.db
-      .prepare("SELECT cli_jsonl_seq FROM sessions WHERE id = ?")
-      .get(id) as { cli_jsonl_seq: number } | undefined;
+    const row = this.lazyStmt(
+      "getCliJsonlSeq",
+      "SELECT cli_jsonl_seq FROM sessions WHERE id = ?",
+    ).get(id) as { cli_jsonl_seq: number } | undefined;
     return row?.cli_jsonl_seq ?? 0;
   }
 
   setCliJsonlSeq(id: string, seq: number): void {
-    this.db
-      .prepare("UPDATE sessions SET cli_jsonl_seq = ? WHERE id = ?")
-      .run(seq, id);
+    this.lazyStmt(
+      "setCliJsonlSeq",
+      "UPDATE sessions SET cli_jsonl_seq = ? WHERE id = ?",
+    ).run(seq, id);
   }
 
   /**
@@ -629,14 +703,13 @@ export class SessionStore {
     sessionId: string,
     kind: EventKind,
   ): SessionEvent | null {
-    const row = this.db
-      .prepare(
-        `SELECT id, session_id, kind, seq, created_at, payload
+    const row = this.lazyStmt(
+      "findLastEventByKind",
+      `SELECT id, session_id, kind, seq, created_at, payload
          FROM session_events
          WHERE session_id = ? AND kind = ?
          ORDER BY seq DESC LIMIT 1`,
-      )
-      .get(sessionId, kind) as
+    ).get(sessionId, kind) as
       | {
           id: string;
           session_id: string;
@@ -664,11 +737,10 @@ export class SessionStore {
     // Clear FTS first so a SQL failure on the events delete doesn't leave
     // orphaned search rows pointing at events we're about to drop.
     this.search.deleteEventsAbove(sessionId, cutoffSeq);
-    const res = this.db
-      .prepare(
-        "DELETE FROM session_events WHERE session_id = ? AND seq > ?",
-      )
-      .run(sessionId, cutoffSeq);
+    const res = this.lazyStmt(
+      "deleteEventsAboveSeq",
+      "DELETE FROM session_events WHERE session_id = ? AND seq > ?",
+    ).run(sessionId, cutoffSeq);
     return res.changes ?? 0;
   }
 
@@ -685,17 +757,15 @@ export class SessionStore {
     seq: number,
     payload: Record<string, unknown>,
   ): boolean {
-    const res = this.db
-      .prepare(
-        "UPDATE session_events SET payload = ? WHERE session_id = ? AND seq = ?",
-      )
-      .run(JSON.stringify(payload), sessionId, seq);
+    const res = this.lazyStmt(
+      "updateEventPayload",
+      "UPDATE session_events SET payload = ? WHERE session_id = ? AND seq = ?",
+    ).run(JSON.stringify(payload), sessionId, seq);
     if ((res.changes ?? 0) === 0) return false;
-    const row = this.db
-      .prepare(
-        "SELECT kind FROM session_events WHERE session_id = ? AND seq = ?",
-      )
-      .get(sessionId, seq) as { kind: string } | undefined;
+    const row = this.lazyStmt(
+      "selectEventKind",
+      "SELECT kind FROM session_events WHERE session_id = ? AND seq = ?",
+    ).get(sessionId, seq) as { kind: string } | undefined;
     if (row) {
       this.search.reindexMessage({
         sessionId,

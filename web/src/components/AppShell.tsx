@@ -172,13 +172,17 @@ function DesktopSidebar({ tab, alertCount }: { tab: ShellTab; alertCount: number
 
   return (
     <aside className="hidden md:flex border-r border-line bg-paper/40 w-[260px] flex-col shrink-0">
-      <div className="p-4 flex items-center gap-2">
+      <Link
+        to="/sessions"
+        aria-label="Go to sessions"
+        className="p-4 flex items-center gap-2 rounded-[6px] hover:bg-canvas/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-klein/40"
+      >
         <svg viewBox="0 0 32 32" className="w-5 h-5">
           <path d="M9 22 L16 8 L23 22 Z" fill="#cc785c" />
           <circle cx="16" cy="18" r="2.2" fill="#faf9f5" />
         </svg>
         <span className="mono text-[13px]">claudex</span>
-      </div>
+      </Link>
 
       <div className="px-3 space-y-1">
         {NAV.map(({ id, label, icon: Icon, href }) => {

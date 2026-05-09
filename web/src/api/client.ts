@@ -31,6 +31,7 @@ import type {
   SearchResponse,
   MemoryResponse,
   StatsResponse,
+  MetaResponse,
   ListSubagentsResponse,
 } from "@claudex/shared";
 
@@ -387,6 +388,15 @@ export const api = {
    */
   getStats() {
     return request<StatsResponse>("/api/stats");
+  },
+  /**
+   * Server version, git commit, build time, node + sqlite versions, platform,
+   * and uptime. Backs the `/about` screen. Static fields are cached server-
+   * side at boot; `uptimeSec` is live per request. `commit` / `commitShort`
+   * are null when the server wasn't launched from a git checkout.
+   */
+  getMeta() {
+    return request<MetaResponse>("/api/meta");
   },
   /**
    * Read-only observability feed for subagent tool invocations (the SDK's

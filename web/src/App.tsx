@@ -6,6 +6,7 @@ import { HomeScreen } from "@/screens/Home";
 import { ChatScreen } from "@/screens/Chat";
 import { DiffReviewScreen } from "@/screens/DiffReview";
 import { SettingsScreen } from "@/screens/Settings";
+import { AboutScreen } from "@/screens/About";
 import { RoutinesScreen } from "@/screens/Routines";
 import { QueueScreen } from "@/screens/Queue";
 import { AgentsScreen } from "@/screens/Agents";
@@ -116,6 +117,14 @@ export default function App() {
         element={
           <Guard>
             <SettingsScreen />
+          </Guard>
+        }
+      />
+      <Route
+        path="/about"
+        element={
+          <Guard>
+            <AboutScreen />
           </Guard>
         }
       />

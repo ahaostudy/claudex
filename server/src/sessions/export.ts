@@ -7,9 +7,15 @@ import type { ModelId, Project, Session, SessionEvent } from "@claudex/shared";
  * project, and the full event array, then hands them in here. No I/O.
  *
  * We deliberately keep this simple & honest — no streaming, no truncation of
- * transcripts as a whole, no redaction. Large individual `tool_result`
- * payloads are truncated at 4000 chars so a single command with a huge
- * stdout doesn't produce an unreadable wall of text.
+ * transcripts as a whole, no redaction, and no per-`tool_result` cap. Users
+ * who hit the export endpoint asked for the full data; this is a one-shot
+ * HTTP response (not the WS fan-out path) so a multi-MB stdout is fine — a
+ * single SQLite read + in-memory markdown join handles it without fuss.
+ *
+ * CLAUDE.md explicitly forbids silent truncation. A prior version clipped
+ * `tool_result.content` at 4000 chars with a trailing `…`, which looked like
+ * content but actually dropped data. Removed outright: the JSON export was
+ * already full-fidelity; Markdown now matches.
  */
 
 const MODEL_LABEL: Record<ModelId, string> = {
@@ -17,8 +23,6 @@ const MODEL_LABEL: Record<ModelId, string> = {
   "claude-sonnet-4-6": "Sonnet 4.6",
   "claude-haiku-4-5": "Haiku 4.5",
 };
-
-const TOOL_RESULT_MAX_CHARS = 4000;
 
 export function exportSessionJson(
   session: Session,
@@ -99,10 +103,7 @@ function renderEvent(ev: SessionEvent): string | null {
       const toolUseId =
         getStr(p, "toolUseId") ?? getStr(p, "tool_use_id") ?? "";
       const isError = Boolean((p as Record<string, unknown>).isError);
-      let content = stringifyContent((p as Record<string, unknown>).content);
-      if (content.length > TOOL_RESULT_MAX_CHARS) {
-        content = content.slice(0, TOOL_RESULT_MAX_CHARS) + "…";
-      }
+      const content = stringifyContent((p as Record<string, unknown>).content);
       return [
         "```",
         `<result for ${toolUseId}>`,

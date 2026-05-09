@@ -196,11 +196,10 @@ describe("GET /api/sessions/:id/export", () => {
   // ----------------------------------------------------------------------
   // Honesty test: a 1 MB tool_result must survive export without silent
   // truncation. JSON export passes events through verbatim, so it's the
-  // honest path. Markdown export currently truncates tool_result content at
-  // TOOL_RESULT_MAX_CHARS (4000) in `exports.ts::renderEvent('tool_result')`
-  // — which violates the CLAUDE.md rule "Don't silently truncate messages,
-  // diffs, or file content." That markdown assertion is skipped pending a
-  // prod-code fix; see the `.skip` block below.
+  // honest path. Markdown export used to clip `tool_result` content at
+  // TOOL_RESULT_MAX_CHARS (4000) with a trailing `…`, which violated the
+  // CLAUDE.md rule "Don't silently truncate messages, diffs, or file
+  // content." That cap has been removed — both formats are now full-fidelity.
   // ----------------------------------------------------------------------
   it("json export preserves a 1 MB tool_result content verbatim", async () => {
     const ctx = await bootstrapAuthedApp();
@@ -255,14 +254,12 @@ describe("GET /api/sessions/:id/export", () => {
     expect(payload.content).toBe(bigContent);
   });
 
-  // Skipped: reveals a production bug. `server/src/sessions/export.ts`
-  // defines `TOOL_RESULT_MAX_CHARS = 4000` and silently slices the string
-  // (appending "…"). CLAUDE.md explicitly forbids silent truncation. The
-  // fix belongs in a separate PR — either (a) remove the cap entirely, or
-  // (b) emit an explicit "[truncated N more chars]" marker so the user
-  // knows content is missing. Keeping this test skipped so it fails loudly
-  // the moment the prod code is touched.
-  it.skip("markdown export preserves a 1 MB tool_result content verbatim (prod bug: export.ts silently truncates)", async () => {
+  // Previously skipped: revealed a production bug where `export.ts` defined
+  // `TOOL_RESULT_MAX_CHARS = 4000` and silently sliced the string (appending
+  // "…"), violating CLAUDE.md's no-silent-truncation rule. The cap is gone —
+  // this test now asserts the full 1MB payload is present, byte-for-byte,
+  // with no `…` marker, and the response is served as `text/markdown`.
+  it("markdown export preserves a 1 MB tool_result content verbatim", async () => {
     const ctx = await bootstrapAuthedApp();
     disposers.push(ctx.cleanup);
     const projects = new ProjectStore(ctx.dbh.db);
@@ -298,9 +295,15 @@ describe("GET /api/sessions/:id/export", () => {
       headers: { cookie: ctx.cookie },
     });
     expect(res.statusCode).toBe(200);
-    // The full 1MB should appear in the body. Today it's sliced to 4000
-    // chars with a trailing "…", so this assertion fails — intentionally.
+    expect(res.headers["content-type"]).toBe(
+      "text/markdown; charset=utf-8",
+    );
+    // Exact substring: the entire 1MB of 'x' must appear verbatim with no
+    // silent-truncation marker attached.
+    expect(res.body.includes(bigContent)).toBe(true);
+    expect(res.body).not.toContain("x…");
+    // Body is the header block + fenced tool_result containing the full
+    // payload; length must comfortably exceed the payload itself.
     expect(res.body.length).toBeGreaterThanOrEqual(ONE_MB);
-    expect(res.body).toContain(bigContent);
   });
 });

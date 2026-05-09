@@ -25,6 +25,7 @@ import { registerMemoryRoutes } from "../sessions/memory-routes.js";
 import { registerSearchRoutes } from "../search/routes.js";
 import { registerLinkPreviewRoutes } from "../link-preview/routes.js";
 import { registerStatsRoutes } from "../stats/routes.js";
+import { registerMetaRoutes } from "../meta/routes.js";
 import { registerAgentsRoutes } from "../agents/routes.js";
 import { AuditStore } from "../audit/store.js";
 import { registerAuditRoutes } from "../audit/routes.js";
@@ -220,6 +221,7 @@ export async function buildApp(
   await registerSearchRoutes(app, { db: deps.db });
   await registerLinkPreviewRoutes(app, { db: deps.db });
   await registerStatsRoutes(app, { db: deps.db });
+  await registerMetaRoutes(app, { db: deps.db });
   await registerAgentsRoutes(app, { db: deps.db });
   await registerAuditRoutes(app, { db: deps.db, audit });
   await registerBackupRoutes(app, { db: deps.db });

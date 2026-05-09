@@ -1,5 +1,5 @@
 import { useEffect, useImperativeHandle, useMemo, useRef, useState, forwardRef } from "react";
-import { X } from "lucide-react";
+import { Star, X } from "lucide-react";
 import { cn } from "@/lib/cn";
 import {
   filterSlashCommands,
@@ -40,6 +40,8 @@ export interface PickerHandle {
 
 const RECENTS_KEY = "claudex.slash.recents";
 const RECENTS_MAX = 6;
+const FAVORITES_KEY = "claudex.slash.favorites";
+const FAVORITES_MAX = 10;
 
 function readRecents(): string[] {
   try {
@@ -61,6 +63,47 @@ function pushRecent(name: string): void {
   } catch {
     /* localStorage quota / private mode — best effort only */
   }
+}
+
+function loadFavorites(): string[] {
+  try {
+    const raw = localStorage.getItem(FAVORITES_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((v): v is string => typeof v === "string")
+      .slice(0, FAVORITES_MAX);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Toggle a command name in the favorites list and persist.
+ *
+ * Pinning appends to the end so the saved order reflects pin order (most
+ * recent pin last). When capacity is exceeded the OLDEST entry (head of
+ * the list) is evicted — first-pinned is first to go. Returns the new
+ * list so callers can update local state without re-reading storage.
+ */
+function toggleFavorite(name: string): string[] {
+  const current = loadFavorites();
+  let next: string[];
+  if (current.includes(name)) {
+    next = current.filter((v) => v !== name);
+  } else {
+    next = [...current, name];
+    if (next.length > FAVORITES_MAX) {
+      next = next.slice(next.length - FAVORITES_MAX);
+    }
+  }
+  try {
+    localStorage.setItem(FAVORITES_KEY, JSON.stringify(next));
+  } catch {
+    /* best effort */
+  }
+  return next;
 }
 
 /**
@@ -90,7 +133,7 @@ function highlightMatch(target: string, query: string) {
 // header rows when moving).
 type Row =
   | { kind: "header"; label: string }
-  | { kind: "cmd"; cmd: SlashCommand; group: "recent" | "main" };
+  | { kind: "cmd"; cmd: SlashCommand; group: "favorite" | "recent" | "main" };
 
 export const SlashCommandSheet = forwardRef<
   PickerHandle,
@@ -118,6 +161,7 @@ export const SlashCommandSheet = forwardRef<
   const [query, setQuery] = useState(initialQuery);
   const [selected, setSelected] = useState(0);
   const [recentNames, setRecentNames] = useState<string[]>(() => readRecents());
+  const [favoriteNames, setFavoriteNames] = useState<string[]>(() => loadFavorites());
   // Pull-to-dismiss — mobile only. On desktop the sheet centers via `sm:`
   // layout and the handlers fire off `pointerType === "mouse"` as a no-op,
   // so attaching unconditionally is safe.
@@ -146,13 +190,21 @@ export const SlashCommandSheet = forwardRef<
   const rows = useMemo<Row[]>(() => {
     const out: Row[] = [];
     const hasQuery = query.trim().length > 0;
-    if (!hasQuery && recentNames.length > 0) {
-      // Resolve each recent name to the current canonical command entry so
-      // kind + description are accurate. Silently drop unknown entries.
+    if (!hasQuery) {
       const byName = new Map(commands.map((c) => [c.name, c] as const));
-      const recentCmds = recentNames
+      const favSet = new Set(favoriteNames);
+      // Resolve favorites in saved order (pin order, not alphabetical).
+      const favoriteCmds = favoriteNames
         .map((n) => byName.get(n))
         .filter((c): c is SlashCommand => !!c);
+      if (favoriteCmds.length > 0) {
+        out.push({ kind: "header", label: "Pinned" });
+        for (const c of favoriteCmds) out.push({ kind: "cmd", cmd: c, group: "favorite" });
+      }
+      // Recents, excluding anything already in favorites.
+      const recentCmds = recentNames
+        .map((n) => byName.get(n))
+        .filter((c): c is SlashCommand => !!c && !favSet.has(c.name));
       if (recentCmds.length > 0) {
         out.push({ kind: "header", label: "Recent" });
         for (const c of recentCmds) out.push({ kind: "cmd", cmd: c, group: "recent" });
@@ -162,7 +214,7 @@ export const SlashCommandSheet = forwardRef<
       for (const c of matches) out.push({ kind: "cmd", cmd: c, group: "main" });
     }
     return out;
-  }, [matches, recentNames, query, commands]);
+  }, [matches, recentNames, favoriteNames, query, commands]);
 
   // Indices into `rows` that are selectable commands.
   const cmdIndices = useMemo(
@@ -358,6 +410,7 @@ export const SlashCommandSheet = forwardRef<
               const isSkill = cmd.kind === "plugin";
               const unsupported = cmd.behavior.kind === "unsupported";
               const isAction = cmd.behavior.kind === "claudex-action";
+              const isFavorite = favoriteNames.includes(cmd.name);
               // Small trailing badge: REPL-only for unsupported, "ui" for
               // claudex-action. Keep to 10px uppercase to match the kind
               // badge rhythm; colored differently so it reads as metadata,
@@ -421,6 +474,28 @@ export const SlashCommandSheet = forwardRef<
                       {behaviorBadge}
                     </span>
                   )}
+                  <span
+                    role="button"
+                    tabIndex={-1}
+                    aria-label={isFavorite ? `Unpin /${cmd.name}` : `Pin /${cmd.name}`}
+                    aria-pressed={isFavorite}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      const next = toggleFavorite(cmd.name);
+                      setFavoriteNames(next);
+                    }}
+                    onMouseDown={(e) => e.stopPropagation()}
+                    className={cn(
+                      "h-6 w-6 rounded-[4px] inline-flex items-center justify-center shrink-0 cursor-pointer",
+                      isFavorite ? "text-klein" : "text-ink-faint hover:text-ink-muted",
+                    )}
+                  >
+                    <Star
+                      className="w-3.5 h-3.5"
+                      fill={isFavorite ? "currentColor" : "none"}
+                      strokeWidth={isFavorite ? 1.5 : 2}
+                    />
+                  </span>
                   <span
                     className={cn(
                       "inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[4px] text-[10px] uppercase tracking-[0.1em] shrink-0 border",
