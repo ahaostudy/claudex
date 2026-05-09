@@ -305,7 +305,7 @@ export function HomeScreen() {
 
   return (
     <AppShell tab="sessions">
-      <header className="shrink-0 bg-canvas/90 backdrop-blur border-b border-line px-5 py-3 flex items-center gap-3">
+      <header className="shrink-0 relative z-40 bg-canvas/90 backdrop-blur border-b border-line px-5 py-3 flex items-center gap-3">
         <div>
           <div className="caps text-ink-muted">Sessions</div>
           <h1 className="display text-[1.25rem] md:text-[22px] leading-tight mt-0.5">
