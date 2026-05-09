@@ -26,6 +26,7 @@ import { api, ApiError, type WorktreeSummary } from "@/api/client";
 import type { Project, PushDevice, UserEnvResponse, AuditEvent, ToolGrant, ImportAllResponse } from "@claudex/shared";
 import { cn } from "@/lib/cn";
 import { timeAgoShort, timeAgoLong } from "@/lib/format";
+import { copyText } from "@/lib/clipboard";
 import { AppShell } from "@/components/AppShell";
 import {
   deviceLabel,
@@ -795,13 +796,12 @@ function RecoveryCodesModal({
   const [copied, setCopied] = useState(false);
 
   async function copyAll() {
-    try {
-      await navigator.clipboard.writeText(codes.join("\n"));
+    const ok = await copyText(codes.join("\n"));
+    if (ok) {
       setCopied(true);
       window.setTimeout(() => setCopied(false), 1500);
-    } catch {
-      /* no clipboard access — user can still tap-hold to select */
     }
+    /* on failure: user can still tap-hold to select */
   }
 
   function download() {

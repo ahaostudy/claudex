@@ -17,20 +17,15 @@ import { useNavigate } from "react-router-dom";
 import { Copy, FileCode, GitFork, Link as LinkIcon } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { toast } from "@/lib/toast";
+import { copyText } from "@/lib/clipboard";
 import { api, ApiError } from "@/api/client";
 
 async function copy(text: string, successMsg = "Copied"): Promise<void> {
-  // Clipboard API is async and only works on secure contexts / focused docs.
-  // Fall through to a failure toast if either condition isn't met — we do NOT
-  // try a document.execCommand('copy') fallback because it needs a live
-  // selection of DOM text, which we don't have here (the source is a prop).
-  try {
-    if (!navigator?.clipboard?.writeText) throw new Error("no clipboard");
-    await navigator.clipboard.writeText(text);
-    toast(successMsg);
-  } catch {
-    toast("Copy failed — try manual select");
-  }
+  // copyText handles the async Clipboard API with a hidden-textarea
+  // execCommand fallback — claudex runs over HTTP (frpc tunnel) where the
+  // async API is unavailable.
+  const ok = await copyText(text);
+  toast(ok ? successMsg : "Copy failed");
 }
 
 export interface MessageActionsProps {

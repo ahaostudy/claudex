@@ -4,6 +4,7 @@ import { Copy } from "lucide-react";
 import type React from "react";
 import { cn } from "@/lib/cn";
 import { toast } from "@/lib/toast";
+import { copyText } from "@/lib/clipboard";
 
 // ---------------------------------------------------------------------------
 // Markdown renderer used for assistant text. GitHub-flavored (tables, task
@@ -246,20 +247,15 @@ function extractText(node: React.ReactNode): string {
 }
 
 /**
- * Copy a code block's raw text via the async Clipboard API. We fail loudly
- * with a toast rather than silently swallowing — matches the existing
- * MessageActions "Copy failed" convention.
+ * Copy a code block's raw text. Uses the shared copyText helper which
+ * falls back to a hidden textarea + execCommand on non-secure contexts
+ * (claudex is served over HTTP via frpc). Fails loudly with a toast —
+ * matches the existing MessageActions "Copy failed" convention.
  */
 function copyCode(text: string): void {
-  const clip = navigator.clipboard;
-  if (!clip || typeof clip.writeText !== "function") {
-    toast("Copy failed");
-    return;
-  }
-  clip.writeText(text).then(
-    () => toast("Copied"),
-    () => toast("Copy failed"),
-  );
+  void copyText(text).then((ok) => {
+    toast(ok ? "Copied" : "Copy failed");
+  });
 }
 
 /**

@@ -1,6 +1,8 @@
 import { create } from "zustand";
 import { api } from "@/api/client";
 import { createWsClient, type WsClient, type WsDiagnostics } from "@/api/ws";
+import { toast } from "@/lib/toast";
+import { flashTitle } from "@/lib/title-flash";
 import type {
   AskUserQuestionAnnotation,
   AskUserQuestionItem,
@@ -8,7 +10,42 @@ import type {
   Session,
   SessionEvent,
   ServerFrame,
+  SessionStatus,
 } from "@claudex/shared";
+
+// ---------------------------------------------------------------------------
+// Session-completion notifier (client-only, dedup'd per session).
+//
+// When a session transitions to a terminal-ish status (`idle` — Claude's
+// turn ended — or `error` — terminal failure) we surface a toast + a
+// document.title flash so the user knows to look. Web Push isn't an
+// option on claudex because the user runs HTTP through frpc, so this is
+// our in-app fallback.
+//
+// Dedup is by sessionId → lastNotifiedStatus. We only fire when the
+// observed status actually differs from the last one we notified on
+// (or there is no prior entry). The map is seeded from the REST
+// /sessions payload on first load so nothing fires retroactively for
+// sessions that were already idle when the app booted.
+//
+// Lives at module scope (not in the zustand store) because it's pure
+// side-effect bookkeeping — no component needs to render off of it and
+// keeping it out of state avoids spurious re-renders.
+// ---------------------------------------------------------------------------
+const notifiedStatus = new Map<string, SessionStatus>();
+
+function shouldNotifyCompletion(
+  prev: SessionStatus | undefined,
+  next: SessionStatus,
+): boolean {
+  // Only `idle` (turn ended) and `error` (terminal failure) count as
+  // "session finished" for the user-facing alert. `archived` is a user
+  // action, `awaiting` is already surfaced on the Alerts screen, and
+  // `running` is a start-of-turn transition.
+  if (next !== "idle" && next !== "error") return false;
+  if (prev === next) return false;
+  return true;
+}
 
 // A streamed turn is rendered as a list of UI "pieces": text, tool_use,
 // tool_result, thinking. We build these up from both persisted events (on
@@ -534,6 +571,12 @@ export const useSessions = create<SessionState>((set, get) => {
       if (frame.type === "hello_ack") set({ connected: true });
       if (frame.type === "session_update") {
         const sid = frame.sessionId;
+        // Snapshot pre-transition state so we can decide whether to fire a
+        // completion toast. We deliberately look at the session BEFORE
+        // applying the new status; the dedup map uses "last notified" as
+        // its key, but the session row's own previous status is what tells
+        // us whether this frame represents a real transition.
+        const prevSession = get().sessions.find((x) => x.id === sid);
         set((s) => ({
           sessions: s.sessions.map((x) =>
             x.id === sid ? { ...x, status: frame.status } : x,
@@ -548,6 +591,31 @@ export const useSessions = create<SessionState>((set, get) => {
           frame.status === "archived"
         ) {
           dropFirstPending(sid);
+        }
+        // Session-completion alert. Only fire on real transitions into
+        // `idle` / `error`, skip child (side-chat) sessions so Task-spawned
+        // subagents don't spam the parent's completion signal, and dedup
+        // per-session via the module-level `notifiedStatus` map so a repeat
+        // `session_update` frame for the same status doesn't re-fire.
+        const lastNotified = notifiedStatus.get(sid);
+        if (
+          prevSession &&
+          !prevSession.parentSessionId &&
+          shouldNotifyCompletion(lastNotified, frame.status)
+        ) {
+          notifiedStatus.set(sid, frame.status);
+          const title = prevSession.title || "Session";
+          const msg =
+            frame.status === "error"
+              ? `${title} — session error`
+              : `${title} — session finished`;
+          toast(msg);
+          flashTitle();
+        } else {
+          // Always keep the dedup map in sync with the current status so
+          // re-transitions (idle → running → idle) fire exactly once per
+          // completion edge.
+          notifiedStatus.set(sid, frame.status);
         }
       }
       // Multi-tab: a user_message broadcast can land in any subscribed tab —
@@ -728,6 +796,15 @@ export const useSessions = create<SessionState>((set, get) => {
     set({ loadingSessions: true });
     try {
       const res = await api.listSessions();
+      // Seed the completion-notify dedup map so that sessions already in a
+      // terminal state when the app boots (or when Home re-fetches) don't
+      // retroactively fire a toast. We only want notifications for live
+      // transitions observed over the WS after this point.
+      for (const s of res.sessions) {
+        if (!notifiedStatus.has(s.id)) {
+          notifiedStatus.set(s.id, s.status);
+        }
+      }
       set({ sessions: res.sessions });
     } finally {
       set({ loadingSessions: false });
