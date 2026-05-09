@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { Bot } from "lucide-react";
+import { Bot, Copy, Loader2 } from "lucide-react";
 import type {
   ListSubagentsResponse,
   SubagentRunStatus,
@@ -11,13 +11,15 @@ import { api, ApiError } from "@/api/client";
 import { AppShell } from "@/components/AppShell";
 import { cn } from "@/lib/cn";
 import { timeAgoShort } from "@/lib/format";
+import { copyText } from "@/lib/clipboard";
+import { toast } from "@/lib/toast";
 
 // ---------------------------------------------------------------------------
 // /agents — Subagent monitor.
 //
 // Read-only observability over the SDK's `Task` / `Agent` / `Explore` tool
 // invocations across every session. The whole surface is aggregation + a
-// flat list; we never let the user kick off or cancel a subagent from here
+// grouped list; we never let the user kick off or cancel a subagent from here
 // (the parent session drives that).
 //
 // Live update strategy mirrors the Queue screen: every session's
@@ -25,6 +27,13 @@ import { timeAgoShort } from "@/lib/format";
 // store emits, and we subscribe + debounce-refetch. Any event kind that the
 // transport broadcasts goes through that bus, so we hear about new
 // tool_use / tool_result rows without polling.
+//
+// While a user has an expanded row whose run is still `running`, we *also*
+// tick an additional 2s refetch on top of the WS-driven debounce — the SDK's
+// Task tool doesn't emit intermediate events on the parent session's wire,
+// so the bus fires only at dispatch + finalize. The fast tick gives the
+// expanded view a chance to surface the `resultPreview` the moment the
+// tool_result lands, without the user having to close + reopen.
 //
 // Filter chips (All / Running / Done / Failed) are URL-backed via
 // `?status=active|done|all` + an explicit `failed` client-side filter. The
@@ -41,6 +50,11 @@ const CHIPS: Array<{ id: ChipFilter; label: string }> = [
   { id: "done", label: "Done" },
   { id: "failed", label: "Failed" },
 ];
+
+/** Order we render tool groups in: the "Agents" category the user singled out
+ * goes first, then Task, then Explore, then everything else alphabetical.
+ * Everything after this list renders in lexicographic order. */
+const PRIMARY_GROUP_ORDER = ["Agent", "Task", "Explore"] as const;
 
 export function AgentsScreen() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -106,12 +120,34 @@ export function AgentsScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chip]);
 
+  // Aggressive refetch while the expanded row is still running. The SDK's
+  // Task tool runs its child turn entirely inside the parent session's stream
+  // — there is no separate claudex session we could subscribe to for the
+  // sub-turn's assistant_text. So the best we can do is keep polling /api/agents
+  // at a tighter cadence than the WS bus guarantees, so the `resultPreview`
+  // surfaces promptly once the tool_result lands.
+  const expandedRow = items.find((i) => i.id === expandedId) ?? null;
+  const shouldFastPoll = expandedRow !== null && expandedRow.status === "running";
+  useEffect(() => {
+    if (!shouldFastPoll) return;
+    const handle = setInterval(() => {
+      void refresh();
+    }, 2000);
+    return () => clearInterval(handle);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shouldFastPoll, chip]);
+
   const setChip = (next: ChipFilter) => {
     const sp = new URLSearchParams(searchParams);
     if (next === "all") sp.delete("status");
     else sp.set("status", next);
     setSearchParams(sp, { replace: true });
   };
+
+  // Bucket by toolName. Order: Agent → Task → Explore → (alphabetical rest).
+  // Within each bucket items already arrive in startedAt-desc order from the
+  // server, so we preserve insertion order.
+  const grouped = useMemo(() => groupByTool(items), [items]);
 
   return (
     <AppShell tab="agents">
@@ -166,18 +202,19 @@ export function AgentsScreen() {
             </div>
           </div>
         ) : (
-          <ul>
-            {items.map((row) => (
-              <AgentRow
-                key={row.id}
-                row={row}
-                expanded={expandedId === row.id}
-                onToggle={() =>
-                  setExpandedId((id) => (id === row.id ? null : row.id))
+          <div>
+            {grouped.map((group) => (
+              <SubagentGroup
+                key={group.toolName}
+                toolName={group.toolName}
+                rows={group.rows}
+                expandedId={expandedId}
+                onToggle={(id) =>
+                  setExpandedId((curr) => (curr === id ? null : id))
                 }
               />
             ))}
-          </ul>
+          </div>
         )}
       </section>
     </AppShell>
@@ -187,6 +224,33 @@ export function AgentsScreen() {
 function normalizeChip(raw: string | null): ChipFilter {
   if (raw === "active" || raw === "done" || raw === "failed") return raw;
   return "all";
+}
+
+/** Bucket + sort helper. Items already arrive sorted by startedAt desc from
+ * the server, so inside a bucket we only need to preserve insertion order. */
+function groupByTool(
+  items: SubagentSummary[],
+): Array<{ toolName: string; rows: SubagentSummary[] }> {
+  const buckets = new Map<string, SubagentSummary[]>();
+  for (const item of items) {
+    const key = item.toolName || "Other";
+    const list = buckets.get(key);
+    if (list) list.push(item);
+    else buckets.set(key, [item]);
+  }
+  const out: Array<{ toolName: string; rows: SubagentSummary[] }> = [];
+  for (const name of PRIMARY_GROUP_ORDER) {
+    const rows = buckets.get(name);
+    if (rows && rows.length > 0) out.push({ toolName: name, rows });
+    buckets.delete(name);
+  }
+  const rest = [...buckets.entries()].sort(([a], [b]) =>
+    a.localeCompare(b),
+  );
+  for (const [name, rows] of rest) {
+    if (rows.length > 0) out.push({ toolName: name, rows });
+  }
+  return out;
 }
 
 function StatsCards({ stats }: { stats: SubagentStats | null }) {
@@ -244,6 +308,47 @@ function StatCard({
   );
 }
 
+/** One tool bucket: a section header + its rows. Rendered as a <section>
+ * rather than a <ul> so the header sits at the top-level of the group and
+ * rows can own their own expand panel flow. */
+function SubagentGroup({
+  toolName,
+  rows,
+  expandedId,
+  onToggle,
+}: {
+  toolName: string;
+  rows: SubagentSummary[];
+  expandedId: string | null;
+  onToggle: (id: string) => void;
+}) {
+  if (rows.length === 0) return null;
+  const runCount = rows.length;
+  return (
+    <section>
+      <div className="sticky top-0 z-[1] bg-canvas/95 backdrop-blur px-4 md:px-6 py-1.5 border-b border-line flex items-center gap-2">
+        <span className="caps text-ink-soft">{toolName}</span>
+        <span className="text-[11px] text-ink-muted mono">
+          · {runCount} {runCount === 1 ? "run" : "runs"}
+        </span>
+      </div>
+      <ul>
+        {rows.map((row) => (
+          <AgentRow
+            key={row.id}
+            row={row}
+            expanded={expandedId === row.id}
+            onToggle={() => onToggle(row.id)}
+          />
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+/** A single row in a tool group. Collapsed state: one tight line with a
+ * colored left-border that encodes status + a very subtle background tint.
+ * Expanded state: a child panel (AgentDetail) with input + output + meta. */
 function AgentRow({
   row,
   expanded,
@@ -253,110 +358,216 @@ function AgentRow({
   expanded: boolean;
   onToggle: () => void;
 }) {
+  const tint = rowTint(row);
   return (
-    <li className="px-4 md:px-6 py-3 border-b border-line hover:bg-paper/40">
+    <li
+      className={cn(
+        "border-b border-line",
+        tint.bg,
+      )}
+    >
       <button
         type="button"
         onClick={onToggle}
-        className="w-full flex items-center gap-3 text-left"
+        className="w-full text-left px-4 md:px-6 py-2 flex items-center gap-3 hover:bg-paper/60"
         aria-expanded={expanded}
       >
-        <StatusDot status={row.status} />
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2 min-w-0">
-            <span className="mono text-[12px] text-ink-muted shrink-0">
-              {row.toolName}
-            </span>
-            <span className="text-[14px] font-medium truncate">
-              {row.description || "(no description)"}
-            </span>
-          </div>
-          <div className="mt-0.5 flex items-center gap-2 text-[12px] text-ink-muted flex-wrap">
-            {/* Desktop: deep-link into the parent session at the exact event.
-                Mobile: still shown, just stacks below the description. The
-                `#seq-<n>` anchor is best-effort — Chat.tsx already honors
-                scroll-to-event hashes where supported. */}
-            <Link
-              to={`/session/${row.sessionId}#seq-${row.seq}`}
-              onClick={(e) => e.stopPropagation()}
-              className="mono hover:underline truncate"
-            >
-              {row.sessionTitle}
-            </Link>
-            {row.projectName && (
-              <>
-                <span>·</span>
-                <span className="mono truncate">{row.projectName}</span>
-              </>
-            )}
-          </div>
-        </div>
-        <div className="shrink-0 mono text-[12px] text-ink-muted tabular-nums text-right">
-          <div>
-            {row.status === "running"
-              ? "running"
-              : row.durationMs !== null
-                ? formatDurationShort(row.durationMs)
-                : "—"}
-          </div>
-          <div
-            className="mono text-[10px] text-ink-faint mt-0.5"
-            title={new Date(row.startedAt).toLocaleString()}
-          >
-            started {timeAgoShort(row.startedAt)}
-          </div>
-        </div>
-      </button>
-      {expanded && (
-        <div className="mt-3 ml-5 pl-3 border-l border-line space-y-2">
-          {row.resultPreview ? (
-            <pre className="whitespace-pre-wrap break-words text-[12px] mono text-ink-soft bg-paper/60 rounded-[8px] p-2 border border-line">
-              {row.resultPreview}
-            </pre>
-          ) : (
-            <div className="text-[12px] text-ink-muted">
-              {row.status === "running"
-                ? "Still running — no result yet."
-                : "(empty result)"}
-            </div>
+        {/* 3px colored left-border strip encodes status. Pulses softly while
+            the run is still in flight so it draws the eye. */}
+        <span
+          aria-hidden
+          className={cn(
+            "self-stretch w-[3px] rounded-sm shrink-0",
+            tint.strip,
+            row.status === "running" ? "animate-pulse" : undefined,
           )}
-          <div className="flex items-center gap-3 text-[12px]">
-            <Link
-              to={`/session/${row.sessionId}#seq-${row.seq}`}
-              className="text-klein hover:underline"
-              onClick={(e) => e.stopPropagation()}
-            >
-              Open session →
-            </Link>
-            <span className="text-ink-muted mono">
-              started {formatClock(row.startedAt)}
-            </span>
-            {row.finishedAt && (
-              <span className="text-ink-muted mono">
-                finished {formatClock(row.finishedAt)}
-              </span>
-            )}
-          </div>
-        </div>
-      )}
+        />
+        <span
+          className={cn(
+            "mono text-[11px] px-1.5 py-0.5 rounded shrink-0 border",
+            tint.chip,
+          )}
+        >
+          {row.toolName}
+        </span>
+        {row.status === "running" && (
+          <Loader2
+            className="w-3 h-3 text-klein shrink-0 animate-spin"
+            aria-hidden
+          />
+        )}
+        <span className="text-[13px] font-medium truncate min-w-0 flex-1">
+          {row.description || <span className="text-ink-muted italic">(no description)</span>}
+        </span>
+        <Link
+          to={`/session/${row.sessionId}#seq-${row.seq}`}
+          onClick={(e) => e.stopPropagation()}
+          className="mono text-[11px] text-ink-muted hover:underline truncate shrink min-w-0 max-w-[28%] hidden sm:inline"
+          title={`${row.sessionTitle}${row.projectName ? ` · ${row.projectName}` : ""}`}
+        >
+          {row.sessionTitle}
+        </Link>
+        <span
+          className="mono text-[11px] text-ink-muted tabular-nums shrink-0"
+          title={new Date(row.startedAt).toLocaleString()}
+        >
+          {row.status === "running"
+            ? "running"
+            : row.durationMs !== null
+              ? formatDurationShort(row.durationMs)
+              : "—"}
+        </span>
+        <span
+          className="mono text-[11px] text-ink-faint tabular-nums shrink-0"
+          title={new Date(row.startedAt).toLocaleString()}
+        >
+          {timeAgoShort(row.startedAt)}
+        </span>
+      </button>
+      {expanded && <AgentDetail row={row} />}
     </li>
   );
 }
 
-function StatusDot({ status }: { status: SubagentRunStatus }) {
-  const cls =
-    status === "running"
-      ? "bg-success animate-pulse"
-      : status === "failed"
-        ? "bg-danger"
-        : "bg-ink-faint";
+/** Per-status tint classes. Running: klein stripe + klein-wash tint. Done
+ * (no error): success stripe + paper tint. Failed / isError: danger stripe
+ * + danger-wash tint. The `chip` classes style the small tool-name pill. */
+function rowTint(row: SubagentSummary): {
+  strip: string;
+  bg: string;
+  chip: string;
+} {
+  if (row.status === "failed" || row.isError) {
+    return {
+      strip: "bg-danger/70",
+      bg: "bg-danger-wash/40",
+      chip: "border-danger/30 text-danger bg-canvas/70",
+    };
+  }
+  if (row.status === "running") {
+    return {
+      strip: "bg-klein",
+      bg: "bg-klein-wash/30",
+      chip: "border-klein/40 text-klein-ink bg-canvas/70",
+    };
+  }
+  return {
+    strip: "bg-success/50",
+    bg: "bg-paper/30",
+    chip: "border-line text-ink-soft bg-canvas/70",
+  };
+}
+
+/** The expand panel below a row — input (pretty JSON) + result preview + meta.
+ * Kept as its own component so the row stays tight. */
+function AgentDetail({ row }: { row: SubagentSummary }) {
+  const inputJson = useMemo(() => safeStringify(row.input), [row.input]);
+  const hasInput = Object.keys(row.input).length > 0;
+
+  async function handleCopyInput() {
+    const ok = await copyText(inputJson);
+    toast(ok ? "Input copied" : "Copy failed");
+  }
+
   return (
-    <span
-      className={`h-2 w-2 rounded-full shrink-0 ${cls}`}
-      title={status}
-      aria-label={status}
-    />
+    <div className="px-4 md:px-6 pb-3 pt-1 space-y-3">
+      {/* Input / parameters */}
+      <div>
+        <div className="flex items-center justify-between mb-1">
+          <div className="caps text-ink-muted">Input</div>
+          {hasInput && (
+            <button
+              type="button"
+              onClick={handleCopyInput}
+              className="mono text-[11px] text-ink-muted hover:text-ink inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-line bg-canvas hover:bg-paper/60"
+              title="Copy input JSON"
+            >
+              <Copy className="w-3 h-3" aria-hidden />
+              Copy
+            </button>
+          )}
+        </div>
+        {hasInput ? (
+          <pre className="mono text-[12px] text-ink-soft bg-paper/60 rounded-[8px] p-2 border border-line max-h-40 overflow-auto whitespace-pre-wrap break-words">
+            {inputJson}
+          </pre>
+        ) : (
+          <div className="text-[12px] text-ink-muted italic">(no input)</div>
+        )}
+      </div>
+
+      {/* Result preview. For the running case we explain why there's no
+          preview yet + note that we're polling. For done/failed we show the
+          200-char truncated preview with a link to the full transcript. */}
+      <div>
+        <div className="caps text-ink-muted mb-1">
+          {row.status === "failed" ? "Error output" : "Result"}
+        </div>
+        {row.status === "running" ? (
+          <div className="text-[12px] text-ink-muted italic inline-flex items-center gap-2">
+            <Loader2 className="w-3 h-3 animate-spin" aria-hidden />
+            Still running — polling every 2 s for the result.
+          </div>
+        ) : row.resultPreview ? (
+          <>
+            <pre
+              className={cn(
+                "mono text-[12px] bg-paper/60 rounded-[8px] p-2 border border-line max-h-48 overflow-auto whitespace-pre-wrap break-words",
+                row.status === "failed" ? "text-danger" : "text-ink-soft",
+              )}
+            >
+              {row.resultPreview}
+            </pre>
+            <div className="mt-1 text-[11px] text-ink-faint">
+              showing first 200 chars —{" "}
+              <Link
+                to={`/session/${row.sessionId}#seq-${row.seq}`}
+                className="text-klein hover:underline"
+                onClick={(e) => e.stopPropagation()}
+              >
+                open session for full tool_result
+              </Link>
+            </div>
+          </>
+        ) : (
+          <div className="text-[12px] text-ink-muted italic">(empty result)</div>
+        )}
+      </div>
+
+      {/* Meta — session / project / timestamps. The collapsed row no longer
+          shows project or full timestamps, so they all land here. */}
+      <div className="flex items-center gap-x-3 gap-y-1 flex-wrap text-[11px] mono text-ink-muted">
+        <Link
+          to={`/session/${row.sessionId}#seq-${row.seq}`}
+          className="text-klein hover:underline"
+          onClick={(e) => e.stopPropagation()}
+        >
+          Open session →
+        </Link>
+        <span className="truncate max-w-[40ch]">
+          session: {row.sessionTitle}
+        </span>
+        {row.projectName && (
+          <span className="truncate max-w-[30ch]">
+            project: {row.projectName}
+          </span>
+        )}
+        <span>started {formatClock(row.startedAt)}</span>
+        {row.finishedAt && <span>finished {formatClock(row.finishedAt)}</span>}
+      </div>
+    </div>
   );
+}
+
+/** JSON.stringify with a catch-all in case of circular refs or getters that
+ * throw. Mirrors the helper in Chat.tsx but inline here to keep /agents
+ * decoupled from the chat surface. */
+function safeStringify(input: Record<string, unknown>): string {
+  try {
+    return JSON.stringify(input, null, 2);
+  } catch {
+    return String(input);
+  }
 }
 
 /** Short, readable duration formatting: "340ms" / "12s" / "2m 10s" / "1h 5m". */
@@ -381,3 +592,6 @@ function formatClock(iso: string): string {
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
+
+// `StatusDot` is retained only in the revision history — rows now encode
+// status via a colored left-border strip + background tint (see rowTint).

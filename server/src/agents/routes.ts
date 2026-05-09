@@ -103,6 +103,22 @@ function summarizeInput(inputJson: string | null): string {
     : firstLine;
 }
 
+/** Parse the tool_use `input` JSON column into an object, defensively. Bad or
+ * non-object payloads return `{}` so the wire shape (always-object) is stable.
+ * Consumers (the /agents expanded view) pretty-print this as-is. */
+function parseInputObject(inputJson: string | null): Record<string, unknown> {
+  if (!inputJson) return {};
+  try {
+    const parsed = JSON.parse(inputJson);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
+    }
+  } catch {
+    /* fall through */
+  }
+  return {};
+}
+
 function derivePreview(content: string | null): string | null {
   if (typeof content !== "string") return null;
   const trimmed = content.trim();
@@ -243,6 +259,7 @@ export async function registerAgentsRoutes(
               projectName: use.project_name,
               toolName: use.tool_name,
               description: summarizeInput(use.input_json),
+              input: parseInputObject(use.input_json),
               seq: Number(use.seq) | 0,
               startedAt: use.created_at,
               finishedAt,

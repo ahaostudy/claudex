@@ -712,6 +712,67 @@ function SessionRow({
   const rel = formatRel(s.lastMessageAt ?? s.updatedAt);
   const branch = s.branch ?? "main";
   const { linesAdded, linesRemoved, filesChanged, contextPct } = s.stats;
+  // Inline delete confirm. Opened by the trailing trash button on the row;
+  // anchored to the row itself (NOT a modal) so the user stays oriented in
+  // the list. Escape closes. The Delete button is NOT autofocused — we don't
+  // want a stray Enter to nuke a session on mobile keyboards.
+  const forgetSession = useSessions((st) => st.forgetSession);
+  const refreshSessions = useSessions((st) => st.refreshSessions);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const confirmRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!confirmOpen) return;
+    const onDoc = (ev: MouseEvent) => {
+      if (confirmRef.current && !confirmRef.current.contains(ev.target as Node)) {
+        setConfirmOpen(false);
+      }
+    };
+    const onKey = (ev: KeyboardEvent) => {
+      if (ev.key === "Escape") {
+        ev.stopPropagation();
+        setConfirmOpen(false);
+      }
+    };
+    // mousedown so click on the row's <Link> still navigates after close —
+    // but deletion via trash icon stops propagation so we don't race.
+    document.addEventListener("mousedown", onDoc);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDoc);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [confirmOpen]);
+
+  const openConfirm = (e: React.MouseEvent) => {
+    // Critical: the row is a <Link> — without these two the trash click
+    // would navigate to /session/:id before the popover can open.
+    e.preventDefault();
+    e.stopPropagation();
+    setConfirmOpen(true);
+  };
+
+  const onDelete = async (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (deleting) return;
+    setDeleting(true);
+    try {
+      await api.deleteSession(s.id);
+      forgetSession(s.id);
+      toast("Session deleted");
+      // Also refresh so grouped counts stay accurate.
+      refreshSessions();
+    } catch (err) {
+      const code = err instanceof ApiError ? err.code : "delete_failed";
+      toast(`Delete failed: ${code}`);
+      setDeleting(false);
+      setConfirmOpen(false);
+      return;
+    }
+    // Component will unmount on successful delete — no need to reset state.
+  };
   // "Looks stuck" — session reports `running` but its last activity timestamp
   // is > 5 min old. Normally the server watchdog catches this; on a recent
   // restart the in-memory timer can be missing until on-boot sweep fires, so
@@ -739,13 +800,14 @@ function SessionRow({
   const showRing = !archived && pct > 0;
 
   return (
-    <Link
-      to={href}
-      className={cn(
-        "block border-b border-line hover:bg-paper/40 cursor-pointer",
-        archived && "opacity-75",
-      )}
-    >
+    <div className="relative group/row">
+      <Link
+        to={href}
+        className={cn(
+          "block border-b border-line hover:bg-paper/40 cursor-pointer",
+          archived && "opacity-75",
+        )}
+      >
       {/* Mobile stacked layout — mirrors mockup s-02 rows (lines 370-403):
           CAPS status line (dot + label + relative time) on top, title with
           context ring aligned to its right, optional subtitle, meta row. */}
@@ -961,6 +1023,70 @@ function SessionRow({
         </div>
       </div>
     </Link>
+      {/* Trailing quick-delete icon. Absolutely positioned so it overlays
+          the row without breaking the Link's tap target. preventDefault +
+          stopPropagation on click are critical — otherwise the row's
+          <Link> navigates to /session/:id before the popover opens. */}
+      <button
+        type="button"
+        onClick={openConfirm}
+        aria-label="Delete session"
+        title="Delete session"
+        className={cn(
+          "absolute top-2 right-2 md:top-3 md:right-3 h-8 w-8 rounded-[8px] border border-line bg-canvas/95 shadow-card",
+          "flex items-center justify-center text-ink-muted hover:text-danger hover:bg-danger-wash hover:border-danger/30",
+          // Always visible on mobile (no hover); only surfaces on hover on
+          // desktop so the row chrome stays quiet until you reach for it.
+          "md:opacity-0 md:group-hover/row:opacity-100 md:focus-visible:opacity-100",
+          confirmOpen && "md:opacity-100",
+        )}
+      >
+        <Trash2 className="w-3.5 h-3.5" />
+      </button>
+      {confirmOpen && (
+        <div
+          ref={confirmRef}
+          role="dialog"
+          aria-label="Confirm delete session"
+          // Anchored below the trash button. Uses max-w so a long warning
+          // still fits on a 390px viewport; z-30 to clear the sticky group
+          // header (z-10) + filter rail (z-20) without going modal-tier.
+          className="absolute right-2 md:right-3 top-11 md:top-12 z-30 w-[260px] rounded-[10px] border border-line bg-canvas shadow-lift p-3"
+          onClick={(e) => {
+            // Keep clicks inside the popover from bubbling up to the row's
+            // <Link> (which would navigate and lose the confirm state).
+            e.stopPropagation();
+          }}
+        >
+          <div className="text-[13px] font-medium mb-1">Delete session?</div>
+          <p className="text-[12px] text-ink-muted leading-snug">
+            This removes the transcript and tool runs. Can't be undone.
+          </p>
+          <div className="mt-3 flex gap-2">
+            <button
+              type="button"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setConfirmOpen(false);
+              }}
+              disabled={deleting}
+              className="h-8 px-3 rounded-[6px] border border-line bg-paper text-[12px] text-ink-soft hover:bg-canvas disabled:opacity-50"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={onDelete}
+              disabled={deleting}
+              className="ml-auto h-8 px-3 rounded-[6px] bg-danger text-canvas text-[12px] font-medium hover:opacity-90 disabled:opacity-50"
+            >
+              {deleting ? "Deleting…" : "Delete"}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 

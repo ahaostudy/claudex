@@ -1267,6 +1267,11 @@ export const SubagentSummary = z.object({
   toolName: z.string(),
   /** Short human-readable label derived from the tool_use input payload. */
   description: z.string(),
+  /** Full `input` payload of the `tool_use` event — shown pretty-printed in
+   * the /agents expanded-row view. Shape varies by tool (Task / Agent /
+   * Explore), so we keep it loose as an arbitrary object. Empty object when
+   * the SDK emitted no input or when parsing failed. */
+  input: z.record(z.string(), z.unknown()),
   /** Seq of the `tool_use` event in its session — lets the UI deep-link via
    * `/session/:id#seq-<seq>`. */
   seq: z.number().int().nonnegative(),
