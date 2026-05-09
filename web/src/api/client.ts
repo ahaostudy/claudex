@@ -418,10 +418,11 @@ export const api = {
    * The `stats` block is unconditional — the four cards read the same
    * regardless of which filter the caller applied.
    */
-  listAgents(opts?: { status?: "active" | "done" | "all"; limit?: number }) {
+  listAgents(opts?: { status?: "active" | "done" | "all"; limit?: number; sessionId?: string }) {
     const qs = new URLSearchParams();
     if (opts?.status && opts.status !== "all") qs.set("status", opts.status);
     if (opts?.limit !== undefined) qs.set("limit", String(opts.limit));
+    if (opts?.sessionId) qs.set("sessionId", opts.sessionId);
     const q = qs.toString();
     return request<ListSubagentsResponse>(
       `/api/agents${q ? `?${q}` : ""}`,

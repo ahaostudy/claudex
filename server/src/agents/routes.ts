@@ -156,6 +156,7 @@ export async function registerAgentsRoutes(
       const query = req.query as {
         status?: string;
         limit?: string;
+        sessionId?: string;
       };
       const statusFilter = parseStatusFilter(query.status);
       if (statusFilter === "invalid") {
@@ -167,50 +168,66 @@ export async function registerAgentsRoutes(
         ? Math.min(rawLimit, MAX_LIMIT)
         : DEFAULT_LIMIT;
 
+      // Optional session-scope filter. When set, the SQL WHERE narrows to
+      // tool_use / tool_result rows that live on this session only — used by
+      // the per-session Subagents rail / drawer in Chat. An unknown or empty
+      // string is treated as "no filter" (same as omitting the param); we
+      // don't 404 because the panel might load concurrent with a session
+      // delete and surfacing an empty list is friendlier than an error.
+      const sessionIdFilter = typeof query.sessionId === "string" && query.sessionId.length > 0
+        ? query.sessionId
+        : null;
+
       const snapshot = deps.db.transaction(
         (): ListSubagentsResponse => {
           // One pass for the tool_use side. We hard-filter to the recognized
           // subagent-family tool names in SQL so the JS join doesn't walk
-          // every tool_use on the system.
-          const toolUseRows = deps.db
-            .prepare(
-              `SELECT
-                 e.id AS id,
-                 e.session_id AS session_id,
-                 s.title AS session_title,
-                 p.name AS project_name,
-                 e.seq AS seq,
-                 e.created_at AS created_at,
-                 json_extract(e.payload, '$.toolUseId') AS tool_use_id,
-                 json_extract(e.payload, '$.name') AS tool_name,
-                 json_extract(e.payload, '$.input') AS input_json
-               FROM session_events e
-               JOIN sessions s ON s.id = e.session_id
-               LEFT JOIN projects p ON p.id = s.project_id
-               WHERE e.kind = 'tool_use'
-                 AND json_extract(e.payload, '$.name') IN (${SUBAGENT_IN_CLAUSE})
-                 AND json_extract(e.payload, '$.toolUseId') IS NOT NULL
-               ORDER BY e.created_at DESC`,
-            )
-            .all() as ToolUseRow[];
+          // every tool_use on the system. When sessionIdFilter is set we
+          // narrow the WHERE clause accordingly — the same filter is also
+          // applied to the tool_result pass below so both sides stay scoped.
+          const toolUseSql =
+            `SELECT
+               e.id AS id,
+               e.session_id AS session_id,
+               s.title AS session_title,
+               p.name AS project_name,
+               e.seq AS seq,
+               e.created_at AS created_at,
+               json_extract(e.payload, '$.toolUseId') AS tool_use_id,
+               json_extract(e.payload, '$.name') AS tool_name,
+               json_extract(e.payload, '$.input') AS input_json
+             FROM session_events e
+             JOIN sessions s ON s.id = e.session_id
+             LEFT JOIN projects p ON p.id = s.project_id
+             WHERE e.kind = 'tool_use'
+               AND json_extract(e.payload, '$.name') IN (${SUBAGENT_IN_CLAUSE})
+               AND json_extract(e.payload, '$.toolUseId') IS NOT NULL
+               ${sessionIdFilter ? "AND e.session_id = ?" : ""}
+             ORDER BY e.created_at DESC`;
+          const toolUseRows = (sessionIdFilter
+            ? deps.db.prepare(toolUseSql).all(sessionIdFilter)
+            : deps.db.prepare(toolUseSql).all()) as ToolUseRow[];
 
           // Companion pass for every tool_result. In theory we could scope
           // this to only the toolUseIds we just picked, but that would be
           // either a very long `IN (...)` list or a temp table — simpler to
-          // fetch all tool_results and look them up by Map.
-          const toolResultRows = deps.db
-            .prepare(
-              `SELECT
-                 e.session_id AS session_id,
-                 e.created_at AS created_at,
-                 json_extract(e.payload, '$.toolUseId') AS tool_use_id,
-                 json_extract(e.payload, '$.isError') AS is_error,
-                 json_extract(e.payload, '$.content') AS content
-               FROM session_events e
-               WHERE e.kind = 'tool_result'
-                 AND json_extract(e.payload, '$.toolUseId') IS NOT NULL`,
-            )
-            .all() as ToolResultRow[];
+          // fetch all tool_results and look them up by Map. When a per-session
+          // filter is active we narrow here too so the scan stays proportional
+          // to the session's event stream rather than the whole database.
+          const toolResultSql =
+            `SELECT
+               e.session_id AS session_id,
+               e.created_at AS created_at,
+               json_extract(e.payload, '$.toolUseId') AS tool_use_id,
+               json_extract(e.payload, '$.isError') AS is_error,
+               json_extract(e.payload, '$.content') AS content
+             FROM session_events e
+             WHERE e.kind = 'tool_result'
+               AND json_extract(e.payload, '$.toolUseId') IS NOT NULL
+               ${sessionIdFilter ? "AND e.session_id = ?" : ""}`;
+          const toolResultRows = (sessionIdFilter
+            ? deps.db.prepare(toolResultSql).all(sessionIdFilter)
+            : deps.db.prepare(toolResultSql).all()) as ToolResultRow[];
 
           // Index the results by `(sessionId, toolUseId)`. Scoping to the
           // owning session protects us from the theoretical case where two

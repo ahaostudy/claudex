@@ -3,7 +3,6 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import {
   Bell,
   BarChart3,
-  Bot,
   Calendar,
   Check,
   ListOrdered,
@@ -34,7 +33,6 @@ export type ShellTab =
   | "sessions"
   | "routines"
   | "queue"
-  | "agents"
   | "alerts"
   | "usage"
   | "settings";
@@ -58,7 +56,6 @@ const NAV: NavItem[] = [
   { id: "sessions", label: "Sessions", icon: MessageSquare, href: "/sessions" },
   { id: "routines", label: "Routines", icon: Calendar, href: "/routines" },
   { id: "queue", label: "Queue", icon: ListOrdered, href: "/queue" },
-  { id: "agents", label: "Subagents", icon: Bot, href: "/agents" },
   { id: "alerts", label: "Alerts", icon: Bell, href: "/alerts" },
   { id: "usage", label: "Usage", icon: BarChart3, href: "/usage" },
   { id: "settings", label: "Settings", icon: SettingsIcon, href: "/settings" },
@@ -68,7 +65,7 @@ const NAV: NavItem[] = [
 // (analytics / observability surfaces where horizontal space helps a lot), so
 // they drop off the thumb-reachable bottom rail. Queue stays because the whole
 // point of Queue is "start a batch from your couch".
-const MOBILE_NAV = NAV.filter((n) => n.id !== "usage" && n.id !== "agents");
+const MOBILE_NAV = NAV.filter((n) => n.id !== "usage");
 
 export function AppShell({
   tab,

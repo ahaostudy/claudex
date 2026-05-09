@@ -3,6 +3,7 @@ import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import {
   AlertTriangle,
   Archive,
+  Bot,
   Check,
   ChevronDown,
   ChevronLeft,
@@ -20,7 +21,8 @@ import {
   X,
 } from "lucide-react";
 import { ChatSessionsRail } from "@/components/ChatSessionsRail";
-import { ChatTasksRail } from "@/components/ChatTasksRail";
+import { SessionSubagentsRail } from "@/components/SessionSubagentsRail";
+import { SubagentsDrawer } from "@/components/SubagentsDrawer";
 import { useSessions } from "@/state/sessions";
 import { api } from "@/api/client";
 import type {
@@ -106,6 +108,9 @@ export function ChatScreen() {
   const [showUsage, setShowUsage] = useState(false);
   const [showSideChat, setShowSideChat] = useState(false);
   const [showTerminal, setShowTerminal] = useState(false);
+  // Mobile-only bottom-sheet for the per-session Subagents list. Desktop uses
+  // the right-rail <SessionSubagentsRail /> instead (gated by `showTasks`).
+  const [showSubagentsDrawer, setShowSubagentsDrawer] = useState(false);
   // Click-to-expand image overlay. Populated by the thumbnail click handlers
   // in Piece below — we hold the state here so the lightbox renders at the
   // Chat root, above every other drawer / sheet.
@@ -588,6 +593,16 @@ export function ChatScreen() {
         />
         <button
           type="button"
+          onClick={() => setShowSubagentsDrawer(true)}
+          disabled={!session}
+          aria-label="Open subagents"
+          title="Subagents"
+          className="h-9 w-9 rounded-[8px] bg-paper border border-line flex items-center justify-center shrink-0 disabled:opacity-40"
+        >
+          <Bot className="w-4 h-4 text-ink-soft" />
+        </button>
+        <button
+          type="button"
           onClick={() => setShowMore(true)}
           disabled={!session}
           className="h-9 w-9 rounded-[8px] bg-paper border border-line flex items-center justify-center shrink-0 disabled:opacity-40"
@@ -909,22 +924,13 @@ export function ChatScreen() {
         <UsagePanel session={session} onClose={() => setShowUsage(false)} />
       )}
       </main>
-      {showTasks && (
-        <ChatTasksRail
-          session={session}
-          pieces={pieces}
-          pendingApprovalCount={pieces.filter(
-            (p) => p.kind === "permission_request",
-          ).length}
-          onReveal={(attr, id) => {
-            const el = scroller.current?.querySelector(
-              `[data-${attr}="${CSS.escape(id)}"]`,
-            );
-            if (el) {
-              el.scrollIntoView({ behavior: "smooth", block: "center" });
-            }
-          }}
-          onClose={() => setShowTasks(false)}
+      {showTasks && id && (
+        <SessionSubagentsRail sessionId={id} />
+      )}
+      {showSubagentsDrawer && id && (
+        <SubagentsDrawer
+          sessionId={id}
+          onClose={() => setShowSubagentsDrawer(false)}
         />
       )}
       {lightbox && (
