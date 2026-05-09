@@ -45,6 +45,7 @@ async function main() {
     webDist,
     vapid,
     stateDir: config.stateDir,
+    port: config.port,
   });
 
   // Declared ahead of `shutdown` so the closure below can `.close()` it.

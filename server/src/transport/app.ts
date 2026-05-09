@@ -30,6 +30,7 @@ import { registerAgentsRoutes } from "../agents/routes.js";
 import { AuditStore } from "../audit/store.js";
 import { registerAuditRoutes } from "../audit/routes.js";
 import { registerBackupRoutes } from "../backup/routes.js";
+import { registerAdminRoutes } from "../admin/routes.js";
 import { registerWsRoute } from "./ws.js";
 import { registerPtyRoutes } from "./pty.js";
 import { agentRunnerFactory } from "../sessions/agent-runner.js";
@@ -91,6 +92,13 @@ export interface AppDeps {
    * `loadConfig()` behavior. Tests inject a tmp state dir via `bootstrapAuthedApp`.
    */
   stateDir?: string;
+  /**
+   * The port the server will listen on. Threaded through so the admin
+   * restart handler can tell its detached worker which port to watch.
+   * Optional for back-compat; defaults to 5179 (same default as
+   * `loadConfig()`). Tests inject 0 / a random port.
+   */
+  port?: number;
 }
 
 export async function buildApp(
@@ -225,6 +233,11 @@ export async function buildApp(
   await registerAgentsRoutes(app, { db: deps.db });
   await registerAuditRoutes(app, { db: deps.db, audit });
   await registerBackupRoutes(app, { db: deps.db });
+  await registerAdminRoutes(app, {
+    audit,
+    port: deps.port ?? 5179,
+    stateDir,
+  });
 
   // Routines: periodic cron-driven session spawns. The scheduler owns a single
   // timer chained across all active routines and reloads itself on any CRUD.

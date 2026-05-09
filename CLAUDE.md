@@ -82,12 +82,26 @@ is the time a Vite-side type elision breaks the server build.
 3. **`pnpm --filter @claudex/web build`** — Vite build must succeed. This
    catches things typecheck misses (CSS, imports, bundle-only errors).
 4. **Restart the server. Kill only the node process — leave frpc alone.**
+   Use the restart script. It spawns a fully detached worker (Node
+   `spawn({ detached: true, stdio: 'ignore' })`, cross-platform — works
+   on macOS/Linux/Windows without `setsid`/`nohup` tricks) that waits for
+   port 5179 to free up, then starts the new server. The worker is NOT a
+   child of your shell / Claude / the old server, so killing the old
+   server cannot cascade-kill the restart.
    ```sh
    SRV=$(lsof -ti :5179 -sTCP:LISTEN | head -1)
-   kill $SRV
-   cd server && nohup pnpm exec tsx src/index.ts \
-     > ~/.claudex/server-stdout.log 2>&1 < /dev/null & disown
+   node scripts/restart.mjs 5179   # detaches the relaunch worker, then returns
+   kill $SRV                        # worker sees the port free and starts new server
    ```
+   If you're logged in and the server is already up, you can instead hit
+   the HTTP endpoint — it runs the same launcher internally and returns
+   before exiting: `curl -b cookies.txt -X POST http://127.0.0.1:5179/api/admin/restart`.
+   This is what claudex itself uses when Claude needs to restart the
+   server it's running under (the old `kill + nohup` shell sequence
+   deadlocked because Claude is a child of the server — killing the
+   server killed Claude mid-command before `nohup ... &` finished
+   detaching).
+
    Then verify three things:
    - new pid listening on 5179: `lsof -ti :5179 -sTCP:LISTEN`
    - frpc pid unchanged: `pgrep -f 'frpc -c'` (remember it from before)

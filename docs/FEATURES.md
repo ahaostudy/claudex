@@ -42,6 +42,7 @@ truth is `git grep -c '^|' docs/FEATURES.md` for ✅ / 🟡 / ⬜ totals and
 | ✅ | `CLAUDEX_WEB_DIST=<path>` override; `CLAUDEX_WEB_DIST=none` disables the static mount (use for Vite dev on 5173) | `server/src/index.ts` |
 | ✅ | pino logger to `~/.claudex/logs/server.log`, pretty to stdout in dev | `server/src/lib/logger.ts` |
 | ✅ | Graceful shutdown on SIGINT/SIGTERM — disposes session runners, closes app, closes DB | `server/src/index.ts` |
+| 🟡 | **Self-restart** — `POST /api/admin/restart` (login-gated). Spawns `scripts/restart-worker.mjs` as a detached child (Node's `child_process.spawn({detached:true})` handles the platform work: `setsid(2)` on Unix, `DETACHED_PROCESS + CREATE_NEW_PROCESS_GROUP` on Windows), replies 200 with `{restarterPid, port, log}`, then SIGTERMs itself so the standard shutdown handler runs. Worker polls the listen port via `net.createServer().listen()` (portable — no `lsof`/`netstat`/`ss`), then execs `pnpm exec tsx src/index.ts` once the port is free. 30s ceiling on the port-drain wait. Audit event `server_restart`. Also runnable manually as `node scripts/restart.mjs [port]`. Restart logs appended to `~/.claudex/server-stdout.log`. Designed so the Claude CLI — a subprocess of the server — can trigger its own host's restart without being killed mid-command when the server dies, which is the failure mode plain `kill && nohup ... & disown` has. UI surface for this (a "Restart server" button in Settings) is not wired yet — that's the 🟡 | `server/src/admin/routes.ts`, `scripts/restart.mjs`, `scripts/restart-worker.mjs` |
 
 ## Auth
 
