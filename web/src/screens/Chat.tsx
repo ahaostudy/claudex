@@ -91,7 +91,15 @@ export function ChatScreen() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const location = useLocation();
-  const [session, setSession] = useState<Session | null>(null);
+  // `sessionBase` holds the full session DTO we fetched via REST (title,
+  // model, mode, tags, worktree path, etc). It's write-authoritative for
+  // those fields and gets updated on explicit user edits (PATCH, settings
+  // sheet). But `status` is driven entirely by the server via WS
+  // `session_update` frames, which update the sessions store — the local
+  // copy would otherwise go stale the moment claude starts running. See
+  // `session` below: we merge the live status from the store over the
+  // local base so every status-dependent render reacts to the wire.
+  const [sessionBase, setSession] = useState<Session | null>(null);
   const [project, setProject] = useState<Project | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [showUsage, setShowUsage] = useState(false);
@@ -160,6 +168,33 @@ export function ChatScreen() {
     viewMode,
     setViewMode,
   } = useSessions();
+
+  // Live status subscription from the global sessions store. Populated by
+  // `session_update` WS frames (see state/sessions.ts). When present, it
+  // overrides the stale `sessionBase.status` so the composer lock, status
+  // dot, and status-gated UI all react to server-side transitions
+  // (running / awaiting / idle / error) without waiting for a page reload.
+  // Falls back to undefined when the store hasn't seen this session yet
+  // (direct-nav / no Home visit); in that case we use the base status.
+  const liveStatus = useSessions((s) =>
+    id ? s.sessions.find((x) => x.id === id)?.status : undefined,
+  );
+  // Ensure the global sessions store knows about this session so live
+  // `session_update` frames have a row to update. Fires once per id change.
+  // Cheap — `/api/sessions` returns the full list and is an indexed query.
+  const refreshSessions = useSessions((s) => s.refreshSessions);
+  useEffect(() => {
+    if (!id) return;
+    // Skip if the store already has it (came from Home or a prior load).
+    const present = useSessions.getState().sessions.some((x) => x.id === id);
+    if (!present) void refreshSessions();
+  }, [id, refreshSessions]);
+  const session = useMemo<Session | null>(() => {
+    if (!sessionBase) return null;
+    return liveStatus !== undefined
+      ? { ...sessionBase, status: liveStatus }
+      : sessionBase;
+  }, [sessionBase, liveStatus]);
 
   useEffect(() => {
     init();
@@ -754,6 +789,15 @@ export function ChatScreen() {
             }
           />
         ))}
+        {/* Tail indicator — as long as the session is running, show three
+            bouncing dots at the bottom so the user knows claude is working.
+            A `pending` UIPiece already renders its own dots; only show this
+            fallback when the tail isn't already one. */}
+        {session?.status === "running" &&
+          (visiblePieces.length === 0 ||
+            visiblePieces[visiblePieces.length - 1].kind !== "pending") && (
+            <RunningDots />
+          )}
         {viewMode === "summary" && (
           <SummaryCards session={session} changes={changes} />
         )}
@@ -1356,55 +1400,40 @@ function Piece({
 }
 
 // ---------------------------------------------------------------------------
-// Pending placeholder — the "claude is thinking" inline marker.
+// Pending placeholder — three bouncing dots so the user can tell the request
+// is alive. The Agent SDK doesn't surface partial message text, so there's
+// nothing to stream in between; the dots are the whole signal.
 //
-// The Agent SDK doesn't surface partial message text: a reply lands all-at-once
-// after `message_stop`. This block fills the gap between user send and the
-// first substantive frame so the user can tell the request is alive.
-// Mentions the limitation in a second line so power users understand why
-// the reply doesn't stream word-by-word. See memory/project_streaming_deferred.md.
+// The `stalled` branch surfaces a short red hint after ~30s of silence (see
+// armStallTimer in state/sessions.ts) so the user knows to hit Stop.
 // ---------------------------------------------------------------------------
 function PendingBlock({ stalled }: { stalled: boolean }) {
-  return (
-    <div className="max-w-[72ch]">
-      <div className="flex items-center gap-2 mb-1.5">
-        <svg viewBox="0 0 32 32" className="w-3.5 h-3.5">
-          <path d="M9 22 L16 8 L23 22 Z" fill="#cc785c" />
-          <circle cx="16" cy="18" r="2.2" fill="#faf9f5" />
-        </svg>
-        <span className="mono text-[11px] text-ink-muted">claude</span>
+  if (stalled) {
+    return (
+      <div
+        className="mono text-[12.5px] text-danger pl-3 border-l-2 border-danger/60 max-w-[72ch]"
+        role="status"
+      >
+        no response in 30s — the request may be stuck. you can keep typing
+        or hit Stop above to cancel.
       </div>
-      {stalled ? (
-        <div
-          className={cn(
-            "mono text-[12.5px] text-danger pl-3 border-l-2 border-danger/60",
-          )}
-          role="status"
-        >
-          no response in 30s — the request may be stuck. you can keep typing
-          or hit Stop above to cancel.
-        </div>
-      ) : (
-        <div className="pl-3 border-l-2 border-line">
-          <div
-            className={cn(
-              "mono text-[12.5px] text-ink-muted flex items-center gap-1.5",
-            )}
-            aria-live="polite"
-          >
-            <span>Thinking</span>
-            <span className="inline-flex gap-0.5">
-              <span className="pending-dot" />
-              <span className="pending-dot" style={{ animationDelay: "0.15s" }} />
-              <span className="pending-dot" style={{ animationDelay: "0.3s" }} />
-            </span>
-          </div>
-          <div className="text-[11px] text-ink-faint mt-1 italic">
-            (claude won't stream this reply — the SDK ships each message whole,
-            so expect it to land all at once.)
-          </div>
-        </div>
-      )}
+    );
+  }
+  return <RunningDots />;
+}
+
+// Three bouncing dots, nothing else. Used both as the `pending` piece body
+// and as the tail indicator any time the session is in a running state.
+function RunningDots() {
+  return (
+    <div
+      className="inline-flex items-center gap-0.5 text-ink-muted"
+      aria-live="polite"
+      aria-label="working"
+    >
+      <span className="pending-dot" />
+      <span className="pending-dot" style={{ animationDelay: "0.15s" }} />
+      <span className="pending-dot" style={{ animationDelay: "0.3s" }} />
     </div>
   );
 }

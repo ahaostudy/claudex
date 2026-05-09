@@ -31,7 +31,26 @@ export function DiffReviewScreen() {
   const navigate = useNavigate();
   const [search] = useSearchParams();
   const preselectId = search.get("approvalId");
-  const [session, setSession] = useState<Session | null>(null);
+  // See the same pattern in Chat.tsx: `sessionBase` holds the REST-fetched
+  // DTO; the live `status` comes from the global sessions store (populated
+  // by WS `session_update` frames) so the header dot + awaiting gates
+  // react to server transitions without waiting for a reload.
+  const [sessionBase, setSession] = useState<Session | null>(null);
+  const liveStatus = useSessions((s) =>
+    id ? s.sessions.find((x) => x.id === id)?.status : undefined,
+  );
+  const refreshSessions = useSessions((s) => s.refreshSessions);
+  useEffect(() => {
+    if (!id) return;
+    const present = useSessions.getState().sessions.some((x) => x.id === id);
+    if (!present) void refreshSessions();
+  }, [id, refreshSessions]);
+  const session = useMemo<Session | null>(() => {
+    if (!sessionBase) return null;
+    return liveStatus !== undefined
+      ? { ...sessionBase, status: liveStatus }
+      : sessionBase;
+  }, [sessionBase, liveStatus]);
   const [diffs, setDiffs] = useState<PendingDiffEntry[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selectedToolUseId, setSelectedToolUseId] = useState<string | null>(
