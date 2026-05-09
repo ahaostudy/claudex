@@ -2202,21 +2202,30 @@
                 <div class="iphone-island"></div>
                 <div class="iphone-status"><span class="mono">9:41</span><span class="flex items-center gap-1"><span class="h-2 w-4 bg-ink rounded-sm"></span><span class="mono text-[11px]">5G</span><span class="h-2.5 w-5 border border-ink rounded-sm flex items-center justify-end pr-[1px]"><span class="h-1.5 w-3.5 bg-ink rounded-[1px]"></span></span></span></div>
                 <div class="iphone-home"></div>
-                <div class="iphone-content relative bg-canvas">
-                  <!-- dimmed chat behind -->
-                  <div class="absolute inset-0 opacity-40 overflow-hidden">
-                    <div class="px-4 py-2.5 border-b border-line flex items-center gap-2">
-                      <div class="h-8 w-8 rounded-[8px] bg-paper border border-line"></div>
-                      <div class="min-w-0 flex-1"><div class="text-[14px] font-medium truncate">Fix hydration mismatch on…</div><div class="flex items-center gap-1.5 text-[11px] text-ink-muted mt-0.5"><span class="mono">spindle</span></div></div>
+                <div class="iphone-content relative bg-canvas flex flex-col">
+                  <!-- Chat header (visible behind the drawer's peek strip). -->
+                  <div class="px-4 py-2.5 border-b border-line flex items-center gap-2 shrink-0">
+                    <div class="h-8 w-8 rounded-[8px] bg-paper border border-line flex items-center justify-center"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-4 h-4 text-ink-soft"><path d="M15 6l-6 6 6 6"/></svg></div>
+                    <div class="min-w-0 flex-1">
+                      <div class="flex items-center gap-1.5"><span class="h-2 w-2 rounded-full bg-warn"></span><div class="text-[14px] font-medium truncate">Fix hydration mismatch…</div></div>
+                      <div class="flex items-center gap-1.5 text-[11px] text-ink-muted mt-0.5"><span class="mono">spindle</span><span>·</span><span>opus-4.7</span></div>
                     </div>
-                    <div class="px-4 py-4 space-y-5">
-                      <div class="flex justify-end"><div class="bg-ink text-canvas rounded-[14px] rounded-br-[4px] px-3.5 py-2 text-[14px]">Dispatching…</div></div>
-                      <div><div class="text-[14px] text-ink">Kicking off the parallel investigation.</div></div>
+                    <div class="h-8 w-8 rounded-[8px] bg-klein-wash/60 border border-klein/30 flex items-center justify-center" title="Subagents (open)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-4 h-4 text-klein-ink"><circle cx="12" cy="8" r="3"/><path d="M6 20a6 6 0 0 1 12 0"/></svg></div>
+                  </div>
+                  <!-- Chat messages in the background (visible through the
+                       dim overlay above the drawer). -->
+                  <div class="flex-1 overflow-hidden px-4 py-3 space-y-3">
+                    <div class="flex justify-end"><div class="bg-ink text-canvas rounded-[14px] rounded-br-[4px] px-3.5 py-2 text-[14px]">Dispatch three parallel investigations.</div></div>
+                    <div>
+                      <div class="flex items-center gap-2 mb-1"><svg viewBox="0 0 32 32" class="w-3.5 h-3.5"><path d="M9 22 L16 8 L23 22 Z" fill="#cc785c"/><circle cx="16" cy="18" r="2.2" fill="#faf9f5"/></svg><span class="mono text-[11px] text-ink-muted">claude</span></div>
+                      <div class="text-[13.5px] leading-[1.55] text-ink">Kicking off Agent · "trace hydration warning" and Task · "vitest + lint" in parallel. Right rail shows the live runs.</div>
                     </div>
                   </div>
-                  <div class="absolute inset-0 bg-ink/30 backdrop-blur-[2px]"></div>
-                  <!-- Bottom-sheet drawer -->
-                  <div class="absolute left-0 right-0 bottom-0 top-[110px] rounded-t-[24px] bg-canvas border-t border-x border-line shadow-lift flex flex-col">
+                  <!-- Dim overlay + bottom-sheet drawer. The overlay sits
+                       above the message stream, below the drawer, so the
+                       chat stays readable at 40% opacity — matches s-05. -->
+                  <div class="absolute inset-0 bg-ink/30 backdrop-blur-[2px] pointer-events-none"></div>
+                  <div class="absolute left-0 right-0 bottom-0 top-[56px] rounded-t-[20px] bg-canvas border-t border-x border-line shadow-lift flex flex-col">
                     <div class="flex justify-center pt-3"><span class="h-1 w-12 bg-line-strong rounded-full"></span></div>
                     <div class="px-4 py-3 border-b border-line flex items-center">
                       <span class="caps text-ink-muted">Subagents</span>
@@ -2299,54 +2308,12 @@
             </div>
           </div>
 
-          <!-- ==================== iPhone · empty ==================== -->
-          <div class="flex flex-col items-center gap-3">
-            <div class="caps text-ink-muted">iPhone · empty drawer</div>
-            <div class="iphone">
-              <div class="iphone-inner">
-                <div class="iphone-island"></div>
-                <div class="iphone-status"><span class="mono">9:41</span><span class="flex items-center gap-1"><span class="h-2 w-4 bg-ink rounded-sm"></span><span class="mono text-[11px]">5G</span><span class="h-2.5 w-5 border border-ink rounded-sm flex items-center justify-end pr-[1px]"><span class="h-1.5 w-3.5 bg-ink rounded-[1px]"></span></span></span></div>
-                <div class="iphone-home"></div>
-                <div class="iphone-content relative bg-canvas">
-                  <div class="absolute inset-0 opacity-40 overflow-hidden">
-                    <div class="px-4 py-2.5 border-b border-line flex items-center gap-2">
-                      <div class="h-8 w-8 rounded-[8px] bg-paper border border-line"></div>
-                      <div class="min-w-0 flex-1"><div class="text-[14px] font-medium truncate">Port config YAML → TOML</div><div class="flex items-center gap-1.5 text-[11px] text-ink-muted mt-0.5"><span class="mono">spindle</span></div></div>
-                    </div>
-                  </div>
-                  <div class="absolute inset-0 bg-ink/30 backdrop-blur-[2px]"></div>
-                  <div class="absolute left-0 right-0 bottom-0 top-[110px] rounded-t-[24px] bg-canvas border-t border-x border-line shadow-lift flex flex-col">
-                    <div class="flex justify-center pt-3"><span class="h-1 w-12 bg-line-strong rounded-full"></span></div>
-                    <div class="px-4 py-3 border-b border-line flex items-center">
-                      <span class="caps text-ink-muted">Subagents</span>
-                      <span class="mono text-[11px] text-ink-muted ml-auto">—</span>
-                      <button class="h-7 w-7 ml-2 rounded-[6px] border border-line flex items-center justify-center"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-3.5 h-3.5 text-ink-soft"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
-                    </div>
-                    <div class="flex-1 flex items-center justify-center px-6">
-                      <div class="text-center max-w-[26ch]">
-                        <div class="inline-flex h-10 w-10 rounded-full bg-paper border border-line items-center justify-center mb-3 text-ink-muted">
-                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-4 h-4"><circle cx="12" cy="8" r="3"/><path d="M6 20a6 6 0 0 1 12 0"/></svg>
-                        </div>
-                        <div class="text-[13px] font-medium mb-1">No subagents yet.</div>
-                        <p class="text-[12px] text-ink-muted leading-[1.5]">Any <span class="mono">Task</span> · <span class="mono">Agent</span> · <span class="mono">Explore</span> tool call shows up here.</p>
-                      </div>
-                    </div>
-                    <div class="p-3 border-t border-line text-[11px] text-ink-muted mono flex items-center gap-1.5">
-                      <span class="h-1.5 w-1.5 rounded-full bg-ink-faint"></span>
-                      <span>waiting for activity</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
 
-          <!-- ==================== FRAME 1 · populated ==================== -->
           <div class="flex-1 w-full min-w-0 flex flex-col items-center gap-3">
             <div class="caps text-ink-muted">Desktop · populated</div>
             <div class="desktop">
               <div class="desktop-chrome"><span style="background:#ff5f57"></span><span style="background:#febc2e"></span><span style="background:#28c840"></span><span class="ml-4 mono text-[11px] text-canvas/70">claudex.local — s/fix-hydration-marketing</span></div>
-              <div class="desktop-inner grid grid-cols-[220px_minmax(0,1fr)_320px]">
+              <div class="desktop-inner grid grid-cols-[220px_minmax(0,1fr)_320px] min-w-[960px] overflow-x-auto">
 
                 <!-- left global rail (condensed from s-04) -->
                 <aside class="border-r border-line bg-paper/40 flex flex-col">
@@ -2520,55 +2487,6 @@
             </div>
           </div>
 
-          <!-- ==================== FRAME 2 · empty ==================== -->
-          <div class="w-full xl:w-[440px] flex flex-col items-center gap-3">
-            <div class="caps text-ink-muted">Desktop · empty state</div>
-            <div class="desktop">
-              <div class="desktop-chrome"><span style="background:#ff5f57"></span><span style="background:#febc2e"></span><span style="background:#28c840"></span><span class="ml-4 mono text-[11px] text-canvas/70">claudex.local — s/toml-port</span></div>
-              <div class="desktop-inner grid grid-cols-[0_minmax(0,1fr)_300px]">
-                <!-- left collapsed in the compact frame -->
-                <div class="hidden"></div>
-
-                <!-- center minimal -->
-                <section class="min-w-0 flex flex-col bg-canvas">
-                  <div class="px-5 py-3 border-b border-line flex items-center gap-3">
-                    <span class="h-2 w-2 rounded-full bg-ink-faint"></span>
-                    <div class="min-w-0">
-                      <div class="text-[14px] font-medium truncate">Port config YAML → TOML</div>
-                      <div class="flex items-center gap-2 text-[11px] text-ink-muted mt-0.5"><span class="mono">spindle</span><span>·</span><span>idle</span></div>
-                    </div>
-                  </div>
-                  <div class="flex-1 px-5 py-6 flex items-center justify-center">
-                    <div class="text-[13px] text-ink-muted text-center max-w-[32ch]">Send your first message to wake claude up.</div>
-                  </div>
-                  <div class="px-5 py-3 border-t border-line">
-                    <div class="rounded-[10px] border border-line bg-paper/50 px-3 py-3 text-[13px] text-ink-muted">Start by describing what you want changed…</div>
-                  </div>
-                </section>
-
-                <!-- empty right rail -->
-                <aside class="border-l border-line bg-paper/40 flex flex-col min-h-0">
-                  <div class="px-4 py-3 border-b border-line flex items-center">
-                    <span class="caps text-ink-muted">Subagents</span>
-                    <span class="mono text-[11px] text-ink-muted ml-auto">—</span>
-                  </div>
-                  <div class="flex-1 flex items-center justify-center px-4">
-                    <div class="text-center max-w-[26ch]">
-                      <div class="inline-flex h-10 w-10 rounded-full bg-canvas border border-line items-center justify-center mb-3 text-ink-muted">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-4 h-4"><circle cx="12" cy="8" r="3"/><path d="M6 20a6 6 0 0 1 12 0"/></svg>
-                      </div>
-                      <div class="text-[13px] font-medium mb-1">No subagents yet.</div>
-                      <p class="text-[12px] text-ink-muted leading-[1.5]">Any <span class="mono">Task</span> · <span class="mono">Agent</span> · <span class="mono">Explore</span> tool call claude makes in this session will show up here.</p>
-                    </div>
-                  </div>
-                  <div class="mt-auto p-3 border-t border-line text-[11px] text-ink-muted mono flex items-center gap-1.5">
-                    <span class="h-1.5 w-1.5 rounded-full bg-ink-faint"></span>
-                    <span>waiting for activity</span>
-                  </div>
-                </aside>
-              </div>
-            </div>
-          </div>
 
         </div>
       </div>
