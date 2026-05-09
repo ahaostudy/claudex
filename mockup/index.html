@@ -2194,6 +2194,153 @@
 
         <div class="flex flex-col xl:flex-row gap-10 items-start justify-center pb-16">
 
+          <!-- ==================== iPhone · drawer populated ==================== -->
+          <div class="flex flex-col items-center gap-3">
+            <div class="caps text-ink-muted">iPhone · subagents drawer</div>
+            <div class="iphone">
+              <div class="iphone-inner">
+                <div class="iphone-island"></div>
+                <div class="iphone-status"><span class="mono">9:41</span><span class="flex items-center gap-1"><span class="h-2 w-4 bg-ink rounded-sm"></span><span class="mono text-[11px]">5G</span><span class="h-2.5 w-5 border border-ink rounded-sm flex items-center justify-end pr-[1px]"><span class="h-1.5 w-3.5 bg-ink rounded-[1px]"></span></span></span></div>
+                <div class="iphone-home"></div>
+                <div class="iphone-content relative bg-canvas">
+                  <!-- dimmed chat behind -->
+                  <div class="absolute inset-0 opacity-40 overflow-hidden">
+                    <div class="px-4 py-2.5 border-b border-line flex items-center gap-2">
+                      <div class="h-8 w-8 rounded-[8px] bg-paper border border-line"></div>
+                      <div class="min-w-0 flex-1"><div class="text-[14px] font-medium truncate">Fix hydration mismatch on…</div><div class="flex items-center gap-1.5 text-[11px] text-ink-muted mt-0.5"><span class="mono">spindle</span></div></div>
+                    </div>
+                    <div class="px-4 py-4 space-y-5">
+                      <div class="flex justify-end"><div class="bg-ink text-canvas rounded-[14px] rounded-br-[4px] px-3.5 py-2 text-[14px]">Dispatching…</div></div>
+                      <div><div class="text-[14px] text-ink">Kicking off the parallel investigation.</div></div>
+                    </div>
+                  </div>
+                  <div class="absolute inset-0 bg-ink/30 backdrop-blur-[2px]"></div>
+                  <!-- Bottom-sheet drawer -->
+                  <div class="absolute left-0 right-0 bottom-0 top-[110px] rounded-t-[24px] bg-canvas border-t border-x border-line shadow-lift flex flex-col">
+                    <div class="flex justify-center pt-3"><span class="h-1 w-12 bg-line-strong rounded-full"></span></div>
+                    <div class="px-4 py-3 border-b border-line flex items-center">
+                      <span class="caps text-ink-muted">Subagents</span>
+                      <span class="mono text-[11px] text-ink-muted ml-auto">4 this session</span>
+                      <button class="h-7 w-7 ml-2 rounded-[6px] border border-line flex items-center justify-center"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-3.5 h-3.5 text-ink-soft"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+                    </div>
+                    <div class="flex-1 overflow-y-auto">
+                      <!-- Group · Agent -->
+                      <div class="px-3 pt-3 pb-1.5 flex items-baseline gap-2">
+                        <span class="caps text-ink-soft">Agent</span>
+                        <span class="mono text-[11px] text-ink-muted">· 3 runs</span>
+                      </div>
+                      <!-- running -->
+                      <div class="mx-3 mb-1.5 rounded-[10px] border border-klein/25 bg-klein-wash/35 overflow-hidden relative">
+                        <div class="absolute left-0 top-0 bottom-0 w-[3px] bg-klein"></div>
+                        <div class="pl-3 pr-2.5 py-2 flex items-center gap-2">
+                          <span class="inline-flex items-center gap-1 px-1.5 h-5 rounded-[4px] border border-klein/40 bg-canvas/70 mono text-[10px] text-klein-ink shrink-0">Agent</span>
+                          <svg class="w-3 h-3 text-klein animate-spin shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.2-8.6"/></svg>
+                          <span class="text-[12.5px] text-ink truncate flex-1">Trace hydration warning</span>
+                          <span class="mono text-[10px] text-ink-muted shrink-0">0:14</span>
+                        </div>
+                      </div>
+                      <!-- done expanded -->
+                      <div class="mx-3 mb-1.5 rounded-[10px] border border-line bg-canvas overflow-hidden relative">
+                        <div class="absolute left-0 top-0 bottom-0 w-[3px] bg-success/50"></div>
+                        <div class="pl-3 pr-2.5 py-2 flex items-center gap-2 border-b border-line">
+                          <span class="inline-flex items-center gap-1 px-1.5 h-5 rounded-[4px] border border-line mono text-[10px] text-ink-soft shrink-0">Agent</span>
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" class="w-3 h-3 text-success shrink-0"><path d="M5 12l5 5 9-10"/></svg>
+                          <span class="text-[12.5px] text-ink truncate flex-1">Review webhook retry</span>
+                          <span class="mono text-[10px] text-ink-muted shrink-0">1m 42s</span>
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-3 h-3 text-ink-muted rotate-90 shrink-0"><path d="M9 6l6 6-6 6"/></svg>
+                        </div>
+                        <div class="px-3 py-3 space-y-2.5 bg-paper/30">
+                          <div>
+                            <div class="flex items-baseline gap-2 mb-1">
+                              <span class="caps text-ink-muted">Input</span>
+                              <button class="ml-auto inline-flex items-center gap-1 px-1.5 h-5 rounded-[4px] border border-line bg-canvas mono text-[10px] text-ink-soft">copy</button>
+                            </div>
+                            <pre class="mono text-[11px] leading-[1.5] text-canvas/90 bg-ink rounded-[8px] px-2.5 py-2 overflow-x-auto max-h-[110px] overflow-y-auto">{
+  "description": "Review retry",
+  "subagent_type": "general-purpose",
+  "prompt": "Compare lanes A vs B…"
+}</pre>
+                          </div>
+                          <div>
+                            <div class="caps text-ink-muted mb-1">Result</div>
+                            <div class="rounded-[8px] border border-line bg-canvas px-2.5 py-2 text-[12px] text-ink-soft leading-[1.5]">Lane B wins on 429 bursts: exponential backoff + full jitter, capped at 32s…</div>
+                          </div>
+                          <a href="#" class="inline-flex items-center gap-1 text-[11.5px] mono text-klein-ink">open turn · seq 42 <span>→</span></a>
+                        </div>
+                      </div>
+                      <!-- failed -->
+                      <div class="mx-3 mb-1.5 rounded-[10px] border border-danger/25 bg-danger-wash/40 overflow-hidden relative">
+                        <div class="absolute left-0 top-0 bottom-0 w-[3px] bg-danger/70"></div>
+                        <div class="pl-3 pr-2.5 py-2 flex items-center gap-2">
+                          <span class="inline-flex items-center gap-1 px-1.5 h-5 rounded-[4px] border border-danger/30 bg-canvas/70 mono text-[10px] text-danger shrink-0">Agent</span>
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="w-3 h-3 text-danger shrink-0"><path d="M6 6l12 12M18 6L6 18"/></svg>
+                          <span class="text-[12.5px] text-ink truncate flex-1">Benchmark Intl perf</span>
+                          <span class="mono text-[10px] text-danger shrink-0">error</span>
+                        </div>
+                      </div>
+                      <!-- Group · Task -->
+                      <div class="px-3 pt-3 pb-1.5 flex items-baseline gap-2">
+                        <span class="caps text-ink-soft">Task</span>
+                        <span class="mono text-[11px] text-ink-muted">· 1 run</span>
+                      </div>
+                      <div class="mx-3 mb-1.5 rounded-[10px] border border-line bg-canvas overflow-hidden relative">
+                        <div class="absolute left-0 top-0 bottom-0 w-[3px] bg-success/50"></div>
+                        <div class="pl-3 pr-2.5 py-2 flex items-center gap-2">
+                          <span class="inline-flex items-center gap-1 px-1.5 h-5 rounded-[4px] border border-line mono text-[10px] text-ink-soft shrink-0">Task</span>
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" class="w-3 h-3 text-success shrink-0"><path d="M5 12l5 5 9-10"/></svg>
+                          <span class="text-[12.5px] text-ink truncate flex-1">vitest + lint + tsc</span>
+                          <span class="mono text-[10px] text-ink-muted shrink-0">38s</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- ==================== iPhone · empty ==================== -->
+          <div class="flex flex-col items-center gap-3">
+            <div class="caps text-ink-muted">iPhone · empty drawer</div>
+            <div class="iphone">
+              <div class="iphone-inner">
+                <div class="iphone-island"></div>
+                <div class="iphone-status"><span class="mono">9:41</span><span class="flex items-center gap-1"><span class="h-2 w-4 bg-ink rounded-sm"></span><span class="mono text-[11px]">5G</span><span class="h-2.5 w-5 border border-ink rounded-sm flex items-center justify-end pr-[1px]"><span class="h-1.5 w-3.5 bg-ink rounded-[1px]"></span></span></span></div>
+                <div class="iphone-home"></div>
+                <div class="iphone-content relative bg-canvas">
+                  <div class="absolute inset-0 opacity-40 overflow-hidden">
+                    <div class="px-4 py-2.5 border-b border-line flex items-center gap-2">
+                      <div class="h-8 w-8 rounded-[8px] bg-paper border border-line"></div>
+                      <div class="min-w-0 flex-1"><div class="text-[14px] font-medium truncate">Port config YAML → TOML</div><div class="flex items-center gap-1.5 text-[11px] text-ink-muted mt-0.5"><span class="mono">spindle</span></div></div>
+                    </div>
+                  </div>
+                  <div class="absolute inset-0 bg-ink/30 backdrop-blur-[2px]"></div>
+                  <div class="absolute left-0 right-0 bottom-0 top-[110px] rounded-t-[24px] bg-canvas border-t border-x border-line shadow-lift flex flex-col">
+                    <div class="flex justify-center pt-3"><span class="h-1 w-12 bg-line-strong rounded-full"></span></div>
+                    <div class="px-4 py-3 border-b border-line flex items-center">
+                      <span class="caps text-ink-muted">Subagents</span>
+                      <span class="mono text-[11px] text-ink-muted ml-auto">—</span>
+                      <button class="h-7 w-7 ml-2 rounded-[6px] border border-line flex items-center justify-center"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-3.5 h-3.5 text-ink-soft"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+                    </div>
+                    <div class="flex-1 flex items-center justify-center px-6">
+                      <div class="text-center max-w-[26ch]">
+                        <div class="inline-flex h-10 w-10 rounded-full bg-paper border border-line items-center justify-center mb-3 text-ink-muted">
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-4 h-4"><circle cx="12" cy="8" r="3"/><path d="M6 20a6 6 0 0 1 12 0"/></svg>
+                        </div>
+                        <div class="text-[13px] font-medium mb-1">No subagents yet.</div>
+                        <p class="text-[12px] text-ink-muted leading-[1.5]">Any <span class="mono">Task</span> · <span class="mono">Agent</span> · <span class="mono">Explore</span> tool call shows up here.</p>
+                      </div>
+                    </div>
+                    <div class="p-3 border-t border-line text-[11px] text-ink-muted mono flex items-center gap-1.5">
+                      <span class="h-1.5 w-1.5 rounded-full bg-ink-faint"></span>
+                      <span>waiting for activity</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
           <!-- ==================== FRAME 1 · populated ==================== -->
           <div class="flex-1 w-full min-w-0 flex flex-col items-center gap-3">
             <div class="caps text-ink-muted">Desktop · populated</div>
