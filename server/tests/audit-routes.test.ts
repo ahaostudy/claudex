@@ -150,4 +150,162 @@ describe("audit routes", () => {
     expect(row.user).not.toBeNull();
     expect(row.user.username).toBe("hao");
   });
+
+  // ---------------------------------------------------------------------
+  // Defense in depth: audit rows are visible to any authed user (single-user
+  // deployment today, but still — the Security tab renders them verbatim).
+  // A `detail` string or a `userAgent` crafted by an attacker must never
+  // leak DB-side secrets (password_hash / totp_secret / recovery code hash)
+  // by reflection or by accident. These tests confirm:
+  //   1. A caller-supplied detail that itself contains the literal string
+  //      "password: secretpass" is stored (audit detail is free-form) but
+  //      the response never carries a `password_hash` or `totp_secret`
+  //      field, and the row is otherwise unaltered.
+  //   2. For every event kind the server emits itself (login, login_failed,
+  //      totp_failed, password_changed, etc.), the resulting audit row's
+  //      free-form fields don't carry raw secrets copied out of the user
+  //      row.
+  // ---------------------------------------------------------------------
+  it("audit rows do not leak password_hash / totp_secret / recovery_code_hash fields", async () => {
+    // Caller-supplied detail that looks like a secret string.
+    audit.append({
+      event: "login",
+      detail: "password: secretpass",
+      userAgent: "totp_secret=ABCDEFGHIJK",
+    });
+    const listRes = await env.app.inject({
+      method: "GET",
+      url: "/api/audit",
+      headers: { cookie: env.cookie },
+    });
+    expect(listRes.statusCode).toBe(200);
+    const body = listRes.json() as {
+      events: Array<Record<string, unknown>>;
+    };
+    expect(body.events.length).toBeGreaterThanOrEqual(1);
+
+    // The actual password hash + totp secret for the bootstrapped user.
+    const userRow = env.dbh.db
+      .prepare("SELECT password_hash, totp_secret FROM users LIMIT 1")
+      .get() as { password_hash: string; totp_secret: string };
+    expect(userRow.password_hash).toBeTruthy();
+    expect(userRow.totp_secret).toBeTruthy();
+
+    const serialized = JSON.stringify(body);
+    // No row should ever surface the user's actual password_hash or TOTP
+    // secret — even if the caller stuffed a decoy secret string into the
+    // detail. Substring check because the secrets are opaque + unique
+    // enough that a false positive is effectively impossible.
+    expect(serialized).not.toContain(userRow.password_hash);
+    expect(serialized).not.toContain(userRow.totp_secret);
+
+    // None of the exposed fields should include the keys we care about.
+    for (const row of body.events) {
+      expect(Object.keys(row)).not.toContain("password_hash");
+      expect(Object.keys(row)).not.toContain("totp_secret");
+      expect(Object.keys(row)).not.toContain("recovery_code_hash");
+      if (row.user && typeof row.user === "object") {
+        expect(Object.keys(row.user as Record<string, unknown>)).not.toContain(
+          "password_hash",
+        );
+        expect(Object.keys(row.user as Record<string, unknown>)).not.toContain(
+          "totp_secret",
+        );
+      }
+    }
+
+    // The stored detail roundtripped — the store clips at 140 chars but
+    // doesn't redact ("password: secretpass" is 20 chars so it survives).
+    const match = body.events.find((e) => e.event === "login");
+    expect(match).toBeDefined();
+    expect(match!.detail).toBe("password: secretpass");
+  });
+
+  it("fires-then-audits every emitted event kind without leaking the user row's secrets", async () => {
+    // Drive the auth routes that emit the non-detail events we care about,
+    // then do a broad substring check on the whole audit list. The core
+    // invariant: no matter which kind fired, the response must never echo
+    // back the user's password_hash or totp_secret.
+    //
+    // 1. login_failed (bad password)
+    await env.app.inject({
+      method: "POST",
+      url: "/api/auth/login",
+      payload: { username: "hao", password: "wrong-password" },
+    });
+    // 2. totp_failed (valid password, bad TOTP)
+    const login = await env.app.inject({
+      method: "POST",
+      url: "/api/auth/login",
+      payload: { username: "hao", password: "hunter22-please-work" },
+    });
+    const challengeId = login.json().challengeId as string;
+    await env.app.inject({
+      method: "POST",
+      url: "/api/auth/verify-totp",
+      payload: { challengeId, code: "000000" },
+    });
+    // 3. password_changed (real path, via the already-authed cookie)
+    await env.app.inject({
+      method: "POST",
+      url: "/api/auth/change-password",
+      headers: { cookie: env.cookie },
+      payload: {
+        currentPassword: "hunter22-please-work",
+        newPassword: "rotate-once-please",
+      },
+    });
+    // 4. logout
+    await env.app.inject({
+      method: "POST",
+      url: "/api/auth/logout",
+      headers: { cookie: env.cookie },
+    });
+    // 5. session_deleted — append directly (the route path is covered by
+    // session-routes.test.ts; here we're just confirming the kind doesn't
+    // leak, same as every other kind).
+    audit.append({
+      event: "session_deleted",
+      target: "sess-ghost",
+      detail: "deleted",
+    });
+    // 6. permission_granted — append directly (same rationale).
+    audit.append({
+      event: "permission_granted",
+      target: "sess-xyz",
+      detail: "tool=Bash",
+    });
+
+    // Post-change, the DB now holds the new password hash. Grab both old
+    // and new — the response must leak neither.
+    const userRow = env.dbh.db
+      .prepare("SELECT password_hash, totp_secret FROM users LIMIT 1")
+      .get() as { password_hash: string; totp_secret: string };
+
+    const listRes = await env.app.inject({
+      method: "GET",
+      url: "/api/audit",
+      headers: { cookie: env.cookie },
+    });
+    expect(listRes.statusCode).toBe(200);
+    const body = listRes.json();
+    const kinds = new Set(
+      (body.events as Array<{ event: string }>).map((e) => e.event),
+    );
+    // Sanity: every kind we intentionally fired shows up in the list.
+    expect(kinds.has("login_failed")).toBe(true);
+    expect(kinds.has("totp_failed")).toBe(true);
+    expect(kinds.has("password_changed")).toBe(true);
+    expect(kinds.has("logout")).toBe(true);
+    expect(kinds.has("session_deleted")).toBe(true);
+    expect(kinds.has("permission_granted")).toBe(true);
+
+    const serialized = JSON.stringify(body);
+    expect(serialized).not.toContain(userRow.password_hash);
+    expect(serialized).not.toContain(userRow.totp_secret);
+    // Raw bcrypt hashes start with "$2" — a broad substring check catches
+    // any accidental hash leak even if the in-memory hash rotated since we
+    // snapshot'd it above.
+    expect(serialized).not.toMatch(/\$2[aby]\$\d{2}\$/);
+  });
 });

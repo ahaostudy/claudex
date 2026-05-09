@@ -37,6 +37,7 @@ import { DiffView, toolCallToDiff } from "@/components/DiffView";
 import { diffForToolCall } from "@/lib/diff";
 import { SessionSettingsSheet } from "@/components/SessionSettingsSheet";
 import { AskUserQuestionCard } from "@/components/AskUserQuestionCard";
+import { PlanAcceptCard } from "@/components/PlanAcceptCard";
 import { SideChatDrawer } from "@/components/SideChatDrawer";
 import { SlashCommandSheet, type PickerHandle } from "@/components/SlashCommandSheet";
 import { FileMentionSheet } from "@/components/FileMentionSheet";
@@ -154,6 +155,7 @@ export function ChatScreen() {
     ensurePendingFor,
     resolvePermission,
     resolveAskUserQuestion,
+    resolvePlanAccept,
     viewMode,
     setViewMode,
   } = useSessions();
@@ -515,7 +517,7 @@ export function ChatScreen() {
         <button
           type="button"
           onClick={() => navigate("/sessions")}
-          className="h-8 w-8 rounded-[8px] bg-paper border border-line flex items-center justify-center shrink-0"
+          className="h-9 w-9 rounded-[8px] bg-paper border border-line flex items-center justify-center shrink-0"
           aria-label="Back to sessions"
         >
           <ChevronLeft className="w-4 h-4" />
@@ -550,7 +552,7 @@ export function ChatScreen() {
           type="button"
           onClick={() => setShowMore(true)}
           disabled={!session}
-          className="h-8 w-8 rounded-[8px] bg-paper border border-line flex items-center justify-center shrink-0 disabled:opacity-40"
+          className="h-9 w-9 rounded-[8px] bg-paper border border-line flex items-center justify-center shrink-0 disabled:opacity-40"
           aria-label="More actions"
         >
           <MoreVertical className="w-4 h-4" />
@@ -731,6 +733,9 @@ export function ChatScreen() {
             }
             onAnswerAskUserQuestion={(askId, answers, annotations) => {
               if (id) resolveAskUserQuestion(id, askId, answers, annotations);
+            }}
+            onDecidePlan={(planId, decision) => {
+              if (id) resolvePlanAccept(id, planId, decision);
             }}
             onOpenLightbox={(images, index) => setLightbox({ images, index })}
             revealedSeq={revealedSeq}
@@ -1073,6 +1078,7 @@ function Piece({
   project,
   onDecide,
   onAnswerAskUserQuestion,
+  onDecidePlan,
   onOpenLightbox,
   isLastUserMessage,
   canEdit,
@@ -1096,6 +1102,7 @@ function Piece({
     answers: Record<string, string>,
     annotations?: Record<string, AskUserQuestionAnnotation>,
   ) => void;
+  onDecidePlan: (planId: string, decision: "accept" | "reject") => void;
   onOpenLightbox: (images: ImageRef[], index: number) => void;
   /** True when this piece is the newest user_message currently visible. */
   isLastUserMessage?: boolean;
@@ -1298,6 +1305,15 @@ function Piece({
           onSubmit={(answers, annotations) =>
             onAnswerAskUserQuestion(p.askId, answers, annotations)
           }
+        />
+      );
+    case "plan_accept_request":
+      return (
+        <PlanAcceptCard
+          planId={p.planId}
+          plan={p.plan}
+          decision={p.decision}
+          onDecide={(decision) => onDecidePlan(p.planId, decision)}
         />
       );
     case "pending":
@@ -2463,6 +2479,14 @@ function Composer({
   keyboardOffset?: number;
 }) {
   const isArchived = session?.status === "archived";
+  // Session errored (SDK crashed mid-turn, watchdog fired, hard runner error)
+  // — composer is locked out the same way archived sessions are, but with a
+  // different banner + placeholder. The user's next move is to start a new
+  // session; trying to queue messages into a dead runner would silently
+  // fail. Archived still takes precedence visually if somehow both are true
+  // (archived is the final state).
+  const isErrored = session?.status === "error";
+  const isLocked = isArchived || isErrored;
   const [text, setText] = useState("");
   const [trigger, setTrigger] = useState<Trigger | null>(null);
   // Prompt history recall (↑ / ↓ like bash/readline). Scoped per-session via
@@ -2777,7 +2801,7 @@ function Composer({
   }
 
   const send = () => {
-    if (isArchived) return;
+    if (isLocked) return;
     if (!text.trim() && attachments.length === 0) return;
     const blocked = leadingUnsupported(text);
     if (blocked) {
@@ -2864,8 +2888,8 @@ function Composer({
         <button
           onClick={openSlashManually}
           type="button"
-          disabled={isArchived}
-          className="h-7 px-2.5 rounded-full border border-line bg-canvas text-[12px] flex items-center gap-1 whitespace-nowrap text-ink-soft disabled:opacity-40"
+          disabled={isLocked}
+          className="h-8 px-3 md:h-7 md:px-2.5 rounded-full border border-line bg-canvas text-[12px] flex items-center gap-1 whitespace-nowrap text-ink-soft disabled:opacity-40"
         >
           <span className="mono text-klein">/</span>
           Slash
@@ -2873,8 +2897,8 @@ function Composer({
         <button
           onClick={openMentionManually}
           type="button"
-          disabled={!project || isArchived}
-          className="h-7 px-2.5 rounded-full border border-line bg-canvas text-[12px] flex items-center gap-1 whitespace-nowrap text-ink-soft disabled:opacity-40"
+          disabled={!project || isLocked}
+          className="h-8 px-3 md:h-7 md:px-2.5 rounded-full border border-line bg-canvas text-[12px] flex items-center gap-1 whitespace-nowrap text-ink-soft disabled:opacity-40"
         >
           <span className="mono text-klein">@</span>
           File
@@ -2882,15 +2906,17 @@ function Composer({
         <button
           type="button"
           onClick={() => fileInputRef.current?.click()}
-          disabled={!session || isArchived}
+          disabled={!session || isLocked}
           title={
             isArchived
               ? "Session is archived — read-only"
+              : isErrored
+              ? "Session errored — start a new session to continue"
               : session
               ? "Attach images or text files to this message"
               : "Create or open a session first"
           }
-          className="h-7 px-2.5 rounded-full border border-line bg-canvas text-[12px] flex items-center gap-1.5 whitespace-nowrap text-ink-soft disabled:opacity-40"
+          className="h-8 px-3 md:h-7 md:px-2.5 rounded-full border border-line bg-canvas text-[12px] flex items-center gap-1.5 whitespace-nowrap text-ink-soft disabled:opacity-40"
         >
           <Paperclip className="w-3 h-3" />
           Attach
@@ -2910,8 +2936,8 @@ function Composer({
         <button
           type="button"
           onClick={onOpenSideChat}
-          disabled={!session || isArchived}
-          className="h-7 px-2.5 rounded-full border border-line bg-canvas text-[12px] flex items-center gap-1 whitespace-nowrap text-ink-soft disabled:opacity-40"
+          disabled={!session || isLocked}
+          className="h-8 px-3 md:h-7 md:px-2.5 rounded-full border border-line bg-canvas text-[12px] flex items-center gap-1 whitespace-nowrap text-ink-soft disabled:opacity-40"
         >
           <MessageCircle className="w-3 h-3 text-klein" />
           /btw
@@ -2922,8 +2948,8 @@ function Composer({
             // /compact is a real slash command; insert it like any other.
             insertCompact();
           }}
-          disabled={isArchived}
-          className="h-7 px-2.5 rounded-full border border-line bg-canvas text-[12px] flex items-center gap-1 whitespace-nowrap text-ink-soft disabled:opacity-40"
+          disabled={isLocked}
+          className="h-8 px-3 md:h-7 md:px-2.5 rounded-full border border-line bg-canvas text-[12px] flex items-center gap-1 whitespace-nowrap text-ink-soft disabled:opacity-40"
         >
           <span className="mono text-klein">/</span>compact
         </button>
@@ -2958,7 +2984,7 @@ function Composer({
               <button
                 type="button"
                 onClick={() => removeAttachment(a.id)}
-                className="ml-1 text-ink-muted hover:text-danger"
+                className="ml-1 min-w-[32px] min-h-[32px] flex items-center justify-center text-ink-muted hover:text-danger"
                 aria-label={`Remove ${a.filename}`}
               >
                 <X className="w-3.5 h-3.5" />
@@ -2983,6 +3009,15 @@ function Composer({
           Archived · read-only — open a new session to continue.
         </div>
       )}
+      {isErrored && !isArchived && (
+        <div
+          className="text-[11px] text-danger mono px-3 py-1 border-t border-line bg-danger-wash/40 flex items-center gap-1.5"
+          role="status"
+        >
+          <span aria-hidden="true">●</span>
+          Session errored — start a new session to continue.
+        </div>
+      )}
 
       <div
         className="shrink-0 border-t border-line bg-canvas px-3 pt-2 pb-3 mt-2 md:px-5 md:pt-3 md:pb-4"
@@ -2996,7 +3031,7 @@ function Composer({
           transition: "transform 120ms ease-out",
         }}
         onDragOver={(e) => {
-          if (!session || isArchived) return;
+          if (!session || isLocked) return;
           e.preventDefault();
           if (!isDragging) setIsDragging(true);
         }}
@@ -3008,7 +3043,7 @@ function Composer({
           }
         }}
         onDrop={(e) => {
-          if (!session || isArchived) return;
+          if (!session || isLocked) return;
           e.preventDefault();
           setIsDragging(false);
           void onFilesPicked(e.dataTransfer.files);
@@ -3133,11 +3168,13 @@ function Composer({
             placeholder={
               isArchived
                 ? "This session is archived — read-only"
+                : isErrored
+                ? "Session errored — start a new session to continue"
                 : busy
                 ? "Type while claude thinks — will queue…"
                 : "Type a message…  try / or @"
             }
-            disabled={isArchived}
+            disabled={isLocked}
           />
           <div className="flex items-center justify-between px-1 mt-1">
             {/* Mobile: show model · mode here (mockup 929). Desktop (mockup
@@ -3155,7 +3192,7 @@ function Composer({
                 "—"
               )}
             </div>
-            {isArchived ? null : busy ? (
+            {isLocked ? null : busy ? (
               <>
                 <button
                   type="button"

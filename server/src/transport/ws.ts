@@ -312,6 +312,14 @@ async function handleClientFrame(
       );
       return;
     }
+    case "plan_accept_decision": {
+      deps.manager.resolvePlanAccept(
+        frame.sessionId,
+        frame.planId,
+        frame.decision,
+      );
+      return;
+    }
   }
 }
 
@@ -411,6 +419,14 @@ function runnerEventToFrame(
         seq: 0,
         askId: event.askId,
         questions: event.questions,
+      };
+    case "plan_accept_request":
+      return {
+        type: "plan_accept_request",
+        sessionId,
+        seq: 0,
+        planId: event.planId,
+        plan: event.plan,
       };
     case "turn_end":
       return {

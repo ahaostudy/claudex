@@ -27,6 +27,7 @@ import {
   removeWorktree,
   WorktreeError,
 } from "./worktree.js";
+import { getRequestCtx } from "../lib/req.js";
 
 export interface SessionsRoutesDeps {
   db: Database.Database;
@@ -112,18 +113,16 @@ export async function registerSessionRoutes(
       if (!existing) return reply.code(404).send({ error: "not_found" });
       projects.setTrusted(id, parsed.data.trusted);
       const updated = projects.findById(id)!;
+      const ctx = getRequestCtx(req);
       deps.audit.append({
-        userId: req.userId ?? null,
+        userId: ctx.userId,
         event: parsed.data.trusted ? "project_trusted" : "project_untrusted",
         target: id,
         detail: `Project ${updated.name} ${
           parsed.data.trusted ? "trusted" : "untrusted"
         }`,
-        ip: (req as { ip?: string }).ip ?? null,
-        userAgent:
-          typeof req.headers["user-agent"] === "string"
-            ? req.headers["user-agent"]
-            : null,
+        ip: ctx.ip,
+        userAgent: ctx.userAgent,
       });
       return reply.send({ project: updated });
     },
@@ -467,16 +466,14 @@ export async function registerSessionRoutes(
       // Audit: hard-delete is the only session action that can't be undone,
       // so it earns an audit row. Title goes in `detail` so the Security UI
       // can show "Deleted session 'Fix login bug'" without another lookup.
+      const ctx = getRequestCtx(req);
       deps.audit.append({
-        userId: req.userId ?? null,
+        userId: ctx.userId,
         event: "session_deleted",
         target: id,
         detail: existing.title,
-        ip: (req as { ip?: string }).ip ?? null,
-        userAgent:
-          typeof req.headers["user-agent"] === "string"
-            ? req.headers["user-agent"]
-            : null,
+        ip: ctx.ip,
+        userAgent: ctx.userAgent,
       });
       return reply.code(204).send();
     },

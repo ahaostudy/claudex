@@ -122,6 +122,12 @@ export function HomeScreen() {
   const [archivedSessions, setArchivedSessions] = useState<Session[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const searchInputRef = useRef<HTMLInputElement | null>(null);
+  // Data-fetch failures from the two direct API calls on this screen:
+  // `listSessions({archived:true})` (only fetched when the archived chip is
+  // active) and `listProjects()`. Previously swallowed with `/* best-effort */`
+  // comments — which meant a broken API looked identical to "no rows". Surface
+  // them as a thin dismissible banner so the user can tell the difference.
+  const [loadErr, setLoadErr] = useState<string | null>(null);
 
   // Cmd+K / Ctrl+K opens the global search sheet (full-text across session
   // titles AND message bodies) from anywhere on the page. preventDefault so
@@ -162,8 +168,13 @@ export function HomeScreen() {
         // narrow to archived so the chip's filter is honest.
         setArchivedSessions(r.sessions.filter((s) => s.status === "archived"));
       })
-      .catch(() => {
-        /* best-effort */
+      .catch((e) => {
+        if (cancelled) return;
+        setLoadErr(
+          e instanceof ApiError
+            ? `archived sessions: ${e.code}`
+            : "Failed to load archived sessions",
+        );
       });
     return () => {
       cancelled = true;
@@ -180,8 +191,13 @@ export function HomeScreen() {
       .then((r) => {
         if (!cancelled) setProjects(r.projects);
       })
-      .catch(() => {
-        /* best-effort */
+      .catch((e) => {
+        if (cancelled) return;
+        setLoadErr(
+          e instanceof ApiError
+            ? `projects: ${e.code}`
+            : "Failed to load projects",
+        );
       });
     return () => {
       cancelled = true;
@@ -381,7 +397,7 @@ export function HomeScreen() {
             onClick={() => setShowImport(true)}
             title="Import existing CLI sessions"
             aria-label="Import CLI sessions"
-            className="h-8 w-8 rounded-[8px] border border-line bg-canvas flex items-center justify-center hover:bg-paper"
+            className="h-9 w-9 rounded-[8px] border border-line bg-canvas flex items-center justify-center hover:bg-paper"
           >
             <Download className="w-4 h-4 text-ink-soft" />
           </button>
@@ -389,14 +405,14 @@ export function HomeScreen() {
             onClick={() => setShowStats(true)}
             title="Statistics"
             aria-label="Statistics"
-            className="h-8 w-8 rounded-[8px] border border-line bg-canvas flex items-center justify-center hover:bg-paper"
+            className="h-9 w-9 rounded-[8px] border border-line bg-canvas flex items-center justify-center hover:bg-paper"
           >
             <BarChart3 className="w-4 h-4 text-ink-soft" />
           </button>
           <button
             onClick={() => setShowProjects(true)}
             title="Manage projects"
-            className="h-8 w-8 rounded-[8px] border border-line bg-canvas flex items-center justify-center hover:bg-paper"
+            className="h-9 w-9 rounded-[8px] border border-line bg-canvas flex items-center justify-center hover:bg-paper"
           >
             <Settings2 className="w-4 h-4 text-ink-soft" />
           </button>
@@ -460,7 +476,30 @@ export function HomeScreen() {
           )}
         </div>
 
-        {sessions.length === 0 && !loadingSessions ? (
+        {loadErr && (
+          <div className="mx-4 md:mx-6 mb-3 flex items-center gap-2 rounded-[8px] border border-danger/30 bg-danger-wash px-3 py-2 text-[12.5px] text-danger">
+            <span className="min-w-0 flex-1 truncate">{loadErr}</span>
+            <button
+              type="button"
+              onClick={() => setLoadErr(null)}
+              aria-label="Dismiss"
+              className="shrink-0 h-5 w-5 rounded-full flex items-center justify-center hover:bg-danger/10"
+            >
+              <X className="w-3 h-3" />
+            </button>
+          </div>
+        )}
+
+        {loadingSessions && sessions.length === 0 ? (
+          // Skeleton list on first paint — 3 greyed rows. Using the empty-state
+          // card here would look identical to a genuine "no sessions" account
+          // and confuse every freshly-loaded page.
+          <div className="px-4 md:px-6 pb-6 space-y-2">
+            <div className="h-[68px] rounded-[8px] bg-paper animate-pulse" />
+            <div className="h-[68px] rounded-[8px] bg-paper animate-pulse" />
+            <div className="h-[68px] rounded-[8px] bg-paper animate-pulse" />
+          </div>
+        ) : sessions.length === 0 && !loadingSessions ? (
           <div className="px-4 md:px-6 pb-6">
             <EmptyState onNew={() => setShowNew(true)} />
           </div>

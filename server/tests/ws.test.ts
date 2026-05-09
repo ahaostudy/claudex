@@ -49,6 +49,9 @@ class MockRunner implements Runner {
   ) {
     // Mock only — covered by ask-user-question.test.ts.
   }
+  resolvePlanAccept(_id: string, _decision: "accept" | "reject") {
+    // Mock only — covered by plan-accept.test.ts.
+  }
   async interrupt() {
     this.interrupted += 1;
   }

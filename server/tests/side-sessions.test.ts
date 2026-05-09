@@ -268,6 +268,7 @@ class MockRunner implements Runner {
   }
   resolvePermission() {}
   resolveAskUserQuestion() {}
+  resolvePlanAccept() {}
   async interrupt() {}
   async setPermissionMode(_: PermissionMode) {}
   async dispose() {

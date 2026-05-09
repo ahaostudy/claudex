@@ -55,6 +55,9 @@ class MockRunner implements Runner {
   resolveAskUserQuestion() {
     /* noop */
   }
+  resolvePlanAccept() {
+    /* noop */
+  }
   async interrupt() {
     /* noop */
   }

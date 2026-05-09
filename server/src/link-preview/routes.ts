@@ -9,6 +9,7 @@ import {
 } from "./store.js";
 import { assertPublicHost, classifyUrl, fetchPreview } from "./fetch.js";
 import type { LinkPreview } from "@claudex/shared";
+import { getRequestCtx } from "../lib/req.js";
 
 // ---------------------------------------------------------------------------
 // GET /api/link-preview?url=<encoded>
@@ -76,7 +77,11 @@ export async function registerLinkPreviewRoutes(
       // Rate limit by authenticated user id. Each successful preview (cache
       // hit OR upstream hit) counts as one stamp — the goal is to bound
       // our work, not our upstream traffic specifically.
-      const userKey = (req as { userId?: string }).userId ?? "anon";
+      const ctx = getRequestCtx(req);
+      if (!ctx.userId) {
+        return reply.code(401).send({ error: "unauthenticated" });
+      }
+      const userKey = ctx.userId;
       const gate = limiter.check(userKey);
       if (!gate.allowed) {
         reply.header("Retry-After", String(gate.retryAfterSec ?? 1));

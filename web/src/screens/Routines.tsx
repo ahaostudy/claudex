@@ -60,11 +60,17 @@ export function RoutinesScreen() {
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState<Routine | null>(null);
   const [creating, setCreating] = useState(false);
+  // `loadErr` is the refresh() failure (blocks the list); `err` is a mutation
+  // failure (run/pause/delete) rendered alongside the list. Priority in the
+  // render: loadErr > loading > empty > data; the mutation banner lives below
+  // the list so the list itself stays visible when a delete fails.
+  const [loadErr, setLoadErr] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const navigate = useNavigate();
 
   async function refresh() {
     setLoading(true);
+    setLoadErr(null);
     try {
       const [r, p] = await Promise.all([
         api.listRoutines(),
@@ -72,6 +78,12 @@ export function RoutinesScreen() {
       ]);
       setRoutines(r.routines);
       setProjects(p.projects);
+    } catch (e) {
+      // Don't silently fall through to an empty-state card — that would look
+      // identical to a genuine "no routines" account and hide a transient
+      // network/API break from the user. Surface the failure as a banner with
+      // a retry button so the list reflects what we know: we don't know yet.
+      setLoadErr(e instanceof ApiError ? e.code : "load failed");
     } finally {
       setLoading(false);
     }
@@ -133,7 +145,23 @@ export function RoutinesScreen() {
       </header>
 
       <section className="flex-1 min-h-0 overflow-y-auto pb-20 md:pb-6">
-        {loading ? (
+        {loadErr ? (
+          <div className="max-w-[900px] mx-auto w-full px-4 md:px-6 py-6">
+            <div className="rounded-[8px] border border-danger/30 bg-danger-wash px-4 py-3 flex items-center gap-3">
+              <div className="min-w-0 flex-1 text-[13px] text-danger">
+                Couldn't load routines: <span className="mono">{loadErr}</span>
+              </div>
+              <button
+                type="button"
+                onClick={refresh}
+                disabled={loading}
+                className="shrink-0 h-8 px-3 rounded-[6px] border border-danger/40 bg-canvas text-[12px] text-danger font-medium disabled:opacity-50"
+              >
+                {loading ? "Retrying…" : "Retry"}
+              </button>
+            </div>
+          </div>
+        ) : loading ? (
           <div className="text-[13px] text-ink-muted text-center py-10 mono">
             loading…
           </div>

@@ -160,6 +160,18 @@ function truncateForPush(s: string, max: number): string {
   return one.slice(0, Math.max(1, max - 1)) + "…";
 }
 
+/**
+ * Default window of runner silence after which the watchdog force-transitions
+ * a session to `error`. Chosen to be long enough that a genuinely-slow tool
+ * (a long `pnpm install`, a Claude turn that streams a big patch) doesn't
+ * trip it, but short enough that a dead AgentRunner surfaces as a visible
+ * error rather than an eternally-"running" row.
+ *
+ * Overridable at boot via `CLAUDEX_SESSION_WATCHDOG_MS` for tests and
+ * operators who want a faster/slower leash.
+ */
+const DEFAULT_SESSION_WATCHDOG_MS = 5 * 60 * 1000;
+
 export class SessionManager {
   private runners = new Map<string, SessionEntry>();
   // Track pending permission requests by toolUseId so we can look up the tool
@@ -173,7 +185,77 @@ export class SessionManager {
   // keys aren't configured — the rest of the manager must keep working.
   private pushSender: ManagerPushSender | null = null;
 
+  // Per-session watchdog timers. A runner that emits NO events for
+  // `CLAUDEX_SESSION_WATCHDOG_MS` (default 5 min) while status=running is
+  // assumed to have died silently (SDK throw before turn_end, WS drop, manager
+  // crash) and gets force-transitioned to "error" so the composer lockout
+  // fires and the user can start a fresh session instead of staring at a
+  // permanently-"running" row.
+  private watchdogs = new Map<string, NodeJS.Timeout>();
+
   constructor(private readonly deps: SessionManagerDeps) {}
+
+  /**
+   * Arm (or reset) the silence watchdog for a session. Called whenever we
+   * observe runner activity for that sessionId. If the timer fires, we stamp
+   * the session as `error` + broadcast a synthesized status so the WS bridge
+   * tells every subscribed tab.
+   */
+  private startWatchdog(sessionId: string): void {
+    this.clearWatchdog(sessionId);
+    const raw = Number(process.env.CLAUDEX_SESSION_WATCHDOG_MS);
+    const ms = Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_SESSION_WATCHDOG_MS;
+    const timer = setTimeout(() => {
+      this.watchdogs.delete(sessionId);
+      this.deps.logger?.warn?.(
+        { sessionId, windowMs: ms },
+        "session watchdog: forcing error after silence",
+      );
+      try {
+        this.deps.sessions.setStatus(sessionId, "error");
+      } catch (err) {
+        // The session row may already be gone (deleted). Log + drop.
+        this.deps.logger?.debug?.(
+          { err, sessionId },
+          "session watchdog: setStatus failed",
+        );
+        return;
+      }
+      this.broadcastStatus(sessionId, "idle");
+      this.deps.sessions.appendEvent({
+        sessionId,
+        kind: "error",
+        payload: {
+          code: "watchdog_timeout",
+          message: `Session watchdog fired — no runner activity for ${Math.round(ms / 1000)}s`,
+        },
+      });
+      // Also emit a synthesized `error` runner event so the ws.ts bridge can
+      // translate it to the existing `session_update` / error frame clients
+      // already handle.
+      this.deps.broadcast(sessionId, {
+        type: "error",
+        code: "watchdog_timeout",
+        message: `Session watchdog fired — no runner activity for ${Math.round(ms / 1000)}s`,
+      });
+    }, ms);
+    // Don't hold the Node event loop open just for the watchdog; the process
+    // should be able to exit cleanly on SIGTERM even if a session has an
+    // armed timer. better-sqlite3 / fastify already keep the loop alive on
+    // their own during normal operation.
+    if (typeof timer.unref === "function") timer.unref();
+    this.watchdogs.set(sessionId, timer);
+  }
+
+  /**
+   * Clear the watchdog for a session if one is armed. Safe to call when no
+   * timer is pending.
+   */
+  private clearWatchdog(sessionId: string): void {
+    const t = this.watchdogs.get(sessionId);
+    if (t) clearTimeout(t);
+    this.watchdogs.delete(sessionId);
+  }
 
   /**
    * Install (or clear, when `null`) the push sender. See the
@@ -259,6 +341,12 @@ export class SessionManager {
   }
 
   private handleEvent(sessionId: string, event: RunnerEvent) {
+    // Any runner event is a heartbeat — the runner is still alive. Reset the
+    // watchdog on every activity while the session looks active. Terminal
+    // transitions below (turn_end, error, idle status) clear it outright.
+    if (this.watchdogs.has(sessionId)) {
+      this.startWatchdog(sessionId);
+    }
     try {
       switch (event.type) {
         case "sdk_session_id":
@@ -409,6 +497,23 @@ export class SessionManager {
           this.deps.broadcast(sessionId, event);
           return;
         }
+        case "plan_accept_request": {
+          // Persist as append-only — sibling `plan_accept_decision` event
+          // lands when the user accepts/rejects. Flip status to `awaiting`
+          // so the chat header and session list both surface that claude is
+          // blocked on user input (same treatment as ask_user_question).
+          this.deps.sessions.appendEvent({
+            sessionId,
+            kind: "plan_accept_request",
+            payload: {
+              planId: event.planId,
+              plan: event.plan,
+            },
+          });
+          this.deps.sessions.setStatus(sessionId, "awaiting");
+          this.deps.broadcast(sessionId, event);
+          return;
+        }
         case "turn_end":
           this.deps.sessions.appendEvent({
             sessionId,
@@ -421,14 +526,22 @@ export class SessionManager {
           this.deps.sessions.bumpStats(sessionId, { messages: 1 });
           this.deps.sessions.touchLastMessage(sessionId);
           this.deps.sessions.setStatus(sessionId, "idle");
+          // Turn wrapped cleanly — cancel the silence watchdog. If a follow-up
+          // turn starts, sendUserMessage / status=running will re-arm it.
+          this.clearWatchdog(sessionId);
           break;
         case "status":
-          if (event.status === "running")
+          if (event.status === "running") {
             this.deps.sessions.setStatus(sessionId, "running");
-          else if (event.status === "idle")
+            // Fresh "running" signal → arm (or reset) the silence watchdog.
+            this.startWatchdog(sessionId);
+          } else if (event.status === "idle") {
             this.deps.sessions.setStatus(sessionId, "idle");
-          else if (event.status === "terminated")
+            this.clearWatchdog(sessionId);
+          } else if (event.status === "terminated") {
             this.deps.sessions.setStatus(sessionId, "idle");
+            this.clearWatchdog(sessionId);
+          }
           break;
         case "error":
           this.deps.sessions.appendEvent({
@@ -437,6 +550,9 @@ export class SessionManager {
             payload: { code: event.code, message: event.message },
           });
           this.deps.sessions.setStatus(sessionId, "error");
+          // Runner reported a hard error — no point in keeping the timer
+          // armed; the session is already in a terminal-visible state.
+          this.clearWatchdog(sessionId);
           break;
       }
     } catch (err) {
@@ -610,6 +726,12 @@ export class SessionManager {
           (content.length > 0 ? `\n\n${content}` : "")
         : content;
     await runner.sendUserMessage(sdkPrompt);
+    // Arm the silence watchdog. We start it here (not only on status=running)
+    // because the SDK can take several seconds to emit its first event after
+    // a sendUserMessage — if that first event never arrives we want the
+    // watchdog to still fire and flip the row to `error` rather than leave
+    // the user staring at a permanently-"running" session.
+    this.startWatchdog(sessionId);
   }
 
   /**
@@ -647,6 +769,7 @@ export class SessionManager {
     this.deps.sessions.setStatus(sessionId, "running");
     this.deps.broadcast(sessionId, { type: "refresh_transcript" });
     await runner.sendUserMessage(editedText);
+    this.startWatchdog(sessionId);
   }
 
   /**
@@ -768,6 +891,8 @@ export class SessionManager {
       payload: { toolUseId, decision, toolName: pending?.toolName ?? null },
     });
     this.deps.sessions.setStatus(sessionId, "running");
+    // Back to active — re-arm the silence watchdog.
+    this.startWatchdog(sessionId);
     // Audit: every permission decision is security-relevant — the user just
     // authorized (or refused) claude touching the host. userId is null
     // because decisions arrive over WS with no FastifyRequest in scope; the
@@ -806,11 +931,48 @@ export class SessionManager {
       },
     });
     this.deps.sessions.setStatus(sessionId, "running");
+    this.startWatchdog(sessionId);
+  }
+
+  /**
+   * Resolve a pending `ExitPlanMode` interaction with the user's decision.
+   * Append-only: persists a sibling `plan_accept_decision` event rather than
+   * mutating the request row. `accept` lets the SDK's `canUseTool` resolve
+   * as `{behavior: "allow"}` (the SDK itself handles transitioning out of
+   * plan mode for the next turn); `reject` resolves as
+   * `{behavior: "deny", message}` so the model sees a tool error it can
+   * recover from by revising the plan.
+   *
+   * Double-submit is harmless — the runner's map is keyed on `planId` and
+   * deleted on first resolve; a second call from a stale client is a no-op
+   * on the runner side, but we still skip the append to keep the transcript
+   * clean.
+   */
+  resolvePlanAccept(
+    sessionId: string,
+    planId: string,
+    decision: "accept" | "reject",
+  ): void {
+    const entry = this.runners.get(sessionId);
+    if (!entry) return;
+    entry.runner.resolvePlanAccept(planId, decision);
+    this.deps.sessions.appendEvent({
+      sessionId,
+      kind: "plan_accept_decision",
+      payload: { planId, decision },
+    });
+    this.deps.sessions.setStatus(sessionId, "running");
+    this.startWatchdog(sessionId);
   }
 
   async disposeAll(): Promise<void> {
     const entries = Array.from(this.runners.values());
     this.runners.clear();
+    // Cancel every pending silence watchdog so a post-shutdown timer can't
+    // fire against a torn-down store / broadcast channel.
+    for (const id of Array.from(this.watchdogs.keys())) {
+      this.clearWatchdog(id);
+    }
     await Promise.all(
       entries.map(async (e) => {
         e.off();
@@ -829,6 +991,10 @@ export class SessionManager {
     const entry = this.runners.get(sessionId);
     if (!entry) return;
     this.runners.delete(sessionId);
+    // Drop any pending watchdog too — the runner is going away, a silence
+    // timer against a disposed session would just produce a spurious error
+    // after the fact.
+    this.clearWatchdog(sessionId);
     entry.off();
     try {
       await entry.runner.dispose();

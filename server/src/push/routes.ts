@@ -11,6 +11,7 @@ import {
 import { PushSubscriptionStore } from "./store.js";
 import { configureWebPush, type VapidKeys } from "./vapid.js";
 import type { AuditStore } from "../audit/store.js";
+import { getRequestCtx } from "../lib/req.js";
 
 // -----------------------------------------------------------------------------
 // Push routes
@@ -196,13 +197,10 @@ export async function registerPushRoutes(
       if (!parsed.success) {
         return reply.code(400).send({ error: "bad_request" });
       }
+      const ctx = getRequestCtx(req);
       // Prefer the body-provided userAgent (client may post the browser's
       // navigator.userAgent verbatim), fall back to the request header.
-      const ua =
-        parsed.data.userAgent ??
-        (typeof req.headers["user-agent"] === "string"
-          ? req.headers["user-agent"]
-          : null);
+      const ua = parsed.data.userAgent ?? ctx.userAgent;
       const row = store.upsert({
         endpoint: parsed.data.endpoint,
         p256dh: parsed.data.keys.p256dh,
@@ -214,11 +212,11 @@ export async function registerPushRoutes(
       // doing. user-agent goes in `detail` so the Security card can render
       // "New push device: Safari on iPhone".
       deps.audit?.append({
-        userId: (req as { userId?: string }).userId ?? null,
+        userId: ctx.userId,
         event: "push_subscribed",
         target: row.id,
         detail: ua ?? null,
-        ip: (req as { ip?: string }).ip ?? null,
+        ip: ctx.ip,
         userAgent: ua ?? null,
       });
       const body: PushSubscribeResponse = { id: row.id, enabled: true };
@@ -234,18 +232,16 @@ export async function registerPushRoutes(
       const existing = store.findById(id);
       const ok = store.deleteById(id);
       if (!ok) return reply.code(404).send({ error: "not_found" });
+      const ctx = getRequestCtx(req);
       // Audit: device revocation. Capture the UA from the row we just
       // deleted so the Security card can say which device dropped off.
       deps.audit?.append({
-        userId: (req as { userId?: string }).userId ?? null,
+        userId: ctx.userId,
         event: "push_revoked",
         target: id,
         detail: existing?.userAgent ?? null,
-        ip: (req as { ip?: string }).ip ?? null,
-        userAgent:
-          typeof req.headers["user-agent"] === "string"
-            ? req.headers["user-agent"]
-            : null,
+        ip: ctx.ip,
+        userAgent: ctx.userAgent,
       });
       return reply.send({ ok: true });
     },

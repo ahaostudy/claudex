@@ -1025,6 +1025,8 @@ describe("session HTTP routes", () => {
       this.userMessages.push(content);
     }
     resolvePermission() {}
+    resolveAskUserQuestion() {}
+    resolvePlanAccept() {}
     async interrupt() {}
     async setPermissionMode(mode: PermissionMode) {
       this.modeChanges.push(mode);

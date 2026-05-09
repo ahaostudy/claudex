@@ -29,6 +29,7 @@ import {
 } from "./recovery-codes.js";
 import { SlidingWindowLimiter } from "./rate-limit.js";
 import type { AuditStore } from "../audit/store.js";
+import { getRequestCtx } from "../lib/req.js";
 
 export interface AuthDeps {
   db: Database.Database;
@@ -106,15 +107,12 @@ export async function registerAuthRoutes(
   });
 
   // Small helper: pull best-effort ip + user-agent off a Fastify request for
-  // audit rows. Keeps the `audit.append` call sites below to one line each so
-  // the event flow stays readable when skim-reading this file.
-  const reqCtx = (req: FastifyRequest) => ({
-    ip: (req as { ip?: string }).ip ?? null,
-    userAgent:
-      typeof req.headers["user-agent"] === "string"
-        ? req.headers["user-agent"]
-        : null,
-  });
+  // audit rows. Delegates to the shared `getRequestCtx` so we don't keep the
+  // same typed-access pattern duplicated in every routes file.
+  const reqCtx = (req: FastifyRequest) => {
+    const ctx = getRequestCtx(req);
+    return { ip: ctx.ip, userAgent: ctx.userAgent };
+  };
 
   app.decorate(
     "requireAuth",
@@ -140,7 +138,7 @@ export async function registerAuthRoutes(
     // Keyed by client IP; behind a tunnel all requests may share one IP and
     // that's fine — if the attacker shares a tunnel with a user, the user's
     // legitimate login still succeeds (success resets the counter).
-    const ipKey = (req as { ip?: string }).ip ?? "unknown";
+    const ipKey = getRequestCtx(req).ip ?? "unknown";
     const gate = loginLimiter.check(ipKey);
     if (!gate.allowed) {
       deps.audit.append({

@@ -50,6 +50,14 @@ export class AgentRunner implements Runner {
       annotations?: Record<string, AskUserQuestionAnnotation>;
     }) => void
   >();
+  // Pending ExitPlanMode interactions. Keyed on the SDK toolUseID. Kept in a
+  // separate map so accept/reject can't collide with a genuine permission
+  // prompt or an AskUserQuestion — and so double-submit is an O(1) no-op
+  // (delete on first resolve).
+  private pendingPlanAccept = new Map<
+    string,
+    (decision: "accept" | "reject") => void
+  >();
   private userMessages: AsyncPush<SDKUserMessageShape>;
   private sdkHandle: ReturnType<typeof query> | null = null;
   private disposed = false;
@@ -124,6 +132,32 @@ export class AgentRunner implements Runner {
               type: "ask_user_question",
               askId: toolUseID,
               questions,
+            });
+            return;
+          }
+          // ExitPlanMode — not a permission ask, the model is signalling
+          // "ready to execute this plan?". Surface a dedicated event so the
+          // UI can render its own card instead of falling through to the
+          // generic "use ExitPlanMode" permission prompt.
+          if (toolName === "ExitPlanMode") {
+            const plan =
+              typeof (input as { plan?: unknown }).plan === "string"
+                ? ((input as { plan: string }).plan)
+                : "";
+            this.pendingPlanAccept.set(toolUseID, (decision) => {
+              if (decision === "accept") {
+                resolve({ behavior: "allow", updatedInput: input });
+              } else {
+                resolve({
+                  behavior: "deny",
+                  message: "plan not accepted — please revise",
+                });
+              }
+            });
+            this.emit({
+              type: "plan_accept_request",
+              planId: toolUseID,
+              plan,
             });
             return;
           }
@@ -315,6 +349,14 @@ export class AgentRunner implements Runner {
     resolver({ answers, annotations });
   }
 
+  resolvePlanAccept(planId: string, decision: "accept" | "reject"): void {
+    const resolver = this.pendingPlanAccept.get(planId);
+    if (!resolver) return;
+    // Delete BEFORE calling so a second resolve races cleanly (no-op).
+    this.pendingPlanAccept.delete(planId);
+    resolver(decision);
+  }
+
   async interrupt(): Promise<void> {
     if (!this.sdkHandle) return;
     await this.sdkHandle.interrupt();
@@ -343,6 +385,13 @@ export class AgentRunner implements Runner {
       resolver({ answers: {} });
     }
     this.pendingAskUserQuestion.clear();
+    // Reject any pending plan_accept_request so the SDK loop can unwind. The
+    // model sees a tool error — acceptable fallback when the runner's being
+    // torn down anyway.
+    for (const [id, resolver] of this.pendingPlanAccept) {
+      resolver("reject");
+    }
+    this.pendingPlanAccept.clear();
     try {
       await this.sdkHandle?.interrupt();
     } catch {

@@ -946,7 +946,25 @@ function GrantedToolsCard() {
           </div>
         </div>
       </div>
-      {grants === null ? (
+      {err ? (
+        // Error wins over loading: previously `grants === null` kept the
+        // "loading…" row up even after the fetch had failed, so the user
+        // waited forever for data that was never coming. Render the banner
+        // first and offer a retry; only fall back to the loading row when we
+        // have neither data nor an error yet.
+        <div className="px-5 py-4 flex items-center gap-3">
+          <div className="min-w-0 flex-1 rounded-[8px] border border-danger/30 bg-danger-wash px-3 py-2 text-[13px] text-danger">
+            Couldn't load granted tools: <span className="mono">{err}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => void refresh()}
+            className="shrink-0 h-8 px-3 rounded-[8px] border border-danger/40 bg-canvas text-[12.5px] text-danger font-medium"
+          >
+            Retry
+          </button>
+        </div>
+      ) : grants === null ? (
         <div className="px-5 py-5 text-[13px] mono text-ink-muted">loading…</div>
       ) : grants.length === 0 ? (
         <div className="px-5 py-5 text-[13px] text-ink-muted">
@@ -1030,7 +1048,7 @@ function GrantedToolsCard() {
           </button>
         </div>
       )}
-      {err && (
+      {grants !== null && err && (
         <div className="m-4 text-[13px] text-danger bg-danger-wash rounded-[8px] px-3 py-2 border border-danger/30">
           {err}
         </div>
@@ -1113,7 +1131,23 @@ function TrustedProjectsCard() {
           </div>
         </div>
       </div>
-      {projects === null ? (
+      {projects === null && err ? (
+        // Error wins over loading: a failed refresh leaves `projects` as null
+        // and would otherwise keep the spinner spinning forever. Render the
+        // banner with a retry button and let the user try again.
+        <div className="px-5 py-4 flex items-center gap-3">
+          <div className="min-w-0 flex-1 rounded-[8px] border border-danger/30 bg-danger-wash px-3 py-2 text-[13px] text-danger">
+            Couldn't load projects: <span className="mono">{err}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => void refresh()}
+            className="shrink-0 h-8 px-3 rounded-[8px] border border-danger/40 bg-canvas text-[12.5px] text-danger font-medium"
+          >
+            Retry
+          </button>
+        </div>
+      ) : projects === null ? (
         <div className="px-5 py-5 text-[13px] mono text-ink-muted">loading…</div>
       ) : projects.length === 0 ? (
         <div className="px-5 py-5 text-[13px] text-ink-muted">
@@ -1171,7 +1205,7 @@ function TrustedProjectsCard() {
           })}
         </ul>
       )}
-      {err && (
+      {projects !== null && err && (
         <div className="m-4 text-[13px] text-danger bg-danger-wash rounded-[8px] px-3 py-2 border border-danger/30">
           {err}
         </div>
@@ -1884,6 +1918,29 @@ function AdvancedWorktreesCard() {
   }
 
   const orphans = (worktrees ?? []).filter((w) => w.status === "orphaned");
+
+  // Error wins over loading AND over the "no worktrees" empty state. A failed
+  // initial fetch would previously fall through to the empty card — which
+  // looks identical to a fresh install with no worktrees, hiding the fact
+  // that we never got a response. Render the banner with a retry and bail.
+  if (worktrees === null && err) {
+    return (
+      <Card header="Claudex-managed git worktrees across your projects.">
+        <div className="px-4 py-4 flex items-center gap-3">
+          <div className="min-w-0 flex-1 rounded-[8px] border border-danger/30 bg-danger-wash px-3 py-2 text-[13px] text-danger">
+            Couldn't load worktrees: <span className="mono">{err}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => void refresh()}
+            className="shrink-0 h-8 px-3 rounded-[8px] border border-danger/40 bg-canvas text-[12.5px] text-danger font-medium"
+          >
+            Retry
+          </button>
+        </div>
+      </Card>
+    );
+  }
 
   if (worktrees !== null && worktrees.length === 0) {
     return (

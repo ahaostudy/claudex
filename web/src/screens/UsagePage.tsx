@@ -92,6 +92,7 @@ export function UsagePage() {
   // Cross-session aggregates.
   const [today, setToday] = useState<UsageTodayResponse | null>(null);
   const [range, setRange] = useState<UsageRangeResponse | null>(null);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     let cancelled = false;
@@ -107,6 +108,8 @@ export function UsagePage() {
       } catch (e) {
         if (!cancelled)
           setError(e instanceof Error ? e.message : "load_failed");
+      } finally {
+        if (!cancelled) setLoading(false);
       }
     })();
     return () => {
@@ -151,10 +154,16 @@ export function UsagePage() {
               Couldn't load usage: {error}
             </div>
           )}
-          <MobileSessionRing session={activeSession} usage={sessionUsage} />
-          <MobilePlanPeriodCard />
-          <MobileByModelCard today={today} />
-          <MobileCostCard today={today} />
+          {loading && !error ? (
+            <UsageSkeleton />
+          ) : (
+            <>
+              <MobileSessionRing session={activeSession} usage={sessionUsage} />
+              <MobilePlanPeriodCard />
+              <MobileByModelCard today={today} />
+              <MobileCostCard today={today} />
+            </>
+          )}
         </div>
       </div>
 
@@ -199,21 +208,27 @@ export function UsagePage() {
           </div>
         )}
 
-        {/* Row 1: current session (2) + plan period (1) + today tokens (1).
-            At md (768–1280) the 4-col grid compresses painfully, so we drop
-            to 2-col there and only expand to 4-col at lg+. Current-session
-            always spans 2 cols for breathing room around its donut. */}
-        <section className="grid md:grid-cols-2 lg:grid-cols-4 gap-4">
-          <CurrentSessionTile session={activeSession} usage={sessionUsage} />
-          <PlanPeriodTile />
-          <TodayTokensTile today={today} />
-        </section>
+        {loading && !error ? (
+          <UsageSkeleton desktop />
+        ) : (
+          <>
+            {/* Row 1: current session (2) + plan period (1) + today tokens (1).
+                At md (768–1280) the 4-col grid compresses painfully, so we drop
+                to 2-col there and only expand to 4-col at lg+. Current-session
+                always spans 2 cols for breathing room around its donut. */}
+            <section className="grid md:grid-cols-2 lg:grid-cols-4 gap-4">
+              <CurrentSessionTile session={activeSession} usage={sessionUsage} />
+              <PlanPeriodTile />
+              <TodayTokensTile today={today} />
+            </section>
 
-        {/* Row 2: 7-day chart (2) + top sessions (1) */}
-        <section className="mt-5 grid grid-cols-3 gap-4">
-          <SevenDayChartTile range={range} />
-          <TopSessionsTile today={today} />
-        </section>
+            {/* Row 2: 7-day chart (2) + top sessions (1) */}
+            <section className="mt-5 grid grid-cols-3 gap-4">
+              <SevenDayChartTile range={range} />
+              <TopSessionsTile today={today} />
+            </section>
+          </>
+        )}
       </div>
     </AppShell>
   );
@@ -225,6 +240,31 @@ export function UsagePage() {
 // per-model rows, and a cost-estimate card. Data comes from the same
 // endpoints as the desktop tiles.
 // ---------------------------------------------------------------------------
+
+// Skeleton shown while the usage endpoints resolve — three greyed placeholder
+// cards so the page isn't an empty canvas on first paint. The old code
+// treated `today === null` as "loading" which meant a broken endpoint looked
+// identical to a mid-flight fetch; now the real null case only appears after
+// `loading` flips false, at which point the tiles render their honest
+// empty states instead.
+function UsageSkeleton({ desktop = false }: { desktop?: boolean }) {
+  if (desktop) {
+    return (
+      <section className="grid md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="col-span-2 rounded-[10px] border border-line bg-canvas p-5 min-h-[160px] bg-paper animate-pulse" />
+        <div className="rounded-[10px] border border-line bg-paper p-5 min-h-[160px] animate-pulse" />
+        <div className="rounded-[10px] border border-line bg-paper p-5 min-h-[160px] animate-pulse" />
+      </section>
+    );
+  }
+  return (
+    <>
+      <div className="rounded-[10px] border border-line bg-paper p-4 h-[180px] animate-pulse" />
+      <div className="rounded-[10px] border border-line bg-paper p-4 h-[100px] animate-pulse" />
+      <div className="rounded-[10px] border border-line bg-paper p-4 h-[120px] animate-pulse" />
+    </>
+  );
+}
 
 function MobileSessionRing({
   session,

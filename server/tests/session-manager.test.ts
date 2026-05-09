@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
 import { openDb } from "../src/db/index.js";
 import { ProjectStore } from "../src/sessions/projects.js";
 import { SessionStore } from "../src/sessions/store.js";
@@ -49,6 +49,9 @@ class MockRunner implements Runner {
     _annotations?: unknown,
   ) {
     // Mock only — real tests that care about AskUserQuestion use a dedicated harness.
+  }
+  resolvePlanAccept(_id: string, _d: "accept" | "reject") {
+    // Mock only — plan accept tests use a dedicated harness.
   }
   async interrupt() {
     this.interrupted += 1;
@@ -583,5 +586,121 @@ describe("SessionManager", () => {
     });
     await s.manager.sendUserMessage(defaulted.id, "Add a dark-mode toggle");
     expect(s.sessions.findById(defaulted.id)!.title).toBe("Add a dark-mode toggle");
+  });
+
+  // ---- Silence watchdog ----------------------------------------------------
+
+  it("force-flips to error + broadcasts when the runner is silent past the watchdog window", async () => {
+    // Tight window so the test runs fast under fake timers. Has to be set
+    // BEFORE `sendUserMessage` arms the timer — the manager reads the env
+    // var at arming time.
+    const prev = process.env.CLAUDEX_SESSION_WATCHDOG_MS;
+    process.env.CLAUDEX_SESSION_WATCHDOG_MS = "1000";
+    vi.useFakeTimers();
+    const s = setupManager();
+    cleanups.push(() => {
+      vi.useRealTimers();
+      if (prev === undefined) delete process.env.CLAUDEX_SESSION_WATCHDOG_MS;
+      else process.env.CLAUDEX_SESSION_WATCHDOG_MS = prev;
+      s.cleanup();
+    });
+    // Send a user message to arm the watchdog, then simulate total silence.
+    await s.manager.sendUserMessage(s.session.id, "kick off");
+    // Session should be active; runner has NOT emitted turn_end / idle / error.
+    expect(s.sessions.findById(s.session.id)!.status).not.toBe("error");
+    // Clear existing broadcasts so assertions below only see watchdog-driven
+    // frames.
+    s.broadcasts.length = 0;
+
+    // Advance past the watchdog window.
+    await vi.advanceTimersByTimeAsync(1100);
+
+    // DB row flipped to error.
+    expect(s.sessions.findById(s.session.id)!.status).toBe("error");
+    // Synthesized `error` RunnerEvent fired (ws bridge will turn this into a
+    // client-visible frame).
+    const errorBroadcasts = s.broadcasts.filter(
+      (b) => b.event.type === "error" && b.sessionId === s.session.id,
+    );
+    expect(errorBroadcasts).toHaveLength(1);
+    const err = errorBroadcasts[0].event as { code: string; message: string };
+    expect(err.code).toBe("watchdog_timeout");
+    // Persisted as an error session_event too, so the transcript shows why.
+    const logged = s.sessions
+      .listEvents(s.session.id)
+      .filter((e) => e.kind === "error");
+    expect(logged).toHaveLength(1);
+    expect(logged[0].payload).toMatchObject({ code: "watchdog_timeout" });
+  });
+
+  it("runner events reset the watchdog so active sessions aren't force-errored", async () => {
+    const prev = process.env.CLAUDEX_SESSION_WATCHDOG_MS;
+    process.env.CLAUDEX_SESSION_WATCHDOG_MS = "1000";
+    vi.useFakeTimers();
+    const s = setupManager();
+    cleanups.push(() => {
+      vi.useRealTimers();
+      if (prev === undefined) delete process.env.CLAUDEX_SESSION_WATCHDOG_MS;
+      else process.env.CLAUDEX_SESSION_WATCHDOG_MS = prev;
+      s.cleanup();
+    });
+    await s.manager.sendUserMessage(s.session.id, "go");
+    const mock = s.last()!;
+    // Emit activity just before the window expires — watchdog should reset.
+    await vi.advanceTimersByTimeAsync(800);
+    mock.emit({
+      type: "assistant_text",
+      messageId: "m1",
+      text: "still thinking",
+      done: false,
+    });
+    // Go past the original window; if the reset worked, we're still NOT errored.
+    await vi.advanceTimersByTimeAsync(400);
+    expect(s.sessions.findById(s.session.id)!.status).not.toBe("error");
+    // But letting it sit silent past the *new* window does fire the watchdog.
+    await vi.advanceTimersByTimeAsync(1100);
+    expect(s.sessions.findById(s.session.id)!.status).toBe("error");
+  });
+
+  it("turn_end clears the watchdog so no spurious error fires after a clean turn", async () => {
+    const prev = process.env.CLAUDEX_SESSION_WATCHDOG_MS;
+    process.env.CLAUDEX_SESSION_WATCHDOG_MS = "1000";
+    vi.useFakeTimers();
+    const s = setupManager();
+    cleanups.push(() => {
+      vi.useRealTimers();
+      if (prev === undefined) delete process.env.CLAUDEX_SESSION_WATCHDOG_MS;
+      else process.env.CLAUDEX_SESSION_WATCHDOG_MS = prev;
+      s.cleanup();
+    });
+    await s.manager.sendUserMessage(s.session.id, "hi");
+    const mock = s.last()!;
+    mock.emit({ type: "turn_end", stopReason: "end_turn" });
+    // Well past the watchdog window — if turn_end cleared the timer, status
+    // should still be idle (not error).
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(s.sessions.findById(s.session.id)!.status).toBe("idle");
+  });
+
+  it("disposeAll cancels pending watchdogs so they can't fire post-shutdown", async () => {
+    const prev = process.env.CLAUDEX_SESSION_WATCHDOG_MS;
+    process.env.CLAUDEX_SESSION_WATCHDOG_MS = "1000";
+    vi.useFakeTimers();
+    const s = setupManager();
+    cleanups.push(() => {
+      vi.useRealTimers();
+      if (prev === undefined) delete process.env.CLAUDEX_SESSION_WATCHDOG_MS;
+      else process.env.CLAUDEX_SESSION_WATCHDOG_MS = prev;
+      s.cleanup();
+    });
+    await s.manager.sendUserMessage(s.session.id, "go");
+    await s.manager.disposeAll();
+    const broadcastsBefore = s.broadcasts.length;
+    await vi.advanceTimersByTimeAsync(5000);
+    // No new error broadcast after disposeAll.
+    const newErrors = s.broadcasts
+      .slice(broadcastsBefore)
+      .filter((b) => b.event.type === "error");
+    expect(newErrors).toHaveLength(0);
   });
 });

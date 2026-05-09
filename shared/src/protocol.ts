@@ -76,6 +76,21 @@ export const ClientAskUserAnswer = z.object({
   annotations: z.record(z.string(), AskUserQuestionAnnotation).optional(),
 });
 
+// Accept / reject decision on an `ExitPlanMode` tool call. Routed to
+// `SessionManager.resolvePlanAccept`, which resolves the corresponding
+// `canUseTool` promise with `{ behavior: "allow" }` on accept or
+// `{ behavior: "deny", message: "plan not accepted — please revise" }` on
+// reject. The SDK treats a deny as a tool error that the model can recover
+// from by regenerating the plan; accept lets the model proceed with the
+// planned actions (the SDK transitions out of `plan` permission mode on
+// its own).
+export const ClientPlanAcceptDecision = z.object({
+  type: z.literal("plan_accept_decision"),
+  sessionId: z.string(),
+  planId: z.string(),
+  decision: z.enum(["accept", "reject"]),
+});
+
 export const ClientFrame = z.discriminatedUnion("type", [
   ClientHello,
   ClientSubscribe,
@@ -84,6 +99,7 @@ export const ClientFrame = z.discriminatedUnion("type", [
   ClientInterrupt,
   ClientPermissionDecision,
   ClientAskUserAnswer,
+  ClientPlanAcceptDecision,
 ]);
 export type ClientFrame = z.infer<typeof ClientFrame>;
 
@@ -171,6 +187,20 @@ export const ServerAskUserQuestion = z.object({
   questions: z.array(AskUserQuestionItem),
 });
 
+// Broadcast when the SDK's `ExitPlanMode` tool fires. Distinct from
+// `permission_request` because it is not a security gate — it's the model
+// signalling "I've sketched a plan, ready to execute?". The client renders a
+// dedicated klein-wash card with the plan rendered as markdown plus
+// Accept/Reject buttons, and replies with a `ClientPlanAcceptDecision` frame.
+// `planId` is the SDK `toolUseID` — we reuse it as the correlation id.
+export const ServerPlanAcceptRequest = z.object({
+  type: z.literal("plan_accept_request"),
+  sessionId: z.string(),
+  seq: z.number().int().nonnegative(),
+  planId: z.string(),
+  plan: z.string(),
+});
+
 export const ServerTurnEnd = z.object({
   type: z.literal("turn_end"),
   sessionId: z.string(),
@@ -235,6 +265,7 @@ export const ServerFrame = z.discriminatedUnion("type", [
   ServerToolResult,
   ServerPermissionRequest,
   ServerAskUserQuestion,
+  ServerPlanAcceptRequest,
   ServerTurnEnd,
   ServerUserMessage,
   ServerRefreshTranscript,

@@ -33,6 +33,8 @@ class RecordingRunner implements Runner {
     this.sent.push(c);
   }
   resolvePermission() {}
+  resolveAskUserQuestion() {}
+  resolvePlanAccept() {}
   async interrupt() {}
   async setPermissionMode() {}
   async dispose() {

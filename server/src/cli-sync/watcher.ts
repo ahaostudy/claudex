@@ -36,8 +36,17 @@ import { resyncCliSession } from "../sessions/cli-resync.js";
 
 const SDK_ID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const RUNNING_MTIME_WINDOW_MS = 60_000;
+// Heuristic windows for `deriveCliStatus`. Keep these conservative — false
+// "running" is the worst outcome (composer looks locked, user can't tell
+// why), while false "idle" just means the status dot lags a few seconds
+// behind. We err on idle.
+const RUNNING_MTIME_WINDOW_MS = 20_000; // file must be actively growing
+const ACTIVE_ASSISTANT_WINDOW_MS = 30_000; // last assistant line must be recent
 const TAIL_BYTES = 8 * 1024;
+// How many tail records we parse back for status derivation. Five is enough
+// to cover a typical turn's trailing pattern: user → tool_use → tool_result
+// → assistant (final) without us having to walk the whole file.
+const TAIL_LINES = 5;
 
 export interface CliSyncWatcherDeps {
   sessions: SessionStore;
@@ -319,8 +328,42 @@ async function backfillStatuses(
 }
 
 /**
- * mtime + last-line heuristic. See module-header notes for limitations.
- * Returns the new status to stamp (which may equal the existing one).
+ * Derive a session's status from its JSONL file alone. We have three inputs:
+ *
+ *   1. file mtime (how fresh is the last write?)
+ *   2. the last few JSONL records (what kind of record is it?)
+ *   3. whether the most recent `assistant` record carries `stop_reason`
+ *      (the authoritative "turn is done" signal the CLI emits)
+ *
+ * Decision table (first match wins):
+ *
+ *   a. Most recent `assistant` record has `stop_reason` set
+ *      → `idle` regardless of mtime. The turn is finished; any subsequent
+ *      file growth is the user typing the next prompt (which we classify
+ *      below).
+ *
+ *   b. Last non-empty line is `type:"user"` with no `assistant` record
+ *      after it → CLI is waiting for the user to send the reply. We don't
+ *      have a dedicated "awaiting_user" status today, so map to `idle` —
+ *      this is the most common "looks idle, I can type" case and matches
+ *      what the user expects.
+ *
+ *   c. mtime < 20s AND there's a recent (< 30s old) `assistant` record
+ *      without `stop_reason` → `running`. We require BOTH an active write
+ *      window and an in-flight assistant turn so that a user typing into a
+ *      just-opened session (where the tail is a `user` record and no
+ *      assistant has started yet) doesn't get misclassified as running.
+ *
+ *   d. Anything else → `idle`. Covers stale files (> 60s), mid-turn pauses
+ *      longer than the active window (we'd rather show idle and flip back
+ *      on next write than show fake-running), and anomalies.
+ *
+ * Honest limits: we can't observe "is the CLI process alive" from a JSONL
+ * alone — only "has the file grown recently". A turn that legitimately runs
+ * a 60+ second tool call will briefly show idle before the next assistant
+ * chunk flips it back. This is a deliberate trade-off: false idle flickers
+ * are visually annoying, false running leaves the user convinced the
+ * session is broken.
  */
 export async function deriveCliStatus(
   session: Session,
@@ -334,27 +377,81 @@ export async function deriveCliStatus(
     return session.status;
   }
   const mtimeAge = now - stat.mtimeMs;
-  const lastLine = await tailLastJsonlLine(absPath).catch(() => null);
-  const looksDone = lastLineLooksTerminal(lastLine);
-  const recentlyWritten = mtimeAge < RUNNING_MTIME_WINDOW_MS;
-  if (recentlyWritten && !looksDone) return "running";
-  if (looksDone && session.status === "running") return "idle";
-  return session.status;
+  const tail = await tailLastJsonlLines(absPath, TAIL_LINES).catch(
+    () => [] as Array<Record<string, unknown>>,
+  );
+
+  // (a) / (b): walk the tail from newest → oldest and find the most-recent
+  // assistant + whether a later user line exists after it.
+  let lastAssistant: Record<string, unknown> | null = null;
+  let lastAssistantIdxFromEnd = -1;
+  let lastNonEmpty: Record<string, unknown> | null = null;
+  for (let i = tail.length - 1; i >= 0; i--) {
+    const rec = tail[i];
+    if (!lastNonEmpty) lastNonEmpty = rec;
+    if (rec && (rec as Record<string, unknown>).type === "assistant") {
+      lastAssistant = rec;
+      lastAssistantIdxFromEnd = tail.length - 1 - i;
+      break;
+    }
+  }
+
+  // (a) Finished turn.
+  if (lastAssistant && assistantHasStopReason(lastAssistant)) return "idle";
+
+  // (b) Last line is a user prompt sitting after the most recent assistant —
+  // CLI is waiting for the user (or we're looking at a brand-new session
+  // that hasn't gotten its first assistant reply yet). Show idle.
+  if (
+    lastNonEmpty &&
+    (lastNonEmpty as Record<string, unknown>).type === "user" &&
+    lastAssistantIdxFromEnd !== 0
+  ) {
+    return "idle";
+  }
+
+  // (c) In-flight turn. Require fresh mtime AND a recent assistant record
+  // without stop_reason, so we don't call "running" on files whose tail is
+  // all tool_use / tool_result with no assistant-in-progress.
+  if (lastAssistant && mtimeAge < RUNNING_MTIME_WINDOW_MS) {
+    const assistantAge = assistantRecordAge(lastAssistant, stat.mtimeMs, now);
+    if (assistantAge < ACTIVE_ASSISTANT_WINDOW_MS) return "running";
+  }
+
+  // (d) Default.
+  return "idle";
 }
 
 /**
- * True when the JSONL's last record looks like the CLI finished a turn.
- * The CLI records final assistant messages with `stop_reason` set; we also
- * accept top-level `result` records, which some SDK versions emit.
+ * True when `type:"assistant"` record carries `message.stop_reason` — the
+ * CLI's signal that the turn has wrapped. SDK variants also emit a top-level
+ * `type:"result"` record we treat as terminal.
  */
-function lastLineLooksTerminal(parsed: unknown): boolean {
-  if (!parsed || typeof parsed !== "object") return false;
-  const obj = parsed as Record<string, unknown>;
-  if (obj.type === "result") return true;
-  if (obj.type !== "assistant") return false;
-  const message = obj.message as Record<string, unknown> | undefined;
+function assistantHasStopReason(rec: Record<string, unknown>): boolean {
+  if (rec.type === "result") return true;
+  if (rec.type !== "assistant") return false;
+  const message = rec.message as Record<string, unknown> | undefined;
   if (!message) return false;
   return message.stop_reason !== undefined && message.stop_reason !== null;
+}
+
+/**
+ * Best-effort age of an assistant record in milliseconds. The CLI stamps
+ * `timestamp` as an ISO string on each record — when present we use that
+ * directly. Otherwise we fall back to the file's mtime (the record is the
+ * last one we saw, so it can't be older than the file's last write).
+ */
+function assistantRecordAge(
+  rec: Record<string, unknown>,
+  mtimeMs: number,
+  now: number,
+): number {
+  const ts = rec.timestamp;
+  if (typeof ts === "string") {
+    const parsed = Date.parse(ts);
+    if (!Number.isNaN(parsed)) return Math.max(0, now - parsed);
+  }
+  return Math.max(0, now - mtimeMs);
 }
 
 /**
@@ -380,36 +477,44 @@ async function countNonEmptyLines(absPath: string): Promise<number> {
 }
 
 /**
- * Read the last ~8 KB of a file, split on `\n`, parse the last non-empty
- * line as JSON. Returns null on malformed / missing / empty input.
+ * Read the last ~8 KB of a file and return up to `maxLines` parsed JSON
+ * records (oldest → newest). Malformed / truncated lines at the head of the
+ * window (possibly clipped mid-line) are dropped silently. Returns an empty
+ * array on missing / empty input.
+ *
+ * We keep the window small because status derivation only needs the trailing
+ * handful of records, and a bounded tail read is O(1) regardless of file size
+ * — the CLI's JSONLs grow indefinitely over long conversations.
  */
-async function tailLastJsonlLine(
+async function tailLastJsonlLines(
   absPath: string,
-): Promise<Record<string, unknown> | null> {
+  maxLines: number,
+): Promise<Array<Record<string, unknown>>> {
   let fd: fsp.FileHandle | null = null;
   try {
     fd = await fsp.open(absPath, "r");
     const stat = await fd.stat();
     const size = stat.size;
-    if (size === 0) return null;
+    if (size === 0) return [];
     const len = Math.min(TAIL_BYTES, size);
     const buf = Buffer.alloc(len);
     await fd.read(buf, 0, len, size - len);
     const text = buf.toString("utf-8");
     const lines = text.split("\n");
-    // Walk back from the end looking for the first non-empty line.
-    for (let i = lines.length - 1; i >= 0; i--) {
+    const parsed: Array<Record<string, unknown>> = [];
+    // Walk from the end collecting parseable lines until we hit `maxLines`.
+    for (let i = lines.length - 1; i >= 0 && parsed.length < maxLines; i--) {
       const trimmed = lines[i].trim();
       if (!trimmed) continue;
       try {
-        return JSON.parse(trimmed) as Record<string, unknown>;
+        const obj = JSON.parse(trimmed) as Record<string, unknown>;
+        parsed.unshift(obj);
       } catch {
-        // If the tail window started mid-line we may have truncated JSON;
-        // keep walking backwards — an earlier complete line is fine.
+        // Likely a truncated head line (we started mid-record). Skip.
         continue;
       }
     }
-    return null;
+    return parsed;
   } finally {
     if (fd) await fd.close();
   }

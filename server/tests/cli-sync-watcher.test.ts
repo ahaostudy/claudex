@@ -256,16 +256,24 @@ describe("deriveCliStatus", () => {
     },
   };
 
-  it("returns running when mtime < 60s and last line lacks stop_reason", async () => {
+  it("returns running when mtime < 20s AND tail has a recent in-flight assistant record", async () => {
     const filePath = writeJsonl([
       { type: "user", message: { role: "user", content: "hi" } },
+      {
+        type: "assistant",
+        timestamp: new Date().toISOString(),
+        message: {
+          role: "assistant",
+          content: [{ type: "text", text: "thinking..." }],
+          // no stop_reason — mid-turn
+        },
+      },
     ]);
-    // Fresh file — mtime ~= now.
     const next = await deriveCliStatus(baseSession, filePath);
     expect(next).toBe("running");
   });
 
-  it("returns idle when mtime < 60s but last line has stop_reason", async () => {
+  it("returns idle when mtime < 20s but last assistant has stop_reason", async () => {
     const filePath = writeJsonl([
       { type: "user", message: { role: "user", content: "hi" } },
       {
@@ -282,18 +290,75 @@ describe("deriveCliStatus", () => {
     expect(next).toBe("idle");
   });
 
-  it("is a no-op when mtime > 60s and status isn't running", async () => {
+  it("returns idle when the last line is a user record with no following assistant (awaiting user)", async () => {
+    // CLI is paused waiting for the user's reply — no assistant after the
+    // last user line. Should NOT classify as running just because the file
+    // mtime is fresh.
     const filePath = writeJsonl([
-      { type: "user", message: { role: "user", content: "hi" } },
+      {
+        type: "assistant",
+        message: {
+          role: "assistant",
+          content: [{ type: "text", text: "done" }],
+          stop_reason: "end_turn",
+        },
+      },
+      { type: "user", message: { role: "user", content: "quick q" } },
     ]);
-    // Backdate mtime.
-    const old = Date.now() / 1000 - 600;
-    await fsp.utimes(filePath, old, old);
+    // Fresh mtime (file was just written) — this is the exact case that
+    // used to mis-classify as running under the old heuristic.
     const next = await deriveCliStatus(baseSession, filePath);
-    expect(next).toBe(baseSession.status);
+    expect(next).toBe("idle");
   });
 
-  it("flips a stale running → idle when last line looks terminal", async () => {
+  it("is idle when tail only contains a user prompt (no assistant ever)", async () => {
+    // Very new session: the user typed something, no assistant replied yet.
+    // Previously this flipped to running because "fresh mtime + no
+    // stop_reason". Now it's idle.
+    const filePath = writeJsonl([
+      { type: "user", message: { role: "user", content: "start me up" } },
+    ]);
+    const next = await deriveCliStatus(baseSession, filePath);
+    expect(next).toBe("idle");
+  });
+
+  it("returns idle when mtime is stale (> 60s) regardless of tail", async () => {
+    const filePath = writeJsonl([
+      {
+        type: "assistant",
+        message: {
+          role: "assistant",
+          content: [{ type: "text", text: "ok" }],
+          // no stop_reason, but mtime is stale
+        },
+      },
+    ]);
+    const old = Date.now() / 1000 - 600;
+    await fsp.utimes(filePath, old, old);
+    const runningRow = { ...baseSession, status: "running" as const };
+    const next = await deriveCliStatus(runningRow, filePath);
+    expect(next).toBe("idle");
+  });
+
+  it("mtime > 20s but < 60s: errs on idle, not running", async () => {
+    const filePath = writeJsonl([
+      {
+        type: "assistant",
+        message: {
+          role: "assistant",
+          content: [{ type: "text", text: "still thinking" }],
+        },
+      },
+    ]);
+    // 30s old — inside the old 60s window but outside our new 20s one.
+    const old = Date.now() / 1000 - 30;
+    await fsp.utimes(filePath, old, old);
+    const runningRow = { ...baseSession, status: "running" as const };
+    const next = await deriveCliStatus(runningRow, filePath);
+    expect(next).toBe("idle");
+  });
+
+  it("flips a stale running → idle when tail has stop_reason", async () => {
     const filePath = writeJsonl([
       {
         type: "assistant",

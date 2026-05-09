@@ -46,6 +46,12 @@ export function ChatTasksRail({
   // a 10k-event session doesn't cost us the full /events payload every time
   // a piece lands.
   const [usage, setUsage] = useState<UsageSummaryResponse | null>(null);
+  // Don't conflate an endpoint failure with "we don't know the last turn's
+  // context yet" — the previous code silently ate the error and rendered the
+  // ring as if it were a historical turn with missing cache fields. A real
+  // load failure gets its own state + tooltip so the user can tell the two
+  // apart.
+  const [usageErr, setUsageErr] = useState<string | null>(null);
   useEffect(() => {
     if (!session) return;
     let cancelled = false;
@@ -54,8 +60,10 @@ export function ChatTasksRail({
         const res = await api.getUsageSummary(session.id);
         if (cancelled) return;
         setUsage(res);
-      } catch {
-        // Fall back to zeros — the ring will render as unknown.
+        setUsageErr(null);
+      } catch (e) {
+        if (cancelled) return;
+        setUsageErr(e instanceof Error ? e.message : "load_failed");
       }
     })();
     return () => {
@@ -68,12 +76,13 @@ export function ChatTasksRail({
 
   const contextWindow = session ? contextWindowTokens(session.model) : 200_000;
   const lastTurnInput = usage?.lastTurnInput ?? 0;
-  const pctKnown = usage?.lastTurnContextKnown ?? false;
+  const pctKnown = usageErr ? false : (usage?.lastTurnContextKnown ?? false);
   const pct = pctKnown
     ? Math.max(0, Math.min(1, lastTurnInput / contextWindow))
     : 0;
-  const unknownReason =
-    usage && usage.turnCount === 0
+  const unknownReason = usageErr
+    ? `Failed to load usage: ${usageErr}`
+    : usage && usage.turnCount === 0
       ? "no turns yet"
       : "historical turn — cache fields not persisted; next turn will reflect real context";
 
@@ -111,7 +120,16 @@ export function ChatTasksRail({
         )}
       </div>
       <div className="mt-auto p-3 border-t border-line">
-        <div className="caps text-ink-muted mb-2">Context window</div>
+        <div className="caps text-ink-muted mb-2 flex items-center gap-1.5">
+          <span>Context window</span>
+          {usageErr && (
+            <span
+              className="h-1.5 w-1.5 rounded-full bg-danger"
+              title="Failed to load usage"
+              aria-label="Failed to load usage"
+            />
+          )}
+        </div>
         <div className="flex items-center gap-3" title={pctKnown ? undefined : unknownReason}>
           <ContextDonut pct={pct} known={pctKnown} />
           <div>

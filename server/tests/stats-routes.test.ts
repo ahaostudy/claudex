@@ -248,4 +248,127 @@ describe("stats routes", () => {
     expect(body.oldestSession!.id).toBe(sArchived);
     expect(body.newestSession!.id).toBe(sIdle);
   });
+
+  // -------------------------------------------------------------------------
+  // Edge cases: empty / all-archived / NULL-usage / archive accounting.
+  // -------------------------------------------------------------------------
+
+  it("div-by-zero guard: avgTokensPerTurn stays 0 when there are sessions but no turns", async () => {
+    // Sessions exist but no turn_end events → totalTurns=0 must not blow up
+    // the avgTokensPerTurn division. Also documents the current choice:
+    // avgTurnsPerSession is 0 (not null) here — the StatsResponse schema is
+    // `z.number().nonnegative()` (non-nullable), and the handler returns 0
+    // when `nonArchived === 0` OR `totalTurns === 0`.
+    const ctx = await bootstrap();
+    disposers.push(ctx.cleanup);
+    const projectId = await createProject(ctx, "empty-turns");
+    await createSession(ctx, projectId, "no-turns");
+
+    const res = await ctx.app.inject({
+      method: "GET",
+      url: "/api/stats",
+      headers: { cookie: ctx.cookie },
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as StatsResponse;
+    expect(body.totalSessions).toBe(1);
+    expect(body.totalTurns).toBe(0);
+    // Non-archived session with zero turns → avg is 0 per the handler's
+    // convention. Documented here; if the design changes to "null" that's
+    // a wire-shape change + schema change + this assertion.
+    expect(body.avgTurnsPerSession).toBe(0);
+    // No turns → 0 tokens / 0 avg, no NaN.
+    expect(body.totalTokens).toBe(0);
+    expect(body.avgTokensPerTurn).toBe(0);
+    expect(Number.isNaN(body.avgTokensPerTurn)).toBe(false);
+    expect(Number.isNaN(body.avgTurnsPerSession)).toBe(false);
+  });
+
+  it("handles turn_end rows with missing / null usage payloads without breaking aggregation", async () => {
+    // Three turn_end events with progressively sparser usage:
+    //   t1: usage = { inputTokens: 100, outputTokens: 50 }
+    //   t2: usage missing entirely → contributes 0 tokens (COALESCE → 0)
+    //   t3: usage = {} (present but empty) → also contributes 0 tokens
+    // Without the COALESCEs in stats/routes.ts this would crash or NaN.
+    const ctx = await bootstrap();
+    disposers.push(ctx.cleanup);
+    const projectId = await createProject(ctx, "sparse-usage");
+    const sid = await createSession(ctx, projectId, "s");
+
+    // t1 — full usage
+    seedTurnEnd(ctx, sid, { inputTokens: 100, outputTokens: 50 }, 1);
+    // t2 — no `usage` key at all on the payload. Insert raw JSON that skips
+    // the field so we're truly testing the NULL-safe aggregate.
+    ctx.dbh.db
+      .prepare(
+        `INSERT INTO session_events (id, session_id, kind, seq, created_at, payload)
+         VALUES (?, ?, 'turn_end', ?, ?, ?)`,
+      )
+      .run(
+        `ev-sparse-2-${Math.random().toString(36).slice(2)}`,
+        sid,
+        2,
+        new Date().toISOString(),
+        JSON.stringify({ note: "no usage here" }),
+      );
+    // t3 — `usage` key present but an empty object.
+    ctx.dbh.db
+      .prepare(
+        `INSERT INTO session_events (id, session_id, kind, seq, created_at, payload)
+         VALUES (?, ?, 'turn_end', ?, ?, ?)`,
+      )
+      .run(
+        `ev-sparse-3-${Math.random().toString(36).slice(2)}`,
+        sid,
+        3,
+        new Date().toISOString(),
+        JSON.stringify({ usage: {} }),
+      );
+
+    const res = await ctx.app.inject({
+      method: "GET",
+      url: "/api/stats",
+      headers: { cookie: ctx.cookie },
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as StatsResponse;
+    expect(body.totalTurns).toBe(3);
+    // Only t1 contributed — 150 tokens total.
+    expect(body.totalTokens).toBe(150);
+    // 150 / 3 = 50. Integer result — no NaN.
+    expect(body.avgTokensPerTurn).toBe(50);
+    expect(Number.isFinite(body.avgTokensPerTurn)).toBe(true);
+  });
+
+  it("busiestProject: only-archived sessions still count toward busiestProject (documents current behavior)", async () => {
+    // Stats routes doc says: "we don't filter archived here on purpose —
+    // 'busiest' means 'where have you spent your effort,' and archived rows
+    // absolutely counted toward that." This test pins the behavior: a
+    // project whose every session is archived still surfaces as busiest
+    // with sessionCount === archivedSessionCount.
+    const ctx = await bootstrap();
+    disposers.push(ctx.cleanup);
+    const projectId = await createProject(ctx, "only-archived");
+    const s1 = await createSession(ctx, projectId, "a-1");
+    const s2 = await createSession(ctx, projectId, "a-2");
+    setStatus(ctx, s1, "archived");
+    setStatus(ctx, s2, "archived");
+
+    const res = await ctx.app.inject({
+      method: "GET",
+      url: "/api/stats",
+      headers: { cookie: ctx.cookie },
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as StatsResponse;
+    expect(body.totalSessions).toBe(2);
+    expect(body.archivedSessions).toBe(2);
+    // Archived sessions DO feed busiestProject per the route's documented
+    // stance. sessionCount === totalSessions on this project (both archived).
+    expect(body.busiestProject).not.toBeNull();
+    expect(body.busiestProject!.id).toBe(projectId);
+    expect(body.busiestProject!.sessionCount).toBe(2);
+    // avgTurnsPerSession: nonArchived=0 → handler returns 0 (documented).
+    expect(body.avgTurnsPerSession).toBe(0);
+  });
 });

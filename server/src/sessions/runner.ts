@@ -70,6 +70,18 @@ export type RunnerEvent =
       askId: string;
       questions: AskUserQuestionItem[];
     }
+  // SDK's built-in `ExitPlanMode` tool — NOT a permission ask either. The
+  // model calls it after a planning pass to signal "I've sketched the plan,
+  // ready to execute?". We resolve the `canUseTool` promise via
+  // `resolvePlanAccept`: accept → `{behavior: "allow"}`, reject →
+  // `{behavior: "deny", message: ...}` (the model sees a tool error and can
+  // regenerate the plan). `plan` is the markdown text the SDK delivered in
+  // the tool_use input payload.
+  | {
+      type: "plan_accept_request";
+      planId: string;
+      plan: string;
+    }
   | {
       type: "turn_end";
       stopReason: string;
@@ -126,6 +138,13 @@ export interface Runner {
     answers: Record<string, string>,
     annotations?: Record<string, AskUserQuestionAnnotation>,
   ): void;
+  // Resolve a pending `ExitPlanMode` interaction. `accept` resolves the SDK's
+  // `canUseTool` with `{ behavior: "allow" }` (letting the model proceed with
+  // its plan; the SDK itself handles transitioning out of `plan` mode).
+  // `reject` resolves with `{ behavior: "deny", message }` — the model sees
+  // a tool error and can revise the plan. No-op on unknown planId (double
+  // submit / stale client).
+  resolvePlanAccept(planId: string, decision: "accept" | "reject"): void;
   interrupt(): Promise<void>;
   setPermissionMode(mode: PermissionMode): Promise<void>;
   dispose(): Promise<void>;

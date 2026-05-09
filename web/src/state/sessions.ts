@@ -87,6 +87,20 @@ export type UIPiece =
       annotations?: Record<string, AskUserQuestionAnnotation>;
       answerSeq?: number;
     }
+  // SDK's ExitPlanMode tool — rendered as a dedicated "commit to this plan?"
+  // card. Like ask_user_question, it's not a security gate; accept lets the
+  // model proceed, reject sends it back for revisions. `decision` is set
+  // once the user has clicked one of the buttons (or on refetch from a
+  // persisted `plan_accept_decision` sibling event), at which point the card
+  // renders read-only with an accepted / rejected pill.
+  | {
+      kind: "plan_accept_request";
+      planId: string;
+      plan: string;
+      seq?: number;
+      decision?: "accept" | "reject";
+      decisionSeq?: number;
+    }
   // `pending` is a UI-only piece (never persisted, never comes off the wire).
   // Inserted right after a user_message echo to give the user immediate
   // feedback that claude is processing. Removed as soon as any substantive
@@ -178,6 +192,11 @@ interface SessionState {
     answers: Record<string, string>,
     annotations?: Record<string, AskUserQuestionAnnotation>,
   ) => void;
+  resolvePlanAccept: (
+    sessionId: string,
+    planId: string,
+    decision: "accept" | "reject",
+  ) => void;
   setViewMode: (mode: ViewMode) => void;
   forgetSession: (id: string) => void;
 }
@@ -253,6 +272,17 @@ function eventToPiece(ev: SessionEvent): UIPiece | null {
       // folds them into the matching `ask_user_question` piece. Return null
       // here so the default piece builder skips it.
       return null;
+    case "plan_accept_request":
+      return {
+        kind: "plan_accept_request",
+        planId: String(p.planId ?? ""),
+        plan: String(p.plan ?? ""),
+        seq: ev.seq,
+      };
+    case "plan_accept_decision":
+      // Decisions land as a sibling event; the reducer folds them into the
+      // matching plan_accept_request piece. Skip in the default builder.
+      return null;
     default:
       return null;
   }
@@ -296,6 +326,12 @@ function frameToPiece(frame: ServerFrame): UIPiece | null {
         askId: frame.askId,
         questions: frame.questions,
       };
+    case "plan_accept_request":
+      return {
+        kind: "plan_accept_request",
+        planId: frame.planId,
+        plan: frame.plan,
+      };
     default:
       return null;
   }
@@ -310,6 +346,8 @@ function eventsToPieces(events: SessionEvent[]): UIPiece[] {
   const pieces: UIPiece[] = [];
   // Map askId → index into `pieces` for fast answer-fold.
   const askIdx = new Map<string, number>();
+  // Map planId → index into `pieces` for fast decision-fold.
+  const planIdx = new Map<string, number>();
   for (const ev of events) {
     if (ev.kind === "ask_user_answer") {
       const p = ev.payload as Record<string, any>;
@@ -330,10 +368,32 @@ function eventsToPieces(events: SessionEvent[]): UIPiece[] {
       }
       continue;
     }
+    if (ev.kind === "plan_accept_decision") {
+      const p = ev.payload as Record<string, any>;
+      const planId = String(p.planId ?? "");
+      const idx = planIdx.get(planId);
+      if (idx !== undefined) {
+        const existing = pieces[idx];
+        if (existing.kind === "plan_accept_request") {
+          const decision =
+            p.decision === "accept" || p.decision === "reject"
+              ? (p.decision as "accept" | "reject")
+              : undefined;
+          pieces[idx] = {
+            ...existing,
+            decision,
+            decisionSeq: ev.seq,
+          };
+        }
+      }
+      continue;
+    }
     const piece = eventToPiece(ev);
     if (!piece) continue;
     if (piece.kind === "ask_user_question") {
       askIdx.set(piece.askId, pieces.length);
+    } else if (piece.kind === "plan_accept_request") {
+      planIdx.set(piece.planId, pieces.length);
     }
     pieces.push(piece);
   }
@@ -583,6 +643,7 @@ export const useSessions = create<SessionState>((set, get) => {
         frame.type === "tool_result" ||
         frame.type === "permission_request" ||
         frame.type === "ask_user_question" ||
+        frame.type === "plan_accept_request" ||
         frame.type === "turn_end"
       ) {
         // Every variant above carries a non-null `sessionId` per protocol.ts —
@@ -607,7 +668,8 @@ export const useSessions = create<SessionState>((set, get) => {
           frame.type !== "tool_use" &&
           frame.type !== "tool_result" &&
           frame.type !== "permission_request" &&
-          frame.type !== "ask_user_question"
+          frame.type !== "ask_user_question" &&
+          frame.type !== "plan_accept_request"
         ) {
           return;
         }
@@ -923,6 +985,45 @@ export const useSessions = create<SessionState>((set, get) => {
       askId,
       answers,
       ...(annotations ? { annotations } : {}),
+    } satisfies ClientFrame);
+    // Re-arm a pending placeholder so the next assistant turn isn't silent.
+    const pendingId = `pending-${Date.now()}`;
+    set((s) => ({
+      transcripts: {
+        ...s.transcripts,
+        [sessionId]: [
+          ...(s.transcripts[sessionId] ?? []),
+          {
+            kind: "pending",
+            id: pendingId,
+            startedAt: Date.now(),
+            stalled: false,
+          },
+        ],
+      },
+    }));
+    armStallTimer(sessionId, pendingId);
+  },
+
+  resolvePlanAccept(sessionId, planId, decision) {
+    // Mark the matching plan card as decided in place — like
+    // ask_user_question, the card stays in the transcript and renders
+    // read-only afterwards with an accepted / rejected pill.
+    set((s) => ({
+      transcripts: {
+        ...s.transcripts,
+        [sessionId]: (s.transcripts[sessionId] ?? []).map((p) =>
+          p.kind === "plan_accept_request" && p.planId === planId
+            ? { ...p, decision }
+            : p,
+        ),
+      },
+    }));
+    get().ws?.send({
+      type: "plan_accept_decision",
+      sessionId,
+      planId,
+      decision,
     } satisfies ClientFrame);
     // Re-arm a pending placeholder so the next assistant turn isn't silent.
     const pendingId = `pending-${Date.now()}`;

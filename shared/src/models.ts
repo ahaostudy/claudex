@@ -112,6 +112,13 @@ export const EventKind = z.enum([
   // `permission_request` pairs with `permission_decision`).
   "ask_user_question",
   "ask_user_answer",
+  // SDK's built-in `ExitPlanMode` tool — emitted by the model at the end of a
+  // planning pass to signal "I've sketched the steps, ready to execute?". Not
+  // a security gate; renders as its own "commit to this plan?" card instead
+  // of the generic permission prompt. Append-only: accept/reject lands as a
+  // sibling `plan_accept_decision` event.
+  "plan_accept_request",
+  "plan_accept_decision",
   "turn_end",
   "error",
 ]);
