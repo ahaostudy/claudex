@@ -3472,6 +3472,26 @@ function HighlightedComposer({
     m.scrollLeft = t.scrollLeft;
   }
 
+  // Resize the textarea to match its content up to max-h-40 (160px). The
+  // CSS clamp means scrollHeight will cap there and the browser takes over
+  // with an internal scrollbar — exactly the UX we want (grow with the
+  // user's keystrokes, stop at 10-ish lines, scroll within).
+  function autoResize() {
+    const t = textareaRef.current;
+    if (!t) return;
+    // Reset then measure so shrinking text also shrinks the box.
+    t.style.height = "auto";
+    t.style.height = `${t.scrollHeight}px`;
+  }
+
+  // Fire autoResize whenever the value changes from outside (slash-command
+  // insertion, edit-last-user-message hydration, reset on send, …) so the
+  // box tracks programmatic updates too, not just keystrokes.
+  useEffect(() => {
+    autoResize();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value]);
+
   const highlighted = useMemo(() => renderHighlighted(value), [value]);
 
   return (
@@ -3488,8 +3508,13 @@ function HighlightedComposer({
         value={value}
         onChange={(e) => {
           onChange(e);
-          // Run after the textarea updates its own scroll metrics.
-          requestAnimationFrame(syncScroll);
+          // Run after the textarea updates its own scroll metrics so
+          // autoResize sees the new scrollHeight and syncScroll sees the
+          // new scrollTop.
+          requestAnimationFrame(() => {
+            autoResize();
+            syncScroll();
+          });
         }}
         onKeyDown={onKeyDown}
         onScroll={syncScroll}
@@ -3498,7 +3523,7 @@ function HighlightedComposer({
         spellCheck={false}
         disabled={disabled}
         className={cn(
-          "relative w-full bg-transparent outline-none text-[15px] leading-[1.5] resize-none min-h-[24px] max-h-40 py-1 px-2 text-transparent caret-ink selection:bg-klein/20 selection:text-transparent placeholder:text-ink-muted",
+          "relative w-full bg-transparent outline-none text-[15px] leading-[1.5] resize-none min-h-[24px] max-h-40 overflow-y-auto py-1 px-2 text-transparent caret-ink selection:bg-klein/20 selection:text-transparent placeholder:text-ink-muted",
           disabled && "opacity-70 cursor-not-allowed",
         )}
       />
