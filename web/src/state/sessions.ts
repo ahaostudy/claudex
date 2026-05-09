@@ -47,6 +47,48 @@ function shouldNotifyCompletion(
   return true;
 }
 
+// Cap the completion map so a long-running client doesn't accumulate
+// unbounded entries. When we overflow the cap we prefer to evict a
+// `seen: true` row (the user has already acked it) by oldest `at`; if
+// nothing is seen we fall back to evicting the globally oldest entry.
+// One pass. Called from both the session_update handler and any future
+// writer — kept small enough to inline but pulled out so the policy is
+// in one place.
+const COMPLETIONS_CAP = 50;
+function capCompletions(
+  map: Record<string, { status: "idle" | "error"; at: string; seen: boolean }>,
+): Record<string, { status: "idle" | "error"; at: string; seen: boolean }> {
+  const keys = Object.keys(map);
+  if (keys.length <= COMPLETIONS_CAP) return map;
+  let victim: string | null = null;
+  let victimAt = Infinity;
+  // Prefer oldest seen.
+  for (const k of keys) {
+    const v = map[k];
+    if (!v.seen) continue;
+    const t = Date.parse(v.at) || 0;
+    if (t < victimAt) {
+      victimAt = t;
+      victim = k;
+    }
+  }
+  // Fall back to oldest overall if no seen entry exists.
+  if (!victim) {
+    victimAt = Infinity;
+    for (const k of keys) {
+      const t = Date.parse(map[k].at) || 0;
+      if (t < victimAt) {
+        victimAt = t;
+        victim = k;
+      }
+    }
+  }
+  if (!victim) return map;
+  const { [victim]: _drop, ...rest } = map;
+  void _drop;
+  return rest;
+}
+
 // A streamed turn is rendered as a list of UI "pieces": text, tool_use,
 // tool_result, thinking. We build these up from both persisted events (on
 // load) and live WS frames.
@@ -205,13 +247,13 @@ interface SessionState {
   loadingSessions: boolean;
   // Per-session "recently completed" marker. A session lands here when a
   // live WS `session_update` flips it into `idle` or `error` — i.e. the
-  // turn just finished or blew up. Cleared when the user opens that
-  // session (subscribeSession). One entry per session, so re-completing
-  // just overwrites the old timestamp; the Alerts screen reads this to
-  // surface "finished while you were away" alongside awaiting/error.
+  // turn just finished or blew up. Once the user opens the session we
+  // flip `seen: true` (not delete) so the entry stays visible on the
+  // Alerts screen as an archival row the user can still click back
+  // into. One entry per session; re-completing resets seen=false.
   completions: Record<
     string,
-    { status: "idle" | "error"; at: string }
+    { status: "idle" | "error"; at: string; seen: boolean }
   >;
   // Current transcript view mode — session-scoped in spirit but not yet
   // persisted per-session or to localStorage (intentional for first pass).
@@ -635,12 +677,19 @@ export const useSessions = create<SessionState>((set, get) => {
             // If the user is currently looking at this session, don't
             // even add the completion — they've already seen it.
             if (activeId === sid) return s;
-            return {
-              completions: {
-                ...s.completions,
-                [sid]: { status: completionStatus, at: new Date().toISOString() },
-              },
+            const nextEntry = {
+              status: completionStatus,
+              at: new Date().toISOString(),
+              // New completions always start unseen — even if a previous
+              // completion for this session was already marked seen, a
+              // re-completion should bubble the row back up.
+              seen: false,
             };
+            const merged = { ...s.completions, [sid]: nextEntry };
+            // Cap total completions at 50 per client so the map doesn't grow
+            // forever. Drop the oldest `seen: true` entry first; if none are
+            // seen, drop the oldest overall.
+            return { completions: capCompletions(merged) };
           });
         } else {
           // Always keep the dedup map in sync with the current status so
@@ -988,16 +1037,22 @@ export const useSessions = create<SessionState>((set, get) => {
     // chat to another, the newer subscribe wins. `clearActiveSession` resets
     // to null on Chat unmount.
     set((s) => {
-      // Clear any "recently completed" marker for this session — the user
-      // is now looking at it, so the surface-it-on-Alerts signal has done
-      // its job. Also avoids the Alerts row sticking around after the
-      // user acks the session by opening it.
-      if (!(sessionId in s.completions)) {
-        return { activeSessionId: sessionId };
-      }
-      const next = { ...s.completions };
-      delete next[sessionId];
-      return { activeSessionId: sessionId, completions: next };
+      // Demote any "recently completed" marker for this session from unseen
+      // to seen — the user is now looking at it, so the Alerts screen should
+      // show it as an archival row (muted) instead of a pending signal. We
+      // deliberately do NOT delete the entry so the user can still see the
+      // history of completed turns. If the entry is already seen, leave it
+      // alone so re-navigating doesn't re-stamp it.
+      const entry = s.completions[sessionId];
+      if (!entry) return { activeSessionId: sessionId };
+      if (entry.seen) return { activeSessionId: sessionId };
+      return {
+        activeSessionId: sessionId,
+        completions: {
+          ...s.completions,
+          [sessionId]: { ...entry, seen: true },
+        },
+      };
     });
     get().ws?.send({ type: "subscribe", sessionId } satisfies ClientFrame);
   },

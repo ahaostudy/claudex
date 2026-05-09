@@ -25,6 +25,7 @@ type CompletionEntry = {
   session: Session;
   status: "idle" | "error";
   at: string;
+  seen: boolean;
 };
 
 export function AlertsScreen() {
@@ -76,10 +77,11 @@ export function AlertsScreen() {
   }, [sessions]);
 
   // Bucket 3: recently-completed — sessions whose latest status transition
-  // into idle/error fired a completion signal and which the user hasn't
-  // acknowledged yet (clicking into the session clears its entry). We
-  // de-dup against the awaiting/error bucket so an errored session isn't
-  // listed twice.
+  // into idle/error fired a completion signal. Unseen entries are the
+  // "fresh" signals; seen entries stick around as archival rows (demoted
+  // styling) so the user can still click back into them. We de-dup
+  // against the awaiting/error bucket so an errored session isn't listed
+  // twice.
   const completionAlerts = useMemo<CompletionEntry[]>(() => {
     const attentionIds = new Set(attentionAlerts.map((s) => s.id));
     const out: CompletionEntry[] = [];
@@ -88,13 +90,28 @@ export function AlertsScreen() {
       const session = sessionLookup.get(sid);
       if (!session) continue;
       if (session.parentSessionId) continue;
-      out.push({ session, status: entry.status, at: entry.at });
+      out.push({
+        session,
+        status: entry.status,
+        at: entry.at,
+        seen: entry.seen,
+      });
     }
-    out.sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
+    // Unseen first (by at desc), then seen (by at desc). A globally-newest
+    // seen row should NOT leapfrog an older unseen row — the user's pending
+    // signals always win the top slots.
+    out.sort((a, b) => {
+      if (a.seen !== b.seen) return a.seen ? 1 : -1;
+      return Date.parse(b.at) - Date.parse(a.at);
+    });
     return out;
   }, [completions, sessionLookup, attentionAlerts]);
 
-  const totalCount = attentionAlerts.length + completionAlerts.length;
+  const unseenCompletions = completionAlerts.filter((e) => !e.seen);
+  const seenCompletions = completionAlerts.filter((e) => e.seen);
+
+  // Badge mirrors AppShell: only unseen entries count toward the open total.
+  const totalCount = attentionAlerts.length + unseenCompletions.length;
 
   return (
     <AppShell tab="alerts">
@@ -141,14 +158,30 @@ export function AlertsScreen() {
               </li>
             ))}
           </ul>
-          {completionAlerts.length > 0 && (
+          {unseenCompletions.length > 0 && (
             <BucketHeader
               label="Recently completed"
-              count={completionAlerts.length}
+              count={unseenCompletions.length}
             />
           )}
           <ul>
-            {completionAlerts.map((e) => (
+            {unseenCompletions.map((e) => (
+              <li key={e.session.id}>
+                <CompletionRow
+                  entry={e}
+                  project={projectLookup.get(e.session.projectId) ?? null}
+                />
+              </li>
+            ))}
+          </ul>
+          {seenCompletions.length > 0 && (
+            <BucketHeader
+              label="Earlier (seen)"
+              count={seenCompletions.length}
+            />
+          )}
+          <ul>
+            {seenCompletions.map((e) => (
               <li key={e.session.id}>
                 <CompletionRow
                   entry={e}
@@ -240,31 +273,85 @@ function CompletionRow({
     : "Turn finished — tap to review";
   const rel = formatRel(entry.at);
   const projectName = project?.name ?? entry.session.projectId.slice(0, 8);
+  // When seen, demote the whole row — fainter icon, muted title, smaller
+  // "seen" chip — but keep the same structural shape so the row height
+  // matches the unseen counterpart (layout doesn't jitter when an entry
+  // flips from unseen to seen on tap-back).
+  const seen = entry.seen;
 
   return (
     <Link
       to={`/session/${entry.session.id}`}
-      className="flex items-center gap-3 px-4 py-3 border-b border-line hover:bg-paper/40 cursor-pointer"
+      className={cn(
+        "flex items-center gap-3 px-4 py-3 border-b border-line hover:bg-paper/40 cursor-pointer",
+        seen && "opacity-80",
+      )}
     >
       <span
-        className={cn("h-2 w-2 rounded-full shrink-0", dotClass)}
-        style={{ boxShadow: dotGlow }}
+        className={cn(
+          "h-2 w-2 rounded-full shrink-0",
+          dotClass,
+          seen && "opacity-50",
+        )}
+        style={seen ? undefined : { boxShadow: dotGlow }}
       />
-      <Icon className={cn("w-4 h-4 shrink-0", iconClass)} />
+      <Icon
+        className={cn(
+          "w-4 h-4 shrink-0",
+          iconClass,
+          seen && "opacity-60",
+        )}
+      />
       <div className="min-w-0 flex-1">
-        <div className="text-[14px] font-medium truncate">
-          {entry.session.title || "Untitled"}
+        <div
+          className={cn(
+            "text-[14px] truncate flex items-center gap-2",
+            seen ? "font-normal text-ink-muted" : "font-medium",
+          )}
+        >
+          <span className="truncate">{entry.session.title || "Untitled"}</span>
+          {seen && (
+            <span className="shrink-0 mono text-[10px] uppercase tracking-[0.08em] text-ink-faint border border-line rounded px-1 py-0.5">
+              seen
+            </span>
+          )}
         </div>
-        <div className="text-[12px] text-ink-muted truncate">{subtitle}</div>
+        <div
+          className={cn(
+            "text-[12px] truncate",
+            seen ? "text-ink-faint" : "text-ink-muted",
+          )}
+        >
+          {subtitle}
+        </div>
       </div>
       <div className="text-right shrink-0 hidden sm:block">
-        <div className="mono text-[12px] text-ink-soft truncate max-w-[160px]">
+        <div
+          className={cn(
+            "mono text-[12px] truncate max-w-[160px]",
+            seen ? "text-ink-faint" : "text-ink-soft",
+          )}
+        >
           {projectName}
         </div>
-        <div className="text-[11px] text-ink-muted">{rel}</div>
+        <div
+          className={cn(
+            "text-[11px]",
+            seen ? "text-ink-faint" : "text-ink-muted",
+          )}
+        >
+          {rel}
+        </div>
       </div>
       <div className="text-right shrink-0 sm:hidden">
-        <div className="text-[11px] text-ink-muted">{rel}</div>
+        <div
+          className={cn(
+            "text-[11px]",
+            seen ? "text-ink-faint" : "text-ink-muted",
+          )}
+        >
+          {rel}
+        </div>
       </div>
     </Link>
   );

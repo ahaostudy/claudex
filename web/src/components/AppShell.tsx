@@ -94,9 +94,14 @@ export function AppShell({
   );
   // Completions that aren't already counted via awaiting/error — an
   // errored session is on both lists and we shouldn't double-count.
+  // Also skip entries the user has already acknowledged (seen=true); those
+  // stick around on the Alerts screen as archival rows but shouldn't drive
+  // the red badge count.
   let completionCount = 0;
-  for (const sid of Object.keys(completions)) {
-    if (!awaitingOrErrorIds.has(sid)) completionCount += 1;
+  for (const [sid, c] of Object.entries(completions)) {
+    if (awaitingOrErrorIds.has(sid)) continue;
+    if (c.seen) continue;
+    completionCount += 1;
   }
   const alertCount = awaitingOrErrorIds.size + completionCount;
 

@@ -49,6 +49,7 @@ import { Markdown } from "@/components/Markdown";
 import { LinkPreview, firstHttpUrl } from "@/components/LinkPreview";
 import { ImageLightbox } from "@/components/ImageLightbox";
 import { MessageActions } from "@/components/MessageActions";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { ToastHost } from "@/lib/toast";
 import type { SlashCommand } from "@/lib/slash-commands";
 import { BUILTIN_FALLBACK_SLASH_COMMANDS } from "@/lib/slash-commands";
@@ -2156,7 +2157,44 @@ function PermissionCard({
 
       {/* Desktop — modal-card shape. Left-aligned (no mx-auto) so the
           card sits in the transcript column next to the other pieces
-          instead of pulling the reader's eye to the viewport center. */}
+          instead of pulling the reader's eye to the viewport center.
+
+          Wrapped in an ErrorBoundary because a rare crash in the inner
+          subtree (historically observed when toggling the "Remember this
+          decision" checkbox) was taking the whole Chat screen down with
+          it. The fallback still exposes a Deny path so the user isn't
+          stuck on a locked permission gate, and the caught error is
+          console.error'd so we can diagnose next round. */}
+      <ErrorBoundary
+        label="PermissionCard-desktop"
+        fallback={
+          <div className="hidden md:block w-[560px] max-w-full rounded-[14px] bg-canvas border border-danger/40 shadow-lift overflow-hidden">
+            <div className="px-6 py-4 flex items-start gap-3">
+              <span className="h-8 w-8 rounded-[8px] bg-danger-wash border border-danger/30 flex items-center justify-center text-danger shrink-0">
+                <AlertTriangle className="w-4 h-4" />
+              </span>
+              <div className="flex-1 min-w-0 text-[13px] text-ink">
+                <div className="font-medium">
+                  Something went wrong in this permission card.
+                </div>
+                <div className="text-[12px] text-ink-muted mt-0.5">
+                  You can still deny the request below. The error was logged
+                  to the browser console.
+                </div>
+              </div>
+            </div>
+            <div className="px-6 py-4 border-t border-line flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => onDecide(approvalId, "deny")}
+                className="h-10 px-4 rounded-[8px] border border-line bg-canvas text-danger text-[14px] font-medium"
+              >
+                Deny
+              </button>
+            </div>
+          </div>
+        }
+      >
       <div
         className="hidden md:block w-[560px] max-w-full rounded-[14px] bg-canvas border border-line shadow-lift overflow-hidden"
         ref={cardRef}
@@ -2273,10 +2311,10 @@ function PermissionCard({
           </button>
         </div>
       </div>
+      </ErrorBoundary>
     </>
   );
 }
-
 // Command block — dark terminal-style rendering. Used by the PermissionCard
 // when the tool isn't a diff-producing Edit/Write/MultiEdit.
 //
