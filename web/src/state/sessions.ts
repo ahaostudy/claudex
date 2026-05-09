@@ -203,6 +203,16 @@ interface SessionState {
   transcripts: Record<string, UIPiece[]>;
   transcriptMeta: Record<string, TranscriptMeta>;
   loadingSessions: boolean;
+  // Per-session "recently completed" marker. A session lands here when a
+  // live WS `session_update` flips it into `idle` or `error` — i.e. the
+  // turn just finished or blew up. Cleared when the user opens that
+  // session (subscribeSession). One entry per session, so re-completing
+  // just overwrites the old timestamp; the Alerts screen reads this to
+  // surface "finished while you were away" alongside awaiting/error.
+  completions: Record<
+    string,
+    { status: "idle" | "error"; at: string }
+  >;
   // Current transcript view mode — session-scoped in spirit but not yet
   // persisted per-session or to localStorage (intentional for first pass).
   viewMode: ViewMode;
@@ -539,6 +549,7 @@ export const useSessions = create<SessionState>((set, get) => {
   loadingSessions: false,
   viewMode: "normal",
   activeSessionId: null,
+  completions: {},
 
   setViewMode(mode) {
     set({ viewMode: mode });
@@ -611,6 +622,26 @@ export const useSessions = create<SessionState>((set, get) => {
               : `${title} — session finished`;
           toast(msg);
           flashTitle();
+          // Also surface this on the Alerts screen as a "recently
+          // completed" entry. One slot per session; re-completing
+          // overwrites. Cleared when the user opens that session via
+          // subscribeSession, so the surface acts like "unread" signals.
+          // `shouldNotifyCompletion` above already narrowed the status,
+          // but TS can't carry that through the closure — re-narrow here.
+          const completionStatus: "idle" | "error" =
+            frame.status === "error" ? "error" : "idle";
+          set((s) => {
+            const activeId = s.activeSessionId;
+            // If the user is currently looking at this session, don't
+            // even add the completion — they've already seen it.
+            if (activeId === sid) return s;
+            return {
+              completions: {
+                ...s.completions,
+                [sid]: { status: completionStatus, at: new Date().toISOString() },
+              },
+            };
+          });
         } else {
           // Always keep the dedup map in sync with the current status so
           // re-transitions (idle → running → idle) fire exactly once per
@@ -956,7 +987,18 @@ export const useSessions = create<SessionState>((set, get) => {
     // and refetch its tail automatically. If the user navigates from one
     // chat to another, the newer subscribe wins. `clearActiveSession` resets
     // to null on Chat unmount.
-    set({ activeSessionId: sessionId });
+    set((s) => {
+      // Clear any "recently completed" marker for this session — the user
+      // is now looking at it, so the surface-it-on-Alerts signal has done
+      // its job. Also avoids the Alerts row sticking around after the
+      // user acks the session by opening it.
+      if (!(sessionId in s.completions)) {
+        return { activeSessionId: sessionId };
+      }
+      const next = { ...s.completions };
+      delete next[sessionId];
+      return { activeSessionId: sessionId, completions: next };
+    });
     get().ws?.send({ type: "subscribe", sessionId } satisfies ClientFrame);
   },
 

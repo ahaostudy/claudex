@@ -78,20 +78,27 @@ export function AppShell({
   children: React.ReactNode;
 }) {
   // Alerts badge count: sessions that need the user — permission pending
-  // (`awaiting`) or errored. Mirrored in both the mobile tab bar and the
-  // desktop sidebar so the number is never hidden. Side-chat children are
-  // excluded because the parent surfaces its own alerts already.
-  const { sessions } = useSessions();
-  const alertCount = sessions.reduce(
-    (n, s) =>
-      n +
-      (s.parentSessionId
-        ? 0
-        : s.status === "awaiting" || s.status === "error"
-          ? 1
-          : 0),
-    0,
+  // (`awaiting`) or errored, plus "recently completed" sessions surfaced
+  // via the sessions-store `completions` map (session finished while the
+  // user was elsewhere). Mirrored in both the mobile tab bar and the
+  // desktop sidebar so the number is never hidden. Side-chat children
+  // are excluded because the parent surfaces its own alerts already.
+  const { sessions, completions } = useSessions();
+  const awaitingOrErrorIds = new Set(
+    sessions
+      .filter(
+        (s) =>
+          !s.parentSessionId && (s.status === "awaiting" || s.status === "error"),
+      )
+      .map((s) => s.id),
   );
+  // Completions that aren't already counted via awaiting/error — an
+  // errored session is on both lists and we shouldn't double-count.
+  let completionCount = 0;
+  for (const sid of Object.keys(completions)) {
+    if (!awaitingOrErrorIds.has(sid)) completionCount += 1;
+  }
+  const alertCount = awaitingOrErrorIds.size + completionCount;
 
   return (
     <div className="h-[100dvh] bg-canvas flex md:flex-row flex-col overflow-hidden">
