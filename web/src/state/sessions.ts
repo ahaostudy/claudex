@@ -365,6 +365,18 @@ function eventsToPieces(events: SessionEvent[]): UIPiece[] {
   const askIdx = new Map<string, number>();
   // Map planId → index into `pieces` for fast decision-fold.
   const planIdx = new Map<string, number>();
+  // Collect toolUseIds for any `permission_decision` event so we can drop
+  // the matching `permission_request` piece — once decided, the card
+  // disappears (live behavior via resolvePermission). Mirrors
+  // server/src/sessions/diffs.ts::aggregatePendingDiffs.
+  const decidedApprovalIds = new Set<string>();
+  for (const ev of events) {
+    if (ev.kind === "permission_decision") {
+      const p = ev.payload as Record<string, any>;
+      const id = String(p.toolUseId ?? p.approvalId ?? "");
+      if (id) decidedApprovalIds.add(id);
+    }
+  }
   for (const ev of events) {
     if (ev.kind === "ask_user_answer") {
       const p = ev.payload as Record<string, any>;
@@ -407,6 +419,14 @@ function eventsToPieces(events: SessionEvent[]): UIPiece[] {
     }
     const piece = eventToPiece(ev);
     if (!piece) continue;
+    // Drop persisted permission_request pieces that already have a decision
+    // recorded. Matches live behavior where the card disappears on decide.
+    if (
+      piece.kind === "permission_request" &&
+      decidedApprovalIds.has(piece.approvalId)
+    ) {
+      continue;
+    }
     if (piece.kind === "ask_user_question") {
       askIdx.set(piece.askId, pieces.length);
     } else if (piece.kind === "plan_accept_request") {

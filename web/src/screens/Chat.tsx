@@ -2073,7 +2073,7 @@ function PermissionCard({
 
           {diff ? (
             <div className="mt-3 w-full space-y-1.5">
-              <DiffView diff={diff} defaultOpen />
+              <DiffView diff={diff} />
               {sessionId && (
                 <Link
                   to={`/session/${sessionId}/diff?approvalId=${encodeURIComponent(approvalId)}`}
@@ -2176,7 +2176,7 @@ function PermissionCard({
         <div className="px-6 py-4 space-y-4">
           {diff ? (
             <div className="w-full space-y-1.5">
-              <DiffView diff={diff} defaultOpen />
+              <DiffView diff={diff} />
               {sessionId && (
                 <Link
                   to={`/session/${sessionId}/diff?approvalId=${encodeURIComponent(approvalId)}`}

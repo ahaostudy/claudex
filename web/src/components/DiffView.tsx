@@ -25,7 +25,7 @@ export function DiffView({ diff, defaultOpen = false }: { diff: FileDiff; defaul
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
-        className="flex items-center gap-2 px-3 py-1.5 bg-paper border-b border-line text-left hover:bg-paper/80 max-w-full"
+        className="flex w-full items-center gap-2 px-3 py-1.5 bg-paper border-b border-line text-left hover:bg-paper/80 max-w-full"
       >
         <ChevronRight
           className={cn(
