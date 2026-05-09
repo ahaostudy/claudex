@@ -2182,6 +2182,252 @@
     </section>
 
     <!-- =========================================================
+      SCREEN 13 · SESSION SUBAGENTS RAIL
+    ========================================================= -->
+    <section id="s-13" class="border-b border-line">
+      <div class="max-w-[1600px] mx-auto px-5 lg:px-10 pt-14">
+        <div class="flex items-baseline gap-4 mb-3">
+          <span class="mono text-[12px] text-ink-faint">screen · 13</span>
+          <h2 class="display text-[1.75rem] leading-tight">Session subagents</h2>
+        </div>
+        <p class="max-w-[70ch] text-[15px] text-ink-muted mb-10">Chat's right rail lists every Task / Agent / Explore / … tool call this session made. Grouped by tool, newest first, status-coded. Click a row to see the input JSON, the result preview, and a link back to the source turn.</p>
+
+        <div class="flex flex-col xl:flex-row gap-10 items-start justify-center pb-16">
+
+          <!-- ==================== FRAME 1 · populated ==================== -->
+          <div class="flex-1 w-full min-w-0 flex flex-col items-center gap-3">
+            <div class="caps text-ink-muted">Desktop · populated</div>
+            <div class="desktop">
+              <div class="desktop-chrome"><span style="background:#ff5f57"></span><span style="background:#febc2e"></span><span style="background:#28c840"></span><span class="ml-4 mono text-[11px] text-canvas/70">claudex.local — s/fix-hydration-marketing</span></div>
+              <div class="desktop-inner grid grid-cols-[220px_minmax(0,1fr)_320px]">
+
+                <!-- left global rail (condensed from s-04) -->
+                <aside class="border-r border-line bg-paper/40 flex flex-col">
+                  <div class="p-4 flex items-center gap-2"><svg viewBox="0 0 32 32" class="w-5 h-5"><path d="M9 22 L16 8 L23 22 Z" fill="#cc785c"/><circle cx="16" cy="18" r="2.2" fill="#faf9f5"/></svg><span class="mono text-[13px]">claudex</span><span class="ml-auto text-[11px] mono text-ink-muted">3</span></div>
+                  <div class="px-3 caps text-ink-muted mb-2">Sessions</div>
+                  <div class="px-2 space-y-1">
+                    <div class="px-2.5 py-2 rounded-[6px] bg-canvas border-l-2 border-klein bg-klein-wash/40">
+                      <div class="flex items-center gap-1.5"><span class="h-1.5 w-1.5 rounded-full bg-warn"></span><span class="text-[12px] font-medium truncate">Fix hydration …</span></div>
+                      <div class="mono text-[10px] text-ink-muted mt-0.5 truncate">14:02 · awaiting</div>
+                    </div>
+                    <button class="w-full text-left px-2.5 py-2 rounded-[6px] hover:bg-canvas/60 border-l-2 border-transparent">
+                      <div class="flex items-center gap-1.5"><span class="h-1.5 w-1.5 rounded-full bg-success animate-pulse"></span><span class="text-[12px] truncate">Add retry + jitter …</span></div>
+                      <div class="mono text-[10px] text-ink-muted mt-0.5 truncate">13:58 · running</div>
+                    </button>
+                    <button class="w-full text-left px-2.5 py-2 rounded-[6px] hover:bg-canvas/60 border-l-2 border-transparent">
+                      <div class="flex items-center gap-1.5"><span class="h-1.5 w-1.5 rounded-full bg-ink-faint"></span><span class="text-[12px] truncate">Port config YAML→TOML</span></div>
+                      <div class="mono text-[10px] text-ink-muted mt-0.5 truncate">11:12 · idle</div>
+                    </button>
+                  </div>
+                  <div class="mt-auto p-4 border-t border-line text-[11px] text-ink-muted mono flex items-center gap-1.5"><span class="h-1.5 w-1.5 rounded-full bg-success"></span>connected</div>
+                </aside>
+
+                <!-- center thread (abbreviated) -->
+                <section class="min-w-0 flex flex-col bg-canvas">
+                  <!-- header -->
+                  <div class="px-5 py-3 border-b border-line flex items-center gap-3">
+                    <span class="h-2 w-2 rounded-full bg-warn" style="box-shadow:0 0 0 4px rgba(217,119,6,0.18)"></span>
+                    <div class="min-w-0">
+                      <div class="text-[14px] font-medium truncate">Fix hydration mismatch on marketing page</div>
+                      <div class="flex items-center gap-2 text-[11px] text-ink-muted mt-0.5"><span class="mono">spindle</span><span>·</span><span class="mono">claude/fix-hydration-marketing</span></div>
+                    </div>
+                    <div class="ml-auto flex items-center gap-1.5">
+                      <button class="h-8 px-2.5 rounded-[6px] border border-line bg-canvas text-[12px] flex items-center gap-1">Normal <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-3 h-3"><path d="M6 9l6 6 6-6"/></svg></button>
+                      <button class="h-8 w-8 rounded-[6px] border border-line bg-canvas flex items-center justify-center" title="Terminal"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-4 h-4 text-ink-soft"><path d="M4 5h16v14H4z"/><path d="M7 9l3 3-3 3M13 15h4"/></svg></button>
+                    </div>
+                  </div>
+
+                  <!-- abbreviated thread -->
+                  <div class="flex-1 overflow-y-auto px-6 py-5 space-y-4">
+                    <div>
+                      <div class="flex items-center gap-2 mb-1.5"><svg viewBox="0 0 32 32" class="w-4 h-4"><path d="M9 22 L16 8 L23 22 Z" fill="#cc785c"/><circle cx="16" cy="18" r="2.2" fill="#faf9f5"/></svg><span class="mono text-[11px] text-ink-muted">claude · 14:02</span></div>
+                      <div class="text-[14.5px] leading-[1.6] text-ink max-w-[72ch]">I'll delegate the codebase sweep to Explorer so we stay focused on the fix itself. Starting three investigations in parallel.</div>
+                    </div>
+
+                    <!-- compact tool chip showing an active Agent call -->
+                    <div class="relative pl-4 my-1"><span class="absolute left-[3px] top-3 bottom-3 w-px bg-klein"></span>
+                      <div class="flex items-center gap-2 py-1.5 pl-2 pr-3 rounded-[8px] bg-klein-wash/50 border border-klein/30">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-3 h-3 text-klein"><path d="M9 6l6 6-6 6"/></svg>
+                        <span class="mono text-[12px] text-klein-ink">Agent</span>
+                        <span class="mono text-[11px] text-ink-muted truncate flex-1">Trace hydration warning across locale helpers</span>
+                        <svg class="w-3.5 h-3.5 text-klein animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.2-8.6"/></svg>
+                      </div>
+                    </div>
+
+                    <div>
+                      <div class="text-[14.5px] leading-[1.6] text-ink max-w-[72ch]">Once the explorer reports back I'll stage the <span class="mono text-[13px]">lib/date.ts</span> patch. <span class="text-ink-muted">Right rail has the live run.</span></div>
+                    </div>
+                  </div>
+
+                  <!-- composer stub -->
+                  <div class="px-5 py-3 border-t border-line flex items-center gap-2">
+                    <div class="flex-1 rounded-[10px] border border-line bg-paper/50 px-3 py-2 text-[13px] text-ink-muted">Reply to claude…</div>
+                    <button class="h-8 w-8 rounded-[8px] bg-klein text-canvas flex items-center justify-center"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="w-3.5 h-3.5"><path d="M5 12l7-7 7 7M12 5v14"/></svg></button>
+                  </div>
+                </section>
+
+                <!-- ==================== RIGHT RAIL · subagents (populated) ==================== -->
+                <aside class="border-l border-line bg-paper/40 flex flex-col min-h-0">
+                  <div class="px-4 py-3 border-b border-line flex items-center">
+                    <span class="caps text-ink-muted">Subagents</span>
+                    <span class="mono text-[11px] text-ink-muted ml-auto">4 this session</span>
+                  </div>
+
+                  <div class="flex-1 overflow-y-auto">
+
+                    <!-- Group · Agent -->
+                    <div class="px-3 pt-3 pb-1.5 flex items-baseline gap-2">
+                      <span class="caps text-ink-soft">Agent</span>
+                      <span class="mono text-[11px] text-ink-muted">· 3 runs</span>
+                    </div>
+
+                    <!-- running row -->
+                    <div class="mx-3 mb-1.5 rounded-[10px] border border-klein/25 bg-klein-wash/35 overflow-hidden relative">
+                      <div class="absolute left-0 top-0 bottom-0 w-[3px] bg-klein"></div>
+                      <button class="w-full pl-3 pr-2.5 py-2 flex items-center gap-2 text-left">
+                        <span class="inline-flex items-center gap-1 px-1.5 h-5 rounded-[4px] border border-klein/40 bg-canvas/70 mono text-[10px] text-klein-ink">Agent</span>
+                        <svg class="w-3 h-3 text-klein animate-spin shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.2-8.6"/></svg>
+                        <span class="text-[12.5px] text-ink truncate flex-1">Trace hydration warning across locale helpers</span>
+                        <span class="mono text-[10px] text-ink-muted shrink-0">0:14</span>
+                      </button>
+                    </div>
+
+                    <!-- done, expanded row -->
+                    <div class="mx-3 mb-1.5 rounded-[10px] border border-line bg-canvas overflow-hidden relative">
+                      <div class="absolute left-0 top-0 bottom-0 w-[3px] bg-success/50"></div>
+                      <button class="w-full pl-3 pr-2.5 py-2 flex items-center gap-2 text-left border-b border-line">
+                        <span class="inline-flex items-center gap-1 px-1.5 h-5 rounded-[4px] border border-line mono text-[10px] text-ink-soft">Agent</span>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" class="w-3 h-3 text-success shrink-0"><path d="M5 12l5 5 9-10"/></svg>
+                        <span class="text-[12.5px] text-ink truncate flex-1">Review webhook retry strategy — lanes A &amp; B</span>
+                        <span class="mono text-[10px] text-ink-muted shrink-0">1m 42s</span>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-3 h-3 text-ink-muted rotate-90 shrink-0"><path d="M9 6l6 6-6 6"/></svg>
+                      </button>
+                      <!-- expansion body -->
+                      <div class="px-3 py-3 space-y-3 bg-paper/30">
+                        <div>
+                          <div class="flex items-baseline gap-2 mb-1">
+                            <span class="caps text-ink-muted">Input</span>
+                            <button class="ml-auto inline-flex items-center gap-1 px-1.5 h-5 rounded-[4px] border border-line bg-canvas mono text-[10px] text-ink-soft"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" class="w-2.5 h-2.5"><rect x="9" y="9" width="11" height="11" rx="1.5"/><path d="M5 15V5a1 1 0 0 1 1-1h10"/></svg>copy</button>
+                          </div>
+                          <pre class="mono text-[11.5px] leading-[1.55] text-canvas/90 bg-ink rounded-[8px] px-3 py-2 overflow-x-auto max-h-[160px] overflow-y-auto">{
+  "description": "Review webhook retry strategy",
+  "subagent_type": "general-purpose",
+  "prompt": "Compare the two retry/jitter
+  branches in feat/webhook-retry-a vs
+  feat/webhook-retry-b. Which handles
+  429 bursts better? Report TOP 3…"
+}</pre>
+                        </div>
+                        <div>
+                          <div class="caps text-ink-muted mb-1">Result preview</div>
+                          <div class="rounded-[8px] border border-line bg-canvas px-3 py-2 text-[12.5px] text-ink-soft leading-[1.55]">
+                            Lane B wins on 429 bursts: exponential backoff + full jitter, capped at 32s, survives 5× more scenarios. Lane A is simpler but<span class="text-ink-muted"> silently drops after 3 retries …</span>
+                          </div>
+                          <a href="#" class="mt-1.5 inline-flex items-center gap-1 text-[11.5px] mono text-klein-ink hover:underline">open source turn · seq 42 <span>→</span></a>
+                        </div>
+                        <div class="flex items-center gap-2 text-[11px] text-ink-muted">
+                          <span class="mono">started 14:01</span>
+                          <span>·</span>
+                          <span class="mono">finished 14:03</span>
+                          <span class="ml-auto mono">id 47a1…c8</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <!-- failed row -->
+                    <div class="mx-3 mb-1.5 rounded-[10px] border border-danger/25 bg-danger-wash/40 overflow-hidden relative">
+                      <div class="absolute left-0 top-0 bottom-0 w-[3px] bg-danger/70"></div>
+                      <button class="w-full pl-3 pr-2.5 py-2 flex items-center gap-2 text-left">
+                        <span class="inline-flex items-center gap-1 px-1.5 h-5 rounded-[4px] border border-danger/30 bg-canvas/70 mono text-[10px] text-danger">Agent</span>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="w-3 h-3 text-danger shrink-0"><path d="M6 6l12 12M18 6L6 18"/></svg>
+                        <span class="text-[12.5px] text-ink truncate flex-1">Benchmark Intl perf across locales</span>
+                        <span class="mono text-[10px] text-danger shrink-0">error</span>
+                      </button>
+                    </div>
+
+                    <!-- Group · Task -->
+                    <div class="px-3 pt-3 pb-1.5 flex items-baseline gap-2">
+                      <span class="caps text-ink-soft">Task</span>
+                      <span class="mono text-[11px] text-ink-muted">· 1 run</span>
+                    </div>
+
+                    <div class="mx-3 mb-1.5 rounded-[10px] border border-line bg-canvas overflow-hidden relative">
+                      <div class="absolute left-0 top-0 bottom-0 w-[3px] bg-success/50"></div>
+                      <button class="w-full pl-3 pr-2.5 py-2 flex items-center gap-2 text-left">
+                        <span class="inline-flex items-center gap-1 px-1.5 h-5 rounded-[4px] border border-line mono text-[10px] text-ink-soft">Task</span>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" class="w-3 h-3 text-success shrink-0"><path d="M5 12l5 5 9-10"/></svg>
+                        <span class="text-[12.5px] text-ink truncate flex-1">Run vitest + lint + typecheck</span>
+                        <span class="mono text-[10px] text-ink-muted shrink-0">38s</span>
+                      </button>
+                    </div>
+
+                  </div>
+
+                  <div class="mt-auto p-3 border-t border-line flex items-center gap-2 text-[11px] text-ink-muted">
+                    <span>Newest first · grouped by tool</span>
+                    <span class="ml-auto mono">live</span>
+                  </div>
+                </aside>
+
+              </div>
+            </div>
+          </div>
+
+          <!-- ==================== FRAME 2 · empty ==================== -->
+          <div class="w-full xl:w-[440px] flex flex-col items-center gap-3">
+            <div class="caps text-ink-muted">Desktop · empty state</div>
+            <div class="desktop">
+              <div class="desktop-chrome"><span style="background:#ff5f57"></span><span style="background:#febc2e"></span><span style="background:#28c840"></span><span class="ml-4 mono text-[11px] text-canvas/70">claudex.local — s/toml-port</span></div>
+              <div class="desktop-inner grid grid-cols-[0_minmax(0,1fr)_300px]">
+                <!-- left collapsed in the compact frame -->
+                <div class="hidden"></div>
+
+                <!-- center minimal -->
+                <section class="min-w-0 flex flex-col bg-canvas">
+                  <div class="px-5 py-3 border-b border-line flex items-center gap-3">
+                    <span class="h-2 w-2 rounded-full bg-ink-faint"></span>
+                    <div class="min-w-0">
+                      <div class="text-[14px] font-medium truncate">Port config YAML → TOML</div>
+                      <div class="flex items-center gap-2 text-[11px] text-ink-muted mt-0.5"><span class="mono">spindle</span><span>·</span><span>idle</span></div>
+                    </div>
+                  </div>
+                  <div class="flex-1 px-5 py-6 flex items-center justify-center">
+                    <div class="text-[13px] text-ink-muted text-center max-w-[32ch]">Send your first message to wake claude up.</div>
+                  </div>
+                  <div class="px-5 py-3 border-t border-line">
+                    <div class="rounded-[10px] border border-line bg-paper/50 px-3 py-3 text-[13px] text-ink-muted">Start by describing what you want changed…</div>
+                  </div>
+                </section>
+
+                <!-- empty right rail -->
+                <aside class="border-l border-line bg-paper/40 flex flex-col min-h-0">
+                  <div class="px-4 py-3 border-b border-line flex items-center">
+                    <span class="caps text-ink-muted">Subagents</span>
+                    <span class="mono text-[11px] text-ink-muted ml-auto">—</span>
+                  </div>
+                  <div class="flex-1 flex items-center justify-center px-4">
+                    <div class="text-center max-w-[26ch]">
+                      <div class="inline-flex h-10 w-10 rounded-full bg-canvas border border-line items-center justify-center mb-3 text-ink-muted">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-4 h-4"><circle cx="12" cy="8" r="3"/><path d="M6 20a6 6 0 0 1 12 0"/></svg>
+                      </div>
+                      <div class="text-[13px] font-medium mb-1">No subagents yet.</div>
+                      <p class="text-[12px] text-ink-muted leading-[1.5]">Any <span class="mono">Task</span> · <span class="mono">Agent</span> · <span class="mono">Explore</span> tool call claude makes in this session will show up here.</p>
+                    </div>
+                  </div>
+                  <div class="mt-auto p-3 border-t border-line text-[11px] text-ink-muted mono flex items-center gap-1.5">
+                    <span class="h-1.5 w-1.5 rounded-full bg-ink-faint"></span>
+                    <span>waiting for activity</span>
+                  </div>
+                </aside>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </section>
+
+    <!-- =========================================================
       FOOTER
     ========================================================= -->
     <footer class="border-t border-line bg-paper/40">
@@ -2205,6 +2451,7 @@
             <a class="text-ink-soft hover:text-ink" href="#s-10">10 · Session</a>
             <a class="text-ink-soft hover:text-ink" href="#s-11">11 · /btw</a>
             <a class="text-ink-soft hover:text-ink" href="#s-12">12 · Global</a>
+            <a class="text-ink-soft hover:text-ink" href="#s-13">13 · Subagents</a>
           </div>
           <div class="ml-auto text-[12px] text-ink-muted mono self-end">v0.1 · mockup</div>
         </div>
