@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Plus, GitBranch, Pencil, Pin, Trash2, FolderOpen, Settings2, X, Download, Search, BarChart3 } from "lucide-react";
 import { useAuth } from "@/state/auth";
@@ -120,8 +120,6 @@ export function HomeScreen() {
   const [showStats, setShowStats] = useState(false);
   const [projects, setProjects] = useState<Project[]>([]);
   const [archivedSessions, setArchivedSessions] = useState<Session[]>([]);
-  const [searchQuery, setSearchQuery] = useState("");
-  const searchInputRef = useRef<HTMLInputElement | null>(null);
   // Data-fetch failures from the two direct API calls on this screen:
   // `listSessions({archived:true})` (only fetched when the archived chip is
   // active) and `listProjects()`. Previously swallowed with `/* best-effort */`
@@ -133,10 +131,7 @@ export function HomeScreen() {
   // titles AND message bodies) from anywhere on the page. preventDefault so
   // the browser's own "search bookmarks" binding doesn't fight us. Works
   // even when another input is focused — users expect to jump into search
-  // without first clicking out of the composer. The inline desktop search
-  // input stays available for narrow-as-you-browse substring filtering; it
-  // operates purely on the already-loaded session list and doesn't hit the
-  // server search endpoint.
+  // without first clicking out of the composer.
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === "k") {
@@ -216,7 +211,6 @@ export function HomeScreen() {
   const groups = useMemo(() => {
     const byProject = new Map<string, Session[]>();
     const projectLookup = new Map(projects.map((p) => [p.id, p] as const));
-    const q = searchQuery.trim().toLowerCase();
     for (const s of sourceSessions) {
       // Hide side-chat children from the Home list. They appear inline in
       // their parent chat's side drawer, not as top-level rows.
@@ -225,20 +219,6 @@ export function HomeScreen() {
       if (activeTag) {
         const tags = s.tags ?? [];
         if (!tags.includes(activeTag)) continue;
-      }
-      if (q) {
-        // Substring match across title / project name / branch. Placeholder
-        // copy says "files" too, but we don't index file content — keep the
-        // copy aspirational and the matcher honest (title/project/branch only).
-        const project = projectLookup.get(s.projectId);
-        const haystack = [
-          s.title ?? "",
-          project?.name ?? "",
-          s.branch ?? "",
-        ]
-          .join(" ")
-          .toLowerCase();
-        if (!haystack.includes(q)) continue;
       }
       const list = byProject.get(s.projectId);
       if (list) list.push(s);
@@ -273,7 +253,7 @@ export function HomeScreen() {
       return sortKey(b.sessions[0]) - sortKey(a.sessions[0]);
     });
     return out;
-  }, [sourceSessions, projects, activeFilter, searchQuery, activeTag]);
+  }, [sourceSessions, projects, activeFilter, activeTag]);
 
   const filteredGroups = useMemo(() => {
     if (!activeProjectId) return groups;
@@ -355,44 +335,24 @@ export function HomeScreen() {
         <span className="hidden md:inline text-[12px] text-ink-muted ml-2">
           signed in as <span className="mono">{user?.username}</span>
         </span>
-        {/* Desktop-only search (mockup s-02 lines 480-490). Mobile header is
-            too narrow to fit a usable input so it stays as-is. Cmd/Ctrl+K
-            opens the GlobalSearchSheet (full-text across titles + messages);
-            this inline input remains a cheap substring filter over the
-            already-visible session list. */}
-        <div className="hidden md:flex flex-1 max-w-md mx-auto items-center gap-2 h-9 px-3 bg-paper border border-line rounded-[8px]">
+        {/* Desktop-only search trigger (mockup s-02 lines 480-490). Mobile
+            header is too narrow to fit this so the magnifier icon on the
+            right serves as the mobile entry point. Click (or ⌘K) opens the
+            GlobalSearchSheet for full-text search across titles + messages. */}
+        <button
+          type="button"
+          onClick={() => setShowSearchSheet(true)}
+          title="Search (⌘K)"
+          className="hidden md:flex flex-1 max-w-md mx-auto w-full text-left items-center gap-2 h-9 px-3 bg-paper border border-line rounded-[8px] hover:bg-paper/80"
+        >
           <Search className="w-3.5 h-3.5 text-ink-muted shrink-0" />
-          <input
-            ref={searchInputRef}
-            type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Filter visible sessions — ⌘K to search everything"
-            className="flex-1 min-w-0 bg-transparent outline-none text-[13px] text-ink placeholder:text-ink-muted"
-          />
-          {searchQuery ? (
-            <button
-              type="button"
-              onClick={() => {
-                setSearchQuery("");
-                searchInputRef.current?.focus();
-              }}
-              title="Clear filter"
-              className="shrink-0 h-4 w-4 rounded-full flex items-center justify-center text-ink-muted hover:text-ink hover:bg-line/60"
-            >
-              <X className="w-3 h-3" />
-            </button>
-          ) : (
-            <button
-              type="button"
-              onClick={() => setShowSearchSheet(true)}
-              title="Full-text search (⌘K)"
-              className="ml-auto text-[11px] text-ink-faint mono shrink-0 hover:text-ink-soft"
-            >
-              ⌘K
-            </button>
-          )}
-        </div>
+          <span className="flex-1 min-w-0 text-[13px] text-ink-muted truncate">
+            Search sessions and messages
+          </span>
+          <span className="ml-auto text-[11px] text-ink-faint mono shrink-0">
+            ⌘K
+          </span>
+        </button>
         <div className="ml-auto flex items-center gap-2">
           {/* Mobile-only full-text search trigger. Desktop uses the inline
               input above (which also carries the ⌘K hint); on touch there's
@@ -519,15 +479,13 @@ export function HomeScreen() {
           </div>
         ) : filteredGroups.length === 0 ? (
           <div className="px-4 md:px-6 pb-6 text-[13px] text-ink-muted">
-            {searchQuery.trim()
-              ? `No matches for "${searchQuery.trim()}". Try a different filter chip or clear the search.`
-              : activeFilter === "all"
-                ? "No sessions in this project yet."
-                : activeFilter === "scheduled"
-                  ? "No scheduled sessions yet — set up a routine and it'll surface here once routines link to sessions."
-                  : activeFilter === "archived"
-                    ? "No archived sessions."
-                    : `No ${activeFilter} sessions right now.`}
+            {activeFilter === "all"
+              ? "No sessions in this project yet."
+              : activeFilter === "scheduled"
+                ? "No scheduled sessions yet — set up a routine and it'll surface here once routines link to sessions."
+                : activeFilter === "archived"
+                  ? "No archived sessions."
+                  : `No ${activeFilter} sessions right now.`}
           </div>
         ) : (
           <div className="pb-6">
@@ -572,9 +530,6 @@ export function HomeScreen() {
         <GlobalSearchSheet
           onClose={() => {
             setShowSearchSheet(false);
-            // Return focus to the inline input so keyboard users keep a
-            // natural landing spot after the sheet closes.
-            searchInputRef.current?.focus();
           }}
         />
       )}

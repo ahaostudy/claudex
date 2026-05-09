@@ -2239,7 +2239,7 @@ function PermissionCard({
           </div>
         </div>
 
-        <div className="px-6 py-4 border-t border-line flex items-center gap-2 flex-wrap">
+        <div className="px-6 py-4 border-t border-line flex items-center gap-2">
           <button
             type="button"
             onClick={() => onDecide(approvalId, "deny")}
@@ -2250,17 +2250,17 @@ function PermissionCard({
           <button
             type="button"
             onClick={() => onDecide(approvalId, "allow_always")}
-            className="h-10 px-4 rounded-[8px] border border-line bg-canvas text-ink text-[14px] font-medium whitespace-nowrap shrink min-w-0 max-w-full inline-flex items-center gap-1"
+            className="h-10 px-3 rounded-[8px] border border-line bg-canvas text-ink text-[14px] font-medium flex-1 min-w-0 inline-flex items-center gap-1 justify-center"
           >
-            <span>Always allow</span>
-            <span className="mono text-[12px] text-ink-muted truncate">
+            <span className="shrink-0 whitespace-nowrap">Always allow</span>
+            <span className="mono text-[12px] text-ink-muted truncate min-w-0">
               {alwaysLabel}
             </span>
           </button>
           <button
             type="button"
             onClick={() => onDecide(approvalId, allowOnceDecision)}
-            className="h-10 px-4 rounded-[8px] bg-ink text-canvas text-[14px] font-medium ml-auto inline-flex items-center gap-1.5 whitespace-nowrap shrink-0"
+            className="h-10 px-4 rounded-[8px] bg-ink text-canvas text-[14px] font-medium inline-flex items-center gap-1.5 whitespace-nowrap shrink-0"
           >
             <Check className="w-4 h-4" />
             Allow once
