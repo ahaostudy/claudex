@@ -938,7 +938,7 @@ function SessionRow({
                   aria-label="Pinned"
                 />
               )}
-              <span className="text-[15px] font-medium truncate">
+              <span className="text-[14px] font-medium truncate">
                 {s.title || "Untitled"}
               </span>
               {s.worktreePath && (

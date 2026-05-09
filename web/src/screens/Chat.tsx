@@ -1619,18 +1619,7 @@ function ToolCallBlock({
 
   return (
     <div className={cn(showBody ? "w-full max-w-full" : "w-fit max-w-full")}>
-      <div
-        className={cn(
-          "w-full max-w-full",
-          running ? "relative pl-4" : "relative",
-        )}
-      >
-        {running && (
-          <span
-            aria-hidden
-            className="absolute left-[3px] top-3 bottom-3 w-px bg-klein pointer-events-none"
-          />
-        )}
+      <div className="w-full max-w-full">
         <button
           type="button"
           onClick={() => canToggle && setExpanded((v) => !v)}

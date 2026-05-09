@@ -280,6 +280,14 @@ export function reconcile(
       const sdkId = row.sdkSessionId;
       if (!sdkId) continue;
       if (!liveSessionIds.has(sdkId)) continue;
+      // claudex-managed sessions have a live AgentRunner attached; the
+      // claude subprocess the SDK spawns for them WILL show up in `ps`
+      // and its JSONL path matches this row's sdkSessionId. That's our
+      // own subprocess, not an external CLI attach — skip it so sessions
+      // the user is actively talking to through claudex don't briefly
+      // flash into cli_running right after the turn finishes while the
+      // subprocess is still winding down.
+      if (manager.hasRunner(row.id)) continue;
       promoteToCliRunning(sessions, manager, row, logger);
       promoted.push(row.id);
     }
