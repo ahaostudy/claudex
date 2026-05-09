@@ -21,10 +21,14 @@ import type { UIPiece } from "@/state/sessions";
  */
 export function TasksDrawer({
   pieces,
+  sessionId,
   onReveal,
   onClose,
 }: {
   pieces: UIPiece[];
+  /** Scope persisted collapse state — same storage as the desktop rail
+   * so a group toggled open on one surface stays open on the other. */
+  sessionId?: string;
   onReveal?: (attr: "tool-use-id", id: string) => void;
   onClose: () => void;
 }) {
@@ -69,6 +73,7 @@ export function TasksDrawer({
         <div className="flex-1 overflow-y-auto min-h-0">
           <TasksList
             pieces={pieces}
+            sessionId={sessionId}
             onReveal={(attr, id) => {
               // Clicking a row on mobile should dismiss the drawer and
               // then scroll the transcript — otherwise the user taps and

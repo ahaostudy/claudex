@@ -25,7 +25,7 @@ export function DiffView({ diff, defaultOpen = false }: { diff: FileDiff; defaul
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
-        className="flex w-full items-center gap-2 px-3 py-1.5 bg-paper border-b border-line text-left hover:bg-paper/80 max-w-full"
+        className="flex w-full items-center gap-2 px-3 py-1.5 bg-paper border-b border-line text-left hover:bg-paper/80 max-w-full min-w-0"
       >
         <ChevronRight
           className={cn(
@@ -33,14 +33,14 @@ export function DiffView({ diff, defaultOpen = false }: { diff: FileDiff; defaul
             open && "rotate-90",
           )}
         />
-        <span className="mono text-[12px] text-ink-soft truncate">
+        <span className="mono text-[12px] text-ink-soft truncate min-w-0 flex-1">
           {diff.path}
         </span>
-        <span className="text-[11px] mono text-success">
+        <span className="text-[11px] mono text-success shrink-0">
           +{diff.addCount}
         </span>
-        <span className="text-[11px] mono text-danger">−{diff.delCount}</span>
-        <span className="ml-auto text-[10px] uppercase tracking-[0.12em] text-ink-muted">
+        <span className="text-[11px] mono text-danger shrink-0">−{diff.delCount}</span>
+        <span className="ml-auto text-[10px] uppercase tracking-[0.12em] text-ink-muted shrink-0">
           {diff.kind}
         </span>
       </button>
@@ -70,7 +70,7 @@ export function DiffView({ diff, defaultOpen = false }: { diff: FileDiff; defaul
                     <div className="text-center text-ink-muted select-none">
                       {ln.kind === "add" ? "+" : ln.kind === "del" ? "−" : " "}
                     </div>
-                    <div className="pr-3 whitespace-pre-wrap break-words">
+                    <div className="pr-3 whitespace-pre-wrap break-words [overflow-wrap:anywhere] min-w-0">
                       {ln.text || " "}
                     </div>
                   </div>

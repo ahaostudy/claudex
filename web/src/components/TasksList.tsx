@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
-import { Loader2 } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ChevronRight, Loader2 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { timeAgoShort } from "@/lib/format";
 import type { UIPiece } from "@/state/sessions";
@@ -151,11 +151,46 @@ function groupRows(rows: TaskRow[]): TaskGroup[] {
   return out;
 }
 
+/**
+ * localStorage key per session for persisted collapse state. Shape is
+ * `Record<groupLabel, boolean>` where `true` means "expanded". We key by
+ * sessionId so opening a different session gets its own fresh default
+ * (groups with running rows open, rest collapsed) rather than inheriting
+ * another session's user toggles.
+ */
+const LS_PREFIX = "claudex:taskRailGroups:";
+
+function readPersisted(sessionId: string | undefined): Record<string, boolean> {
+  if (!sessionId) return {};
+  try {
+    const raw = localStorage.getItem(LS_PREFIX + sessionId);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      const out: Record<string, boolean> = {};
+      for (const [k, v] of Object.entries(parsed)) {
+        if (typeof v === "boolean") out[k] = v;
+      }
+      return out;
+    }
+  } catch {
+    // Corrupted storage — start fresh; don't crash the rail.
+  }
+  return {};
+}
+
 export function TasksList({
   pieces,
+  sessionId,
   onReveal,
 }: {
   pieces: UIPiece[];
+  /**
+   * Session id used to scope persisted collapse state in localStorage.
+   * Optional — when omitted (e.g. older callers) collapse state still
+   * works in-memory but isn't persisted across remounts.
+   */
+  sessionId?: string;
   /** Scroll the main transcript to the source event when a row is clicked.
    * We only ever emit "tool-use-id"; approvals have their own card inline
    * and aren't listed here. */
@@ -167,7 +202,11 @@ export function TasksList({
 
   // Tick once a second while anything is running so mm:ss timers stay
   // fresh. We do a single panel-level interval instead of one per row —
-  // cheap, and it stops as soon as nothing is running.
+  // cheap, and it stops as soon as nothing is running. Lives at the list
+  // level (not the group) so the timer keeps ticking for running rows
+  // even inside collapsed groups — which matters because a collapsed
+  // group with a running row will re-open or reveal the right label as
+  // soon as the user expands it, without a stale value flash.
   const [, setTick] = useState(0);
   useEffect(() => {
     if (!hasRunning) return;
@@ -175,13 +214,102 @@ export function TasksList({
     return () => clearInterval(handle);
   }, [hasRunning]);
 
+  // ----- Collapse state -----
+  //
+  // Two sources of truth, composed at render time:
+  //   1. `userToggled` — labels the user has explicitly clicked in this
+  //      session, with whatever boolean they landed on. This wins.
+  //   2. Derived default — a group whose rows include a running row is
+  //      expanded by default; everything else is collapsed by default.
+  //      Re-evaluated every render from `groups` so newly-created groups
+  //      (e.g. first Bash call lands mid-turn) get the right default
+  //      without us having to migrate any state on each rows change.
+  //
+  // We persist `userToggled` to localStorage (scoped per session) so the
+  // user's choices survive remounts. On mount we hydrate from storage;
+  // the default rule still applies to any group not in storage yet.
+  const [userToggled, setUserToggled] = useState<Record<string, boolean>>(() =>
+    readPersisted(sessionId),
+  );
+
+  // If the session id changes (navigating between sessions with the rail
+  // mounted) refresh the toggles from storage — otherwise session B would
+  // inherit session A's user choices.
+  const lastSessionIdRef = useRef<string | undefined>(sessionId);
+  useEffect(() => {
+    if (lastSessionIdRef.current !== sessionId) {
+      lastSessionIdRef.current = sessionId;
+      setUserToggled(readPersisted(sessionId));
+    }
+  }, [sessionId]);
+
+  // Debounced persist. We keep a timer ref so the latest pending write
+  // wins, and flush on unmount so a quick toggle → navigate doesn't drop
+  // the user's choice.
+  const flushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingRef = useRef<Record<string, boolean> | null>(null);
+  const flush = useCallback(() => {
+    if (!sessionId) return;
+    const toWrite = pendingRef.current;
+    if (!toWrite) return;
+    pendingRef.current = null;
+    try {
+      localStorage.setItem(LS_PREFIX + sessionId, JSON.stringify(toWrite));
+    } catch {
+      // Quota / disabled storage — silent; in-memory state still works.
+    }
+  }, [sessionId]);
+  useEffect(() => {
+    pendingRef.current = userToggled;
+    if (flushTimerRef.current) clearTimeout(flushTimerRef.current);
+    flushTimerRef.current = setTimeout(flush, 250);
+    return () => {
+      if (flushTimerRef.current) clearTimeout(flushTimerRef.current);
+    };
+  }, [userToggled, flush]);
+  useEffect(() => {
+    // Flush on unmount so navigation doesn't lose the latest toggle.
+    return () => {
+      if (flushTimerRef.current) {
+        clearTimeout(flushTimerRef.current);
+        flushTimerRef.current = null;
+      }
+      flush();
+    };
+  }, [flush]);
+
+  const isExpanded = useCallback(
+    (label: string, groupHasRunning: boolean): boolean => {
+      if (Object.prototype.hasOwnProperty.call(userToggled, label)) {
+        return userToggled[label];
+      }
+      return groupHasRunning;
+    },
+    [userToggled],
+  );
+
+  const toggle = useCallback((label: string, next: boolean) => {
+    setUserToggled((prev) => ({ ...prev, [label]: next }));
+  }, []);
+
   if (groups.length === 0) return <EmptyState />;
 
   return (
     <div className="flex flex-col">
-      {groups.map((g) => (
-        <TaskGroupView key={g.label} group={g} onReveal={onReveal} />
-      ))}
+      {groups.map((g) => {
+        const groupHasRunning = g.rows.some((r) => r.state === "running");
+        const expanded = isExpanded(g.label, groupHasRunning);
+        return (
+          <TaskGroupView
+            key={g.label}
+            group={g}
+            expanded={expanded}
+            groupHasRunning={groupHasRunning}
+            onToggle={() => toggle(g.label, !expanded)}
+            onReveal={onReveal}
+          />
+        );
+      })}
     </div>
   );
 }
@@ -213,22 +341,59 @@ function EmptyState() {
 
 function TaskGroupView({
   group,
+  expanded,
+  groupHasRunning,
+  onToggle,
   onReveal,
 }: {
   group: TaskGroup;
+  expanded: boolean;
+  groupHasRunning: boolean;
+  onToggle: () => void;
   onReveal?: (attr: "tool-use-id", id: string) => void;
 }) {
+  const runCount = group.rows.length;
   return (
     <section>
-      <div className="px-3 pt-3 pb-1.5 flex items-baseline gap-2">
-        <span className="caps text-ink-soft">{group.label}</span>
-        <span className="mono text-[11px] text-ink-muted">
-          · {group.rows.length} {group.rows.length === 1 ? "run" : "runs"}
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={expanded}
+        className={cn(
+          "w-full px-2.5 py-1.5 flex items-center gap-1.5 text-left hover:bg-paper/60 transition-colors",
+          // Subtle bottom border when collapsed — visually terminates the
+          // group without the row list to do it for us.
+          !expanded && "border-b border-line/40",
+        )}
+      >
+        <ChevronRight
+          className={cn(
+            "w-2.5 h-2.5 text-ink-muted shrink-0 transition-transform",
+            expanded ? "rotate-90" : "rotate-0",
+          )}
+          aria-hidden
+        />
+        <span className="uppercase tracking-[0.12em] text-[10px] font-medium text-ink-soft">
+          {group.label}
         </span>
-      </div>
-      {group.rows.map((row) => (
-        <TaskRowView key={row.id} row={row} onReveal={onReveal} />
-      ))}
+        <span className="mono text-[10px] text-ink-muted">
+          · {runCount}
+        </span>
+        {groupHasRunning && (
+          <span
+            aria-hidden
+            className="h-1 w-1 rounded-full bg-klein animate-pulse"
+            title="has running tool calls"
+          />
+        )}
+      </button>
+      {expanded && (
+        <div className="pt-0.5 pb-1">
+          {group.rows.map((row) => (
+            <TaskRowView key={row.id} row={row} onReveal={onReveal} />
+          ))}
+        </div>
+      )}
     </section>
   );
 }

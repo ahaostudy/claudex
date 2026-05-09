@@ -97,7 +97,7 @@ export function AskUserQuestionCard({
   return (
     <div
       data-ask-id={askId}
-      className="rounded-[12px] border border-klein/30 bg-klein-wash/30 p-3 max-w-[72ch]"
+      className="rounded-[12px] border border-klein/30 bg-klein-wash/30 p-3 max-w-[72ch] min-w-0"
     >
       <div className="flex items-center gap-2 mb-3">
         <span className="h-7 w-7 rounded-[8px] bg-klein-wash border border-klein/40 flex items-center justify-center text-klein">
@@ -120,7 +120,7 @@ export function AskUserQuestionCard({
           return (
             <div key={q.question} className="space-y-2">
               <div className="flex items-baseline justify-between gap-2">
-                <div className="text-[15px] leading-snug text-ink display">
+                <div className="text-[15px] leading-snug text-ink display break-words [overflow-wrap:anywhere] min-w-0 flex-1">
                   {q.question}
                 </div>
                 {q.header ? (
@@ -195,11 +195,11 @@ export function AskUserQuestionCard({
                           className="mt-0.5 accent-klein shrink-0"
                         />
                         <div className="flex-1 min-w-0">
-                          <div className="text-[13.5px] font-medium text-ink">
+                          <div className="text-[13.5px] font-medium text-ink break-words [overflow-wrap:anywhere]">
                             {opt.label}
                           </div>
                           {opt.description ? (
-                            <div className="text-[12px] text-ink-muted leading-snug">
+                            <div className="text-[12px] text-ink-muted leading-snug break-words [overflow-wrap:anywhere]">
                               {opt.description}
                             </div>
                           ) : null}

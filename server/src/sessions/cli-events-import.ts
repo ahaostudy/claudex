@@ -2,6 +2,7 @@ import fs from "node:fs";
 import readline from "node:readline";
 import { nanoid } from "nanoid";
 import type { SessionStore } from "./store.js";
+import { stripHarnessNoise } from "./cli-text-filter.js";
 
 export interface CliEventsImportDeps {
   sessionEvents: SessionStore;
@@ -94,14 +95,16 @@ function appendUserRecord(
   if (!message || message.role !== "user") return 0;
   const content = message.content;
 
-  // String content = a real user turn.
+  // String content = a real user turn *unless* it's entirely harness-injected
+  // noise (task-notification, system-reminder, slash-command echo, …). We run
+  // the filter on every string payload and drop the event if nothing remains.
   if (typeof content === "string") {
-    const text = content.trim();
-    if (text.length === 0) return 0;
+    const cleaned = stripHarnessNoise(content);
+    if (cleaned.length === 0) return 0;
     sessionEvents.appendEvent({
       sessionId,
       kind: "user_message",
-      payload: { text: content },
+      payload: { text: cleaned },
     });
     return 1;
   }
@@ -144,12 +147,17 @@ function appendUserRecord(
     return n;
   }
 
-  const text = textParts.join("").trim();
+  // Strip harness noise from each text block independently, then join. If the
+  // joined result is empty the whole record was harness chatter → drop it.
+  const cleanedParts = textParts
+    .map((t) => stripHarnessNoise(t))
+    .filter((t) => t.length > 0);
+  const text = cleanedParts.join("\n").trim();
   if (text.length === 0) return 0;
   sessionEvents.appendEvent({
     sessionId,
     kind: "user_message",
-    payload: { text: textParts.join("") },
+    payload: { text },
   });
   return 1;
 }

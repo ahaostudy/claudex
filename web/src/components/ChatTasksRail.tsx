@@ -118,7 +118,11 @@ export function ChatTasksRail({
         </button>
       </div>
       <div className="flex-1 overflow-y-auto min-h-0">
-        <TasksList pieces={pieces} onReveal={revealToolUse} />
+        <TasksList
+          pieces={pieces}
+          sessionId={session?.id}
+          onReveal={revealToolUse}
+        />
       </div>
       <div className="mt-auto p-3 border-t border-line shrink-0">
         <div className="caps text-ink-muted mb-2 flex items-center gap-1.5">

@@ -2,6 +2,7 @@ import Database, { type Database as Db } from "better-sqlite3";
 import fs from "node:fs";
 import type { Config } from "../lib/config.js";
 import type { Logger } from "../lib/logger.js";
+import { stripHarnessNoise } from "../sessions/cli-text-filter.js";
 
 export interface ClaudexDb {
   db: Db;
@@ -451,6 +452,60 @@ const MIGRATIONS: { id: number; name: string; up: string }[] = [
       ALTER TABLE sessions ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0;
     `,
   },
+  {
+    id: 17,
+    name: "strip_harness_noise_from_user_messages",
+    // Backfill for the harness-injection bug: before this migration the CLI
+    // JSONL importer treated Claude Code harness pseudo-messages
+    // (<task-notification>, <system-reminder>, <command-message>, …) as
+    // real user turns, so long imported sessions grew dozens of junk
+    // `user_message` rows. The importer has been fixed; this migration
+    // rewrites existing rows so already-ingested sessions stop rendering
+    // the junk too.
+    //
+    // Uses the `strip_harness_noise` SQL function registered by `openDb`
+    // (wrapping the same JS helper the importer now calls). For each
+    // `user_message` row:
+    //   - compute cleaned := strip_harness_noise(payload.text)
+    //   - if cleaned is empty → delete the row AND the mirrored
+    //     session_search row (FTS5 keeps its own copy)
+    //   - else if cleaned differs from the original → update payload.text
+    //     and the mirrored FTS row body so search snippets stay honest
+    //
+    // Idempotent: running twice is a no-op because the filter is
+    // idempotent and the WHERE-differs guard kicks in on the second pass.
+    up: `
+      DELETE FROM session_search
+       WHERE (session_id, event_seq) IN (
+         SELECT session_id, seq FROM session_events
+          WHERE kind = 'user_message'
+            AND length(strip_harness_noise(
+                  coalesce(json_extract(payload, '$.text'), ''))) = 0
+       );
+
+      DELETE FROM session_events
+       WHERE kind = 'user_message'
+         AND length(strip_harness_noise(
+               coalesce(json_extract(payload, '$.text'), ''))) = 0;
+
+      UPDATE session_events
+         SET payload = json_set(
+               payload,
+               '$.text',
+               strip_harness_noise(json_extract(payload, '$.text'))
+             )
+       WHERE kind = 'user_message'
+         AND json_extract(payload, '$.text') IS NOT NULL
+         AND strip_harness_noise(json_extract(payload, '$.text'))
+             <> json_extract(payload, '$.text');
+
+      UPDATE session_search
+         SET body = strip_harness_noise(body)
+       WHERE kind = 'user_message'
+         AND body IS NOT NULL
+         AND strip_harness_noise(body) <> body;
+    `,
+  },
 ];
 
 export function openDb(config: Config, log: Logger): ClaudexDb {
@@ -464,6 +519,20 @@ export function openDb(config: Config, log: Logger): ClaudexDb {
   db.pragma("synchronous = NORMAL");
   db.pragma("foreign_keys = ON");
   db.pragma("busy_timeout = 2000");
+
+  // Register a SQL wrapper around the CLI harness-noise stripper so migration
+  // 17 (and any future backfill work) can run it inline from SQL. Declared
+  // `deterministic` so SQLite is free to call it once per distinct input.
+  // The SQL null-guard shows up as `null` on the JS side → we return "" and
+  // let the migration's `coalesce(...)` handle it.
+  db.function(
+    "strip_harness_noise",
+    { deterministic: true },
+    (value: unknown) => {
+      if (typeof value !== "string") return "";
+      return stripHarnessNoise(value);
+    },
+  );
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS _migrations (

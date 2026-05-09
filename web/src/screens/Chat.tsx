@@ -741,7 +741,7 @@ export function ChatScreen() {
       <div
         ref={scroller}
         onScroll={onScrollerScroll}
-        className="flex-1 min-h-0 overflow-y-auto px-4 py-4 space-y-4 md:px-6 md:py-6 md:space-y-6"
+        className="flex-1 min-h-0 min-w-0 overflow-y-auto overflow-x-hidden px-4 py-4 space-y-4 md:px-6 md:py-6 md:space-y-6"
       >
         {meta?.loadingOlder && (
           <div className="text-center text-[11px] text-ink-muted mono py-2">
@@ -957,6 +957,7 @@ export function ChatScreen() {
       {showTasksDrawer && id && (
         <TasksDrawer
           pieces={pieces}
+          sessionId={id}
           onReveal={(attr, revealId) => {
             const el = scroller.current?.querySelector(
               `[data-${attr}="${CSS.escape(revealId)}"]`,
@@ -1287,7 +1288,7 @@ function Piece({
       const thisRevealed = p.seq != null && revealedSeq === p.seq;
       return (
         <div
-          className="group relative max-w-[72ch]"
+          className="group relative max-w-[72ch] min-w-0"
           data-event-seq={p.seq}
           data-show-actions={thisRevealed ? "true" : "false"}
           onClick={() => {
@@ -1334,7 +1335,7 @@ function Piece({
       // Thinking is only reached in verbose mode (normal/summary filter it
       // out in applyViewMode). Render full.
       return (
-        <div className="text-[12.5px] text-ink-muted italic pl-4 border-l-2 border-line whitespace-pre-wrap max-w-[72ch]">
+        <div className="text-[12.5px] text-ink-muted italic pl-4 border-l-2 border-line whitespace-pre-wrap break-words [overflow-wrap:anywhere] max-w-[72ch]">
           {p.text}
         </div>
       );
@@ -2016,7 +2017,7 @@ function UserBubble({
           />
         )}
         {remainingText.trim() && (
-          <div className="whitespace-pre-wrap">{remainingText}</div>
+          <div className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{remainingText}</div>
         )}
       </div>
       {(() => {
@@ -2183,8 +2184,8 @@ function PermissionCard({
             </span>
             <span className="caps text-ink-muted">ask mode</span>
           </div>
-          <h3 className="display text-[22px] leading-tight mt-2">{title}</h3>
-          <p className="text-[13.5px] text-ink-muted mt-1">
+          <h3 className="display text-[22px] leading-tight mt-2 break-words [overflow-wrap:anywhere]">{title}</h3>
+          <p className="text-[13.5px] text-ink-muted mt-1 break-words [overflow-wrap:anywhere]">
             Claude wants to run this in{" "}
             <span className="mono text-ink">{cwd}</span>
           </p>
@@ -2216,9 +2217,9 @@ function PermissionCard({
           >
             <div className="caps text-ink-muted mb-1.5">Blast radius</div>
             <div className="flex items-center gap-3 text-[12px]">
-              <div className="flex-1">
-                <div className="text-ink font-medium">{blast.title}</div>
-                <div className="text-ink-muted mt-0.5">{blast.subtitle}</div>
+              <div className="flex-1 min-w-0">
+                <div className="text-ink font-medium break-words [overflow-wrap:anywhere]">{blast.title}</div>
+                <div className="text-ink-muted mt-0.5 break-words [overflow-wrap:anywhere]">{blast.subtitle}</div>
               </div>
             </div>
           </div>
@@ -2237,9 +2238,9 @@ function PermissionCard({
               checked={remember}
               onChange={(e) => setRemember(e.target.checked)}
             />
-            <span className="flex-1 min-w-0">
+            <span className="flex-1 min-w-0 break-words [overflow-wrap:anywhere]">
               Remember{" "}
-              <span className="mono text-[12px] text-ink-muted truncate">
+              <span className="mono text-[12px] text-ink-muted">
                 {alwaysLabel}
               </span>
             </span>
@@ -2328,7 +2329,7 @@ function PermissionCard({
                 permission · ask mode
               </span>
             </div>
-            <h3 className="display text-[24px] leading-tight mt-1">{title}</h3>
+            <h3 className="display text-[24px] leading-tight mt-1 break-words [overflow-wrap:anywhere]">{title}</h3>
             <div className="mono text-[12px] text-ink-muted mt-1 truncate">
               {metaLine}
             </div>
@@ -2371,8 +2372,8 @@ function PermissionCard({
               )}
             >
               <div className="caps text-ink-muted">Blast radius</div>
-              <div className="text-[13px] mt-1 font-medium">{blast.title}</div>
-              <div className="text-[11px] text-ink-muted mt-0.5">
+              <div className="text-[13px] mt-1 font-medium break-words [overflow-wrap:anywhere]">{blast.title}</div>
+              <div className="text-[11px] text-ink-muted mt-0.5 break-words [overflow-wrap:anywhere]">
                 {blast.subtitle}
               </div>
             </div>
@@ -2380,7 +2381,7 @@ function PermissionCard({
 
           <div className="rounded-[8px] border border-line bg-canvas p-3">
             <div className="caps text-ink-muted mb-2">Why Claude is asking</div>
-            <div className="text-[13px] text-ink-muted">
+            <div className="text-[13px] text-ink-muted break-words [overflow-wrap:anywhere]">
               Your permission mode is{" "}
               <span className="mono text-ink">ask</span> and you haven't
               approved <span className="mono text-ink">{alwaysLabel}</span>{" "}

@@ -61,7 +61,7 @@ export function PlanAcceptCard({
   return (
     <div
       data-plan-id={planId}
-      className="rounded-[12px] border border-klein/30 bg-klein-wash/30 p-3 max-w-[72ch]"
+      className="rounded-[12px] border border-klein/30 bg-klein-wash/30 p-3 max-w-[72ch] min-w-0"
     >
       <div className="flex items-center gap-2 mb-3">
         <span className="h-7 w-7 rounded-[8px] bg-klein-wash border border-klein/40 flex items-center justify-center text-klein">
