@@ -8,6 +8,7 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  Copy,
   GitFork,
   MessageCircle,
   MoreVertical,
@@ -52,7 +53,8 @@ import { LinkPreview, firstHttpUrl } from "@/components/LinkPreview";
 import { ImageLightbox } from "@/components/ImageLightbox";
 import { MessageActions } from "@/components/MessageActions";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
-import { ToastHost } from "@/lib/toast";
+import { ToastHost, toast } from "@/lib/toast";
+import { copyText } from "@/lib/clipboard";
 import type { SlashCommand } from "@/lib/slash-commands";
 import { BUILTIN_FALLBACK_SLASH_COMMANDS } from "@/lib/slash-commands";
 import type { UIPiece, ViewMode } from "@/state/sessions";
@@ -88,6 +90,16 @@ const VIEW_LABEL: Record<ViewMode, string> = {
   normal: "Normal",
   verbose: "Verbose",
   summary: "Summary",
+};
+
+// One-line description per mode, kept in sync with the desktop popover in
+// ViewModePicker.tsx (mockup s-07 lines 1414–1422). Used by the mobile
+// MoreSheet's "Transcript view" group so the picker feels the same shape
+// on both breakpoints.
+const VIEW_DESCRIPTION: Record<ViewMode, string> = {
+  normal: "Tool calls collapsed into summaries, with full text responses.",
+  verbose: "Every tool call, file read, and intermediate step Claude takes.",
+  summary: "Only Claude's final responses and the changes it made.",
 };
 
 export function ChatScreen() {
@@ -1058,21 +1070,40 @@ function ChatMoreSheet({
           <span className="h-1 w-12 bg-line-strong rounded-full" />
         </div>
         <div className="caps text-ink-muted mb-2">Transcript view</div>
-        <div className="grid grid-cols-3 gap-1.5 mb-4">
-          {viewModes.map((m) => (
-            <button
-              key={m}
-              onClick={() => onPickViewMode(m)}
-              className={cn(
-                "h-10 rounded-[8px] text-[13px] font-medium border",
-                viewMode === m
-                  ? "border-klein bg-klein-wash/40 text-ink"
-                  : "border-line bg-canvas text-ink-soft",
-              )}
-            >
-              {VIEW_LABEL[m]}
-            </button>
-          ))}
+        <div className="space-y-2 mb-4">
+          {viewModes.map((m) => {
+            const active = viewMode === m;
+            return (
+              <button
+                key={m}
+                type="button"
+                onClick={() => onPickViewMode(m)}
+                className={cn(
+                  "w-full flex items-start gap-3 p-3 rounded-[8px] border text-left",
+                  active
+                    ? "border-klein bg-klein-wash/40"
+                    : "border-line bg-canvas hover:bg-paper/40",
+                )}
+                aria-pressed={active}
+              >
+                {active ? (
+                  <span className="h-4 w-4 mt-1 rounded-full border-2 border-klein bg-klein shrink-0">
+                    <span className="block h-full w-full rounded-full border-2 border-canvas" />
+                  </span>
+                ) : (
+                  <span className="h-4 w-4 mt-1 rounded-full border-2 border-line-strong bg-canvas shrink-0" />
+                )}
+                <div className="min-w-0">
+                  <div className="text-[14px] font-medium">
+                    {VIEW_LABEL[m]}
+                  </div>
+                  <div className="text-[12px] text-ink-muted mt-0.5">
+                    {VIEW_DESCRIPTION[m]}
+                  </div>
+                </div>
+              </button>
+            );
+          })}
         </div>
         <div className="caps text-ink-muted mb-2">Actions</div>
         <div className="space-y-1">
@@ -1464,6 +1495,71 @@ function RunningDots() {
 // still truncates overflows because even verbose shouldn't dump 50 KB.
 // Error state: folded chip gets a danger dot + subtle danger-wash tint.
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Shared input/output pane. Unifies the visual treatment of tool_use input
+// JSON and tool_result text so the pair reads as one coherent unit: same
+// dark shell, same mono size, same width, same max-height, same Copy
+// affordance. Error state on the output pane carries a danger-accented
+// border and a ✗ in the label; otherwise the two panes are visually
+// indistinguishable apart from the label.
+// ---------------------------------------------------------------------------
+function ToolPayloadPane({
+  label,
+  text,
+  isError,
+}: {
+  label: "input" | "output";
+  text: string;
+  isError?: boolean;
+}) {
+  const onCopy = async () => {
+    const ok = await copyText(text);
+    toast(
+      ok ? `${label === "input" ? "Input" : "Output"} copied` : "Copy failed",
+    );
+  };
+  return (
+    <div
+      className={cn(
+        "w-full max-w-[min(80ch,100%)] rounded-[10px] border bg-ink/95",
+        isError ? "border-danger/40" : "border-ink-soft/40",
+      )}
+    >
+      <div className="flex items-center gap-2 px-3 pt-2 pb-1">
+        <span
+          className={cn(
+            "caps text-[10px] tracking-wider",
+            isError ? "text-danger" : "text-canvas/55",
+          )}
+        >
+          {isError && label === "output" ? (
+            <span aria-hidden className="mr-1">
+              ✗
+            </span>
+          ) : null}
+          {label}
+        </span>
+        <button
+          type="button"
+          onClick={onCopy}
+          className="ml-auto inline-flex items-center gap-1 px-1.5 h-5 rounded-[4px] border border-canvas/15 bg-ink-soft/60 mono text-[10px] text-canvas/70 hover:bg-ink-soft"
+          title={`Copy ${label}`}
+        >
+          <Copy className="w-2.5 h-2.5" aria-hidden />
+          copy
+        </button>
+      </div>
+      <pre className="mono text-[12px] leading-[1.55] text-canvas/90 px-3 pb-3 pt-0.5 max-h-[320px] overflow-auto whitespace-pre-wrap [overflow-wrap:anywhere] break-words dark-scroll">
+        {text}
+      </pre>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Tool call block (continued)
+// ---------------------------------------------------------------------------
 function ToolCallBlock({
   name,
   input,
@@ -1495,7 +1591,7 @@ function ToolCallBlock({
   const rightHint = running ? null : summarizeResult(resultContent, isError);
 
   return (
-    <div className="w-fit max-w-full">
+    <div className={cn(showBody ? "w-full max-w-full" : "w-fit max-w-full")}>
       <button
         type="button"
         onClick={() => canToggle && setExpanded((v) => !v)}
@@ -1544,10 +1640,8 @@ function ToolCallBlock({
         ) : null}
       </button>
       {showBody && (
-        <div className="mt-1 space-y-1">
-          <pre className="mono text-[11.5px] text-canvas bg-ink rounded-[8px] px-3 py-2 whitespace-pre-wrap [overflow-wrap:anywhere] break-all overflow-x-auto max-w-full">
-            {pretty}
-          </pre>
+        <div className="mt-1.5 space-y-1.5">
+          <ToolPayloadPane label="input" text={pretty} />
           {!running && (
             <ToolResultBlock
               content={resultContent}
@@ -1655,7 +1749,7 @@ function ToolResultBlock({
   }
 
   return (
-    <div className="max-w-full">
+    <div className="max-w-full space-y-1.5">
       {images.length > 0 && (
         <ImageThumbs
           images={images}
@@ -1664,15 +1758,8 @@ function ToolResultBlock({
         />
       )}
       {hasText && (
-        <div
-          className={cn(
-            "mono text-[12px] whitespace-pre-wrap [overflow-wrap:anywhere] break-all px-3 py-2 rounded-[8px] border w-fit max-w-full",
-            isError
-              ? "bg-danger-wash border-danger/30 text-[#7a1d21]"
-              : "bg-paper border-line text-ink-soft",
-          )}
-        >
-          {shownText}
+        <div>
+          <ToolPayloadPane label="output" text={shownText} isError={isError} />
           {canToggle && (
             <button
               type="button"
@@ -3673,6 +3760,10 @@ interface ChangeEntry {
   path: string;
   addCount: number;
   delCount: number;
+  /** seq of the first tool_use piece that touched this path — used by the
+   * Summary-mode Changes card to scroll into view on click. null when we
+   * never saw a seq (in-flight turns etc). */
+  firstSeq: number | null;
 }
 
 /**
@@ -3725,7 +3816,10 @@ function applyViewMode(
     // ask_user_question are all suppressed in summary mode.
   }
   // Aggregate Edit/Write/MultiEdit tool_use pieces into a de-duplicated
-  // changes list (latest stats win for a given path).
+  // changes list. Adds/dels are summed across calls touching the same path;
+  // paths with zero net change (e.g. an edit that added 3 lines and a later
+  // edit that removed those same 3) are dropped — per mockup s-07 the
+  // Changes card is a scan-mode signal, not an audit log.
   const changesMap = new Map<string, ChangeEntry>();
   for (const p of pieces) {
     if (p.kind !== "tool_use") continue;
@@ -3740,10 +3834,14 @@ function applyViewMode(
         path: d.path,
         addCount: d.addCount,
         delCount: d.delCount,
+        firstSeq: p.seq ?? null,
       });
     }
   }
-  return { visiblePieces: out, changes: Array.from(changesMap.values()) };
+  const changes = Array.from(changesMap.values()).filter(
+    (c) => c.addCount > 0 || c.delCount > 0,
+  );
+  return { visiblePieces: out, changes };
 }
 
 // ---------------------------------------------------------------------------
@@ -3759,13 +3857,33 @@ function SummaryCards({
   changes: ChangeEntry[];
 }) {
   const outcome = outcomeFor(session);
+  // Clicking a change row scrolls to the first tool_use event for that
+  // path. In summary mode those pieces are hidden from the transcript, so
+  // we hop to the underlying DOM node by seq — the hash listener in the
+  // scroller effect picks up the change. Best-effort: if the seq was
+  // never set (unseq'd optimistic piece) we log-and-no-op.
+  const handleJump = (c: ChangeEntry) => {
+    if (c.firstSeq == null) {
+      // eslint-disable-next-line no-console
+      console.debug("[summary] no seq for path", c.path);
+      return;
+    }
+    const hash = `#seq-${c.firstSeq}`;
+    if (window.location.hash !== hash) {
+      window.location.hash = hash;
+    }
+    const el = document.querySelector(
+      `[data-event-seq="${c.firstSeq}"]`,
+    ) as HTMLElement | null;
+    el?.scrollIntoView({ behavior: "smooth", block: "center" });
+  };
   return (
     <div className="space-y-3 max-w-[72ch]">
       <div className="rounded-[8px] border border-line bg-paper/50 p-3">
         <div className="text-[11px] uppercase tracking-[0.14em] text-ink-muted">
           Outcome
         </div>
-        <div className="display text-[15px] leading-tight mt-1">
+        <div className="mt-1 text-[13.5px] font-medium leading-snug">
           {outcome}
         </div>
       </div>
@@ -3778,26 +3896,42 @@ function SummaryCards({
             No file changes yet.
           </div>
         ) : (
-          <div className="mt-1 space-y-0.5">
-            {changes.map((c) => (
-              <div
-                key={c.path}
-                className="mono text-[12px] text-ink-soft flex items-center gap-2"
-              >
-                <span className="truncate">{c.path}</span>
-                <span className="shrink-0">·</span>
-                {c.addCount > 0 && (
-                  <span className="text-success shrink-0">
-                    +{c.addCount}
-                  </span>
-                )}
-                {c.delCount > 0 && (
-                  <span className="text-danger shrink-0">
-                    −{c.delCount}
-                  </span>
-                )}
-              </div>
-            ))}
+          <div className="mt-1">
+            {changes.map((c) => {
+              const clickable = c.firstSeq != null;
+              return (
+                <button
+                  key={c.path}
+                  type="button"
+                  onClick={() => handleJump(c)}
+                  disabled={!clickable}
+                  title={
+                    clickable
+                      ? "Jump to this change in the transcript"
+                      : undefined
+                  }
+                  className={cn(
+                    "w-full flex items-center gap-2 mono text-[12px] text-ink-soft text-left py-0.5 px-1 -mx-1 rounded-[4px]",
+                    clickable
+                      ? "hover:bg-paper/60 cursor-pointer"
+                      : "cursor-default",
+                  )}
+                >
+                  <span className="truncate min-w-0 flex-1">{c.path}</span>
+                  <span className="shrink-0 text-ink-muted">·</span>
+                  {c.addCount > 0 && (
+                    <span className="text-success shrink-0">
+                      +{c.addCount}
+                    </span>
+                  )}
+                  {c.delCount > 0 && (
+                    <span className="text-danger shrink-0">
+                      −{c.delCount}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
           </div>
         )}
       </div>

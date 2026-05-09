@@ -838,6 +838,19 @@ function SessionRow({
             </span>
           )}
           <span className="ml-auto text-[11px] text-ink-faint">{rel}</span>
+          {/* Mobile-only in-flow delete trigger. Lives inside the status
+              line (not absolute) so it never overlaps title / context ring
+              / tags. Small target with an accessible label; confirm popover
+              anchors from the row itself. */}
+          <button
+            type="button"
+            onClick={openConfirm}
+            aria-label="Delete session"
+            title="Delete session"
+            className="md:hidden shrink-0 h-7 w-7 -my-1 -mr-1 flex items-center justify-center text-ink-faint active:text-danger"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+          </button>
         </div>
         <div className="mt-1 flex items-center gap-2">
           {s.pinned && (
@@ -1041,10 +1054,12 @@ function SessionRow({
         aria-label="Delete session"
         title="Delete session"
         className={cn(
-          "absolute top-2 right-2 md:top-3 md:right-3 h-8 w-8 rounded-[8px] border border-line bg-canvas/95 shadow-card",
-          "flex items-center justify-center text-ink-muted hover:text-danger hover:bg-danger-wash hover:border-danger/30",
-          // Always visible on mobile (no hover); only surfaces on hover on
-          // desktop so the row chrome stays quiet until you reach for it.
+          // Desktop-only: absolutely positioned, hover-revealed. On mobile
+          // the in-row trash button (below) is the affordance — an always-
+          // visible absolute overlay covers the relative-time + context
+          // ring and felt heavy.
+          "hidden md:flex absolute top-3 right-3 h-8 w-8 rounded-[8px] border border-line bg-canvas/95 shadow-card",
+          "items-center justify-center text-ink-muted hover:text-danger hover:bg-danger-wash hover:border-danger/30",
           "md:opacity-0 md:group-hover/row:opacity-100 md:focus-visible:opacity-100",
           confirmOpen && "md:opacity-100",
         )}

@@ -29,9 +29,15 @@ function readPersistedWidth(): number {
   }
 }
 
+// Inline utility for the mockup's `.caps` class (uppercase, tight tracking,
+// 11px). The webapp CSS doesn't ship `.caps` globally, so we reconstruct it
+// here with Tailwind so the rail matches s-04 exactly without a global add.
+const CAPS_CLS =
+  "uppercase tracking-[0.14em] text-[11px] font-medium";
+
 /**
  * Condensed per-session rail for the desktop Chat screen (mockup s-04,
- * lines 944–962). Lists sessions **scoped to the current project** — the
+ * lines 943–962). Lists sessions **scoped to the current project** — the
  * same-project rail is how we keep the sidebar focused on the conversation
  * the user is actually in, rather than replaying the full Home list.
  *
@@ -81,6 +87,12 @@ export function ChatSessionsRail({ currentId }: { currentId: string }) {
 
   useEffect(() => {
     if (!dragging) return;
+    // Freeze text selection on the whole document while dragging. Without
+    // this the browser highlights transcript content as the cursor sweeps
+    // across the center column. Restored in the cleanup below.
+    const prevUserSelect = document.body.style.userSelect;
+    document.body.style.userSelect = "none";
+
     const onMove = (ev: MouseEvent) => {
       const aside = asideRef.current;
       if (!aside) return;
@@ -102,6 +114,7 @@ export function ChatSessionsRail({ currentId }: { currentId: string }) {
     return () => {
       document.removeEventListener("mousemove", onMove);
       document.removeEventListener("mouseup", onUp);
+      document.body.style.userSelect = prevUserSelect;
     };
     // width is read in onUp via closure; we want the CURRENT width at release.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -113,40 +126,38 @@ export function ChatSessionsRail({ currentId }: { currentId: string }) {
   return (
     <aside
       ref={asideRef}
-      className={cn(
-        "hidden md:flex relative border-r border-line bg-paper/40 flex-col shrink-0",
-        dragging && "select-none",
-      )}
+      className="hidden md:flex relative border-r border-line bg-paper/40 flex-col shrink-0"
       style={{ width }}
     >
-      <div className="px-3 py-3 flex items-center gap-2">
+      {/* Header block — mirrors mockup s-04 line 945: logo + mono wordmark +
+          right-aligned count pill. Click goes to /sessions (global list). */}
+      <div className="p-4 flex items-center gap-2">
         <Link
           to="/sessions"
           aria-label="Go to sessions"
           className="flex items-center gap-2 flex-1 min-w-0 -mx-1 px-1 py-0.5 rounded-[6px] hover:bg-canvas/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-klein/40"
         >
-          <svg viewBox="0 0 32 32" className="w-5 h-5">
+          <svg viewBox="0 0 32 32" className="w-5 h-5 shrink-0">
             <path d="M9 22 L16 8 L23 22 Z" fill="#cc785c" />
             <circle cx="16" cy="18" r="2.2" fill="#faf9f5" />
           </svg>
-          <span className="mono text-[13px]">claudex</span>
+          <span className="mono text-[13px] truncate">claudex</span>
         </Link>
-        <span className="ml-auto mono text-[11px] text-ink-muted">
+        <span className="ml-auto text-[11px] mono text-ink-muted">
           {visible.length}
         </span>
       </div>
 
-      <div className="px-3 pb-2 flex items-center gap-2">
-        <span className="text-[12px] text-ink-soft uppercase tracking-[0.08em] font-medium">
-          Sessions
-        </span>
+      {/* Caps "Sessions" label — mockup uses px-3, we do too. Soft muted
+          because the active session title below is the eye-anchor. */}
+      <div className={cn("px-3", CAPS_CLS, "text-ink-muted mb-2")}>
+        Sessions
       </div>
 
-      {/* Quick-create inline form. Stays in-rail — NOT a full sheet — so the
-          user doesn't lose the transcript context. Only the first prompt is
-          collected; model/mode/worktree are copied from the current session
-          so the rail acts as a "same project, same setup" sibling spawner. */}
-      <div className="px-3 pb-2">
+      {/* Quick-create affordance. Dashed-border trigger reads as "this will
+          add a new thing" without the loud solid-fill of a primary CTA; the
+          transcript is the primary surface and this rail is subordinate. */}
+      <div className="px-2 pb-2">
         {createOpen ? (
           <QuickCreateForm
             current={current}
@@ -162,8 +173,10 @@ export function ChatSessionsRail({ currentId }: { currentId: string }) {
             onClick={() => setCreateOpen(true)}
             disabled={!current}
             className={cn(
-              "w-full inline-flex items-center gap-1.5 h-8 px-2.5 rounded-[6px]",
-              "bg-klein text-canvas text-[12px] font-medium hover:opacity-90 disabled:opacity-50",
+              "w-full flex items-center justify-center gap-1.5 h-8 rounded-[6px]",
+              "border border-dashed border-line-strong text-ink-muted",
+              "hover:bg-canvas/60 hover:text-ink-soft hover:border-ink-faint",
+              "text-[12px] disabled:opacity-50 transition-colors",
             )}
             title={
               current ? "New session in this project" : "Loading current session…"
@@ -194,23 +207,23 @@ export function ChatSessionsRail({ currentId }: { currentId: string }) {
         )}
       </div>
 
-      <div className="mt-auto px-3 py-2 border-t border-line flex items-center gap-1.5 text-[11px] mono opacity-70">
+      {/* Footer — mockup uses `mt-auto p-4 border-t border-line text-[11px]
+          text-ink-muted mono`. We add a tiny status dot in front to hint at
+          the live WS connection state the user otherwise can't see. */}
+      <div className="mt-auto p-4 border-t border-line text-[11px] text-ink-muted mono flex items-center gap-1.5">
         <span
           className={cn(
-            "h-1.5 w-1.5 rounded-full",
+            "h-1.5 w-1.5 rounded-full shrink-0",
             connected ? "bg-success" : "bg-ink-faint",
           )}
         />
-        <span className="text-ink-soft">
-          {connected ? "connected" : "offline"}
-        </span>
+        <span>{connected ? "connected" : "offline"}</span>
       </div>
 
-      {/* Resize strip — thin absolute column on the right edge. Grabbing it
-          flips `dragging` true, at which point the document-level mousemove
-          listener computes width from the cursor's clientX offset. The
-          `select-none` class on the aside (applied while dragging) keeps
-          the browser from highlighting transcript text while you drag. */}
+      {/* Resize strip — 1px invisible column; a subtle hover tint is the
+          only affordance, which is enough once the cursor flips to
+          col-resize. `active:bg-klein/40` brightens it while the drag is
+          live so the user can tell the handle "grabbed". */}
       <div
         role="separator"
         aria-orientation="vertical"
@@ -220,9 +233,9 @@ export function ChatSessionsRail({ currentId }: { currentId: string }) {
           setDragging(true);
         }}
         className={cn(
-          "absolute top-0 right-0 h-full w-1 cursor-col-resize",
-          "hover:bg-klein/30 transition-colors",
-          dragging && "bg-klein/50",
+          "absolute right-0 top-0 bottom-0 w-1 cursor-col-resize",
+          "hover:bg-line/60 transition-colors",
+          dragging && "bg-klein/40",
         )}
       />
     </aside>
@@ -278,7 +291,7 @@ function QuickCreateForm({
   }
 
   return (
-    <div className="rounded-[8px] border border-line bg-canvas p-2 space-y-2">
+    <div className="rounded-[6px] border border-line bg-canvas p-2 space-y-2">
       <textarea
         ref={textareaRef}
         value={prompt}
@@ -330,7 +343,8 @@ function SessionRow({
   active: boolean;
 }) {
   // Status dot mirrors Home: warn on awaiting, pulsing success on running,
-  // danger on error, ink-faint otherwise.
+  // danger on error, klein-pulse for detected external CLI, ink-faint for
+  // idle, line-strong for archived (hidden in this rail but kept for parity).
   const dotTone = cn(
     "h-1.5 w-1.5 rounded-full shrink-0",
     session.status === "running" && "bg-success animate-pulse",
@@ -344,14 +358,26 @@ function SessionRow({
   const activityIso = session.lastMessageAt ?? session.updatedAt;
   const activityLabel = timeAgoShort(activityIso);
   const activityTitle = new Date(activityIso).toLocaleString();
+  // Single-word status echo so the mono meta line doubles as a legend for
+  // the dot: "running", "awaiting", "error". Skips idle/archived (the
+  // neutral dot + timestamp is already self-evident there).
+  const statusWord =
+    session.status === "running" ||
+    session.status === "cli_running" ||
+    session.status === "awaiting" ||
+    session.status === "error"
+      ? session.status === "cli_running"
+        ? "cli"
+        : session.status
+      : null;
 
-  // Active row: klein-wash fill + a 2px klein bar on the left. Inactive row:
-  // canvas hover only. Dropping the outline+shadow "card" treatment makes the
-  // list feel like one coherent rail rather than two competing surfaces.
-  const baseRow =
-    "block w-full text-left pl-[10px] pr-2.5 py-1.5 rounded-r-[6px] border-l-2";
-  const activeCls = "bg-klein-wash/40 border-klein";
-  const inactiveCls = "border-transparent hover:bg-canvas/60";
+  // Active row mirrors mockup s-04 line 948: a lifted card with canvas bg,
+  // 1px line border, and shadow-card. No klein wash — the shadow + border
+  // already separates it from the rail's paper/40 backdrop. Inactive rows
+  // are truly flat (no border, transparent bg) with a canvas/60 hover.
+  const rowBase = "block w-full text-left px-2.5 py-2 rounded-[6px]";
+  const activeCls = "bg-canvas border border-line shadow-card";
+  const inactiveCls = "hover:bg-canvas/60";
 
   const content = (
     <>
@@ -359,32 +385,32 @@ function SessionRow({
         <span className={dotTone} />
         <span
           className={cn(
-            "text-[13px] font-medium truncate flex-1 min-w-0",
-            !active && "text-ink-soft",
+            "text-[12px] truncate flex-1 min-w-0",
+            active ? "font-medium text-ink" : "text-ink-soft",
           )}
         >
           {title}
         </span>
       </div>
       <div
-        className="mono text-[11px] text-ink-muted truncate mt-0.5"
+        className="mono text-[10px] text-ink-muted mt-0.5 truncate"
         title={activityTitle}
       >
-        {activityLabel}
+        {statusWord ? `${activityLabel} · ${statusWord}` : activityLabel}
       </div>
     </>
   );
 
   if (active) {
     return (
-      <div className={cn(baseRow, activeCls)} aria-current="page">
+      <div className={cn(rowBase, activeCls)} aria-current="page">
         {content}
       </div>
     );
   }
 
   return (
-    <Link to={`/session/${session.id}`} className={cn(baseRow, inactiveCls)}>
+    <Link to={`/session/${session.id}`} className={cn(rowBase, inactiveCls)}>
       {content}
     </Link>
   );
