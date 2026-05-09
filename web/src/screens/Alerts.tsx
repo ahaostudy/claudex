@@ -361,7 +361,9 @@ function formatRel(iso: string): string {
   const now = Date.now();
   const then = new Date(iso).getTime();
   const diff = Math.max(0, Math.round((now - then) / 1000));
-  if (diff < 10) return "just now";
+  // Sub-minute precision — a session that finished 5s ago shouldn't
+  // collapse into "just now" alongside one from 55s ago.
+  if (diff < 3) return "just now";
   if (diff < 60) return `${diff}s ago`;
   if (diff < 3600) return `${Math.round(diff / 60)}m ago`;
   if (diff < 86400) return `${Math.round(diff / 3600)}h ago`;

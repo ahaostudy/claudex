@@ -8,13 +8,18 @@
 // that the UI output was subtly inconsistent. This module picks one clean
 // variant of each and every caller now uses it.
 
-/** "2m ago" / "5h ago" / "3d ago" — short form. */
+/** "3s ago" / "2m ago" / "5h ago" / "3d ago" — short form.
+ *  Sub-minute precision so fast events (a Bash call that just finished,
+ *  a session that just flipped to idle) don't all collapse into the
+ *  vague "just now" bucket. `<3s` still shows "now" since second-level
+ *  ticking at that granularity reads as jitter, not freshness. */
 export function timeAgoShort(iso: string | Date | null | undefined): string {
   if (!iso) return "—";
   const t = typeof iso === "string" ? Date.parse(iso) : iso.getTime();
   const delta = Math.max(0, Date.now() - t);
   const s = Math.floor(delta / 1000);
-  if (s < 60) return "just now";
+  if (s < 3) return "now";
+  if (s < 60) return `${s}s ago`;
   const m = Math.floor(s / 60);
   if (m < 60) return `${m}m ago`;
   const h = Math.floor(m / 60);
@@ -27,13 +32,15 @@ export function timeAgoShort(iso: string | Date | null | undefined): string {
   return new Date(t).toISOString().slice(0, 10);
 }
 
-/** "2 minutes ago" etc — long form, for audit rows and similar. */
+/** "3 seconds ago" / "2 minutes ago" etc — long form, for audit rows
+ *  and similar. Same sub-minute precision story as `timeAgoShort`. */
 export function timeAgoLong(iso: string | Date | null | undefined): string {
   if (!iso) return "—";
   const t = typeof iso === "string" ? Date.parse(iso) : iso.getTime();
   const delta = Math.max(0, Date.now() - t);
   const s = Math.floor(delta / 1000);
-  if (s < 60) return "just now";
+  if (s < 3) return "just now";
+  if (s < 60) return `${s} second${s === 1 ? "" : "s"} ago`;
   const m = Math.floor(s / 60);
   if (m < 60) return `${m} minute${m === 1 ? "" : "s"} ago`;
   const h = Math.floor(m / 60);

@@ -10,6 +10,7 @@ import {
   ChevronRight,
   Copy,
   GitFork,
+  Loader2,
   MessageCircle,
   MoreVertical,
   PanelRight,
@@ -55,6 +56,7 @@ import { MessageActions } from "@/components/MessageActions";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { ToastHost, toast } from "@/lib/toast";
 import { copyText } from "@/lib/clipboard";
+import { summarizeToolCall, toolIcon } from "@/lib/tool-summary";
 import type { SlashCommand } from "@/lib/slash-commands";
 import { BUILTIN_FALLBACK_SLASH_COMMANDS } from "@/lib/slash-commands";
 import type { UIPiece, ViewMode } from "@/state/sessions";
@@ -1613,56 +1615,102 @@ function ToolCallBlock({
   const pretty = useMemo(() => safeStringify(input), [input]);
   const running = resultContent === null;
   const rightHint = running ? null : summarizeResult(resultContent, isError);
+  const ToolIcon = toolIcon(name);
 
   return (
     <div className={cn(showBody ? "w-full max-w-full" : "w-fit max-w-full")}>
-      <button
-        type="button"
-        onClick={() => canToggle && setExpanded((v) => !v)}
-        disabled={!canToggle}
+      <div
         className={cn(
-          "flex items-center gap-2 py-1.5 pl-1.5 pr-3 rounded-[8px] border max-w-full text-left",
-          isError
-            ? "bg-danger-wash/40 border-danger/30"
-            : "bg-paper border-line",
-          canToggle && "hover:bg-paper/80 cursor-pointer",
+          "w-full max-w-full",
+          running ? "relative pl-4" : "relative",
         )}
-        aria-expanded={showBody}
       >
-        {canToggle ? (
-          showBody ? (
-            <ChevronDown className="w-3 h-3 text-ink-muted shrink-0" />
+        {running && (
+          <span
+            aria-hidden
+            className="absolute left-[3px] top-3 bottom-3 w-px bg-klein pointer-events-none"
+          />
+        )}
+        <button
+          type="button"
+          onClick={() => canToggle && setExpanded((v) => !v)}
+          disabled={!canToggle}
+          className={cn(
+            "flex items-center gap-2 py-1.5 pl-2 pr-3 rounded-[8px] border max-w-full text-left overflow-hidden",
+            isError
+              ? "bg-danger-wash/40 border-danger/30"
+              : running
+                ? "bg-klein-wash/50 border-klein/30"
+                : "bg-paper border-line",
+            canToggle &&
+              (running ? "hover:bg-klein-wash/70 cursor-pointer" : "hover:bg-paper/80 cursor-pointer"),
+          )}
+          aria-expanded={showBody}
+        >
+          {canToggle ? (
+            showBody ? (
+              <ChevronDown
+                className={cn(
+                  "w-3 h-3 shrink-0",
+                  running ? "text-klein" : "text-ink-muted",
+                )}
+              />
+            ) : (
+              <ChevronRight
+                className={cn(
+                  "w-3 h-3 shrink-0",
+                  running ? "text-klein" : "text-ink-muted",
+                )}
+              />
+            )
           ) : (
-            <ChevronRight className="w-3 h-3 text-ink-muted shrink-0" />
-          )
-        ) : (
-          <ChevronDown className="w-3 h-3 text-ink-muted shrink-0" />
-        )}
-        {isError && (
-          <span className="h-1.5 w-1.5 rounded-full bg-danger shrink-0" />
-        )}
-        <span className="mono text-[12px] text-ink-soft">{name}</span>
-        <span className="mono text-[11px] text-ink-muted truncate max-w-[40vw]">
-          {summarizeInput(input)}
-        </span>
-        {running ? (
-          <span className="mono text-[11px] text-ink-muted flex items-center gap-1 shrink-0">
-            <span className="pending-dot" />
-            <span className="pending-dot" style={{ animationDelay: "0.15s" }} />
-            <span className="pending-dot" style={{ animationDelay: "0.3s" }} />
-            <span>running</span>
+            <ChevronDown
+              className={cn(
+                "w-3 h-3 shrink-0",
+                running ? "text-klein" : "text-ink-muted",
+              )}
+            />
+          )}
+          {isError && (
+            <span className="h-1.5 w-1.5 rounded-full bg-danger shrink-0" />
+          )}
+          <span className="shrink-0 inline-flex" title={name}>
+            <ToolIcon
+              className={cn(
+                "w-3.5 h-3.5",
+                running ? "text-klein-ink" : "text-ink-soft",
+              )}
+              aria-label={name}
+            />
           </span>
-        ) : rightHint ? (
           <span
             className={cn(
-              "mono text-[11px] truncate max-w-[40vw] shrink min-w-0",
-              isError ? "text-danger" : "text-ink-muted",
+              "mono text-[12px]",
+              running ? "text-klein-ink" : "text-ink-soft",
             )}
           >
-            {rightHint}
+            {name}
           </span>
-        ) : null}
-      </button>
+          <span className="mono text-[11px] text-ink-muted truncate flex-1 min-w-0">
+            {summarizeToolCall(name, input)}
+          </span>
+          {running ? (
+            <Loader2
+              className="w-3.5 h-3.5 text-klein animate-spin shrink-0"
+              aria-label={`${name} running`}
+            />
+          ) : rightHint ? (
+            <span
+              className={cn(
+                "mono text-[11px] truncate max-w-[40vw] shrink min-w-0",
+                isError ? "text-danger" : "text-ink-muted",
+              )}
+            >
+              {rightHint}
+            </span>
+          ) : null}
+        </button>
+      </div>
       {showBody && (
         <div className="mt-1.5 space-y-1.5">
           <ToolPayloadPane label="input" text={pretty} />
@@ -1975,7 +2023,7 @@ function UserBubble({
 
   return (
     <div
-      className="flex flex-col items-end group"
+      className="flex flex-col items-end group relative"
       data-event-seq={seq}
       data-show-actions={revealed ? "true" : "false"}
     >
@@ -3721,11 +3769,6 @@ function renderHighlighted(text: string): React.ReactNode {
     parts.push(display.slice(last));
   }
   return parts;
-}
-
-function summarizeInput(input: Record<string, unknown>): string {
-  const s = JSON.stringify(input);
-  return s.length > 120 ? s.slice(0, 118) + "…" : s;
 }
 
 /**

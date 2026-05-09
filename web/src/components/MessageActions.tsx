@@ -1,11 +1,15 @@
 // ---------------------------------------------------------------------------
 // Per-message action row.
 //
-// Rendered as a sibling BELOW user / assistant_text / tool_result bubbles in
-// Chat.tsx. Hidden by default — appears on hover (desktop) or when the parent
-// bubble has been tapped (mobile). The component is stateless about reveal:
-// the parent owns a single `revealedSeq` and passes `revealed` down so only
-// one bubble ever shows its row at a time.
+// Rendered as an absolutely-positioned overlay at the tail end of user /
+// assistant_text / tool_result bubbles in Chat.tsx. Hidden by default —
+// appears on hover (desktop) or when the parent bubble has been tapped
+// (mobile). Because the row is absolute, it never reserves vertical flow
+// space, so consecutive messages keep a uniform gap regardless of whether
+// the row is present.
+//
+// Parent owns a single `revealedSeq` and passes `revealed` down so only one
+// bubble ever shows its row at a time.
 //
 // We intentionally don't ship this on tool_use / thinking / permission_request
 // pieces — those aren't user-addressable content and the actions would be
@@ -62,16 +66,15 @@ function buildPermalink(sessionId: string, seq?: number): string {
   return seq != null ? `${base}#seq-${seq}` : base;
 }
 
-/** Rounded-full pill chip matching the composer chip rail. */
-function ActionChip({
+/** Icon-only square button. Flat (no border), sits on the metadata line —
+ * we want these to read as a row of subtle affordances, not a button bank. */
+function ActionIcon({
   icon: Icon,
-  label,
   onClick,
   title,
   disabled,
 }: {
   icon: typeof Copy;
-  label: string;
   onClick: () => void;
   title: string;
   disabled?: boolean;
@@ -81,7 +84,7 @@ function ActionChip({
       type="button"
       onClick={(e) => {
         // Stop the click from bubbling up to the bubble wrapper's tap
-        // handler — otherwise tapping a chip would immediately toggle
+        // handler — otherwise tapping would immediately toggle
         // `revealedSeq` back on, racing the `onActionComplete` clear.
         e.stopPropagation();
         if (!disabled) onClick();
@@ -89,10 +92,9 @@ function ActionChip({
       title={title}
       aria-label={title}
       disabled={disabled}
-      className="h-8 min-w-[36px] px-3 rounded-full border border-line bg-canvas text-[12px] flex items-center gap-1 whitespace-nowrap text-ink-soft hover:bg-paper disabled:opacity-50"
+      className="h-6 w-6 rounded-[6px] flex items-center justify-center text-ink-faint hover:text-ink-soft hover:bg-paper disabled:opacity-50 disabled:hover:bg-transparent transition-colors"
     >
       <Icon className="w-3.5 h-3.5" />
-      <span>{label}</span>
     </button>
   );
 }
@@ -168,47 +170,45 @@ export function MessageActions({
   return (
     <div
       className={cn(
-        // Rendered in normal flow as a sibling below the bubble. Tight top
-        // margin so the chips hug the bubble without touching it.
-        "flex gap-1 mt-1",
+        // Don't reserve vertical space when idle — collapse to zero height
+        // so consecutive pieces keep a uniform gap whether or not the row
+        // is rendered. The row expands back to its natural height when the
+        // parent `group` is hovered (desktop) or `revealed` via tap (mobile).
+        // A tiny top margin is applied only when expanded so the row hugs
+        // the bubble without touching it.
+        "overflow-hidden transition-[height,opacity] duration-100",
+        revealed ? "h-6 opacity-100 mt-1" : "h-0 opacity-0 mt-0",
+        "md:h-0 md:opacity-0 md:mt-0",
+        "md:group-hover:h-6 md:group-hover:opacity-100 md:group-hover:mt-1",
+        "md:focus-within:h-6 md:focus-within:opacity-100 md:focus-within:mt-1",
+        "flex items-center gap-0.5",
         align === "end" ? "justify-end" : "justify-start",
-        // Default hidden. Mobile: parent flips `revealed` to force-show.
-        // Desktop (md+): hover on the `group` wrapper wins unconditionally,
-        // so the tap state is ignored — exactly what we want for pointer
-        // devices where the bubble isn't tappable.
-        "transition-opacity duration-150",
-        revealed ? "opacity-100" : "opacity-0",
-        "md:opacity-0 md:group-hover:opacity-100 md:focus-within:opacity-100",
-        // Don't let the hidden row swallow clicks aimed at pieces behind it.
+        // Don't let the collapsed row swallow clicks aimed at pieces behind it.
         revealed
           ? "pointer-events-auto"
           : "pointer-events-none md:group-hover:pointer-events-auto md:focus-within:pointer-events-auto",
       )}
     >
-      <ActionChip
+      <ActionIcon
         icon={Copy}
-        label="Copy"
         title="Copy text"
         onClick={doCopyText}
       />
       {markdown != null && (
-        <ActionChip
+        <ActionIcon
           icon={FileCode}
-          label="Markdown"
           title="Copy as markdown"
           onClick={doCopyMarkdown}
         />
       )}
-      <ActionChip
+      <ActionIcon
         icon={LinkIcon}
-        label="Link"
         title="Copy permalink"
         onClick={doCopyPermalink}
       />
       {seq != null && (
-        <ActionChip
+        <ActionIcon
           icon={GitFork}
-          label="Branch"
           title="Branch from here into a new session"
           onClick={() => void doFork()}
           disabled={forking}

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronRight, Loader2 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { timeAgoShort } from "@/lib/format";
+import { summarizeToolCall, toolIcon } from "@/lib/tool-summary";
 import type { UIPiece } from "@/state/sessions";
 
 /**
@@ -79,7 +80,7 @@ export function buildTaskRows(pieces: UIPiece[]): TaskRow[] {
     rows.push({
       id: p.id,
       name: p.name,
-      summary: summarizeToolInput(p.name, p.input),
+      summary: summarizeToolCall(p.name, p.input),
       state,
       startedAt: p.createdAt,
       finishedAt: matched?.createdAt,
@@ -87,33 +88,6 @@ export function buildTaskRows(pieces: UIPiece[]): TaskRow[] {
     });
   }
   return rows;
-}
-
-/** Tool-specific best guess at the most user-facing input field, falling
- * back to a truncated JSON blob so we never produce an empty row. */
-function summarizeToolInput(
-  _name: string,
-  input: Record<string, unknown>,
-): string {
-  const candidates = [
-    "description",
-    "command",
-    "file_path",
-    "path",
-    "pattern",
-    "url",
-    "query",
-    "prompt",
-  ];
-  for (const key of candidates) {
-    const v = input[key];
-    if (typeof v === "string" && v.trim().length > 0) {
-      return v.length > 120 ? v.slice(0, 118) + "…" : v;
-    }
-  }
-  const s = JSON.stringify(input);
-  if (!s || s === "{}") return "";
-  return s.length > 120 ? s.slice(0, 118) + "…" : s;
 }
 
 interface TaskGroup {
@@ -407,6 +381,7 @@ function TaskRowView({
 }) {
   const tint = rowTint(row.state);
   const right = renderRightLabel(row);
+  const RowToolIcon = toolIcon(row.name);
   return (
     <div
       className={cn(
@@ -432,6 +407,7 @@ function TaskRowView({
             tint.chip,
           )}
         >
+          <RowToolIcon className="w-3 h-3" aria-hidden />
           {row.name}
         </span>
         <StatusIcon state={row.state} />
