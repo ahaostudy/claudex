@@ -257,12 +257,16 @@ export class SessionManager {
    * place that emits the `session status transition` log line (from / to /
    * reason). Callers should not invoke `sessions.setStatus` directly.
    *
-   * Note: `transitionStatus` does NOT broadcast on its own — the
-   * `handleEvent` path already broadcasts the originating RunnerEvent at
-   * the end of the function (which the WS bridge translates to the right
-   * frame), and external callers like the watchdog and force-idle use
-   * `broadcastStatus` or the `error` event directly. Keeps us from
-   * double-broadcasting the same transition.
+   * Note: `transitionStatus` does NOT broadcast on its own. Most runner
+   * events that move the status (turn_end, `status:running`, explicit
+   * `status:idle`) already carry their own broadcast at the tail of
+   * `handleEvent`, which the WS bridge translates to the right frame;
+   * auto-broadcasting here would double-send those. Transitions that DO
+   * need a broadcast but won't get one for free — `awaiting`
+   * (permission_request / ask_user_question / plan_accept_request),
+   * `running` on user_message_sent or on a permission/ask/plan decision —
+   * call `broadcastStatus` explicitly after the transitionStatus call at
+   * their respective sites.
    *
    * Idempotent — re-setting the same status is a no-op (no log) so noisy
    * callers (e.g. SDK re-emitting `status:running`) don't spam the log.
@@ -594,6 +598,10 @@ export class SessionManager {
             input: event.input,
           });
           this.transitionStatus(sessionId, "awaiting", "permission_request");
+          // Synthesize a session_update so every subscribed tab's status dot
+          // flips to awaiting. The runner itself never emits a status frame
+          // for awaiting — that's a claudex-side concept.
+          this.broadcastStatus(sessionId, "awaiting");
           // Propagate enriched event to subscribers.
           this.deps.broadcast(sessionId, {
             ...event,
@@ -620,6 +628,10 @@ export class SessionManager {
             },
           });
           this.transitionStatus(sessionId, "awaiting", "ask_user_question");
+          // Synthesize a session_update so Home/Chat status dots flip to
+          // awaiting — AskUserQuestion is a blocking interaction just like a
+          // permission_request.
+          this.broadcastStatus(sessionId, "awaiting");
           // Forward the event to the WS layer — ws.ts will translate it into
           // a `ServerAskUserQuestion` frame. Short-circuit the generic
           // broadcast at the bottom of handleEvent so we don't double-send.
@@ -640,6 +652,9 @@ export class SessionManager {
             },
           });
           this.transitionStatus(sessionId, "awaiting", "plan_accept_request");
+          // Same reasoning as ask_user_question — ExitPlanMode is a blocking
+          // interaction, the status dot needs to move.
+          this.broadcastStatus(sessionId, "awaiting");
           this.deps.broadcast(sessionId, event);
           return;
         }
@@ -740,6 +755,21 @@ export class SessionManager {
     echoId?: string,
   ): Promise<void> {
     const runner = this.getOrCreate(sessionId);
+    // Flip the session to `running` the moment we accept the user's message.
+    // The AgentRunner only emits `status:running` once, at the top of its
+    // consume loop — so on second-and-later turns (when the runner is
+    // already iterating) the SDK itself never tells us the session became
+    // active again. Without this transition + broadcast, a session would
+    // sit on `idle` (its terminal state from the previous turn_end)
+    // through the entire follow-up turn until the next turn_end, and the
+    // UI's "thinking" dot would never light up. transitionStatus is
+    // idempotent when already running — only the broadcast fires on
+    // first-turn as well, keeping the wire in sync with the DB.
+    const before = this.deps.sessions.findById(sessionId);
+    if (before?.status !== "running") {
+      this.transitionStatus(sessionId, "running", "user_message_sent");
+      this.broadcastStatus(sessionId, "running");
+    }
     // If this is a side chat whose runner has a pending context seed,
     // flush it to the SDK first. We do NOT append the seed to
     // session_events — the transcript only shows what the user typed.
@@ -840,6 +870,16 @@ export class SessionManager {
       ...(echoId !== undefined ? { echoId } : {}),
     });
 
+    // Flip to `running` before we push the prompt into the runner. After the
+    // first turn_end lands, the session sits at `idle` until another runner
+    // event arrives — but the AgentRunner only emits `status: running` ONCE
+    // at the top of `consume()`, so second/third/nth turns would otherwise
+    // stay visually idle through the entire streamed reply. Doing the flip
+    // here (instead of relying on the runner) also covers the first turn
+    // cleanly: the transition is a no-op when status is already running.
+    // Idempotent via `transitionStatus`'s from===to guard.
+    this.transitionStatus(sessionId, "running", "user_message_sent");
+
     // Build the outgoing SDK prompt by prefixing `@<absolute-path>` tokens
     // so the SDK's Read tool picks the files up in-line — this is how the
     // `claude` CLI handles `@path` references, and the SDK inherits that
@@ -939,14 +979,26 @@ export class SessionManager {
 
   /**
    * Broadcast a synthesized `status` RunnerEvent so the WS bridge emits a
-   * `session_update` frame. Used by the CLI file-watcher which derives
-   * status from the JSONL's mtime + tail and never goes through
-   * AgentRunner. The DB status is expected to already be stamped by the
-   * caller — this method is pure broadcast.
+   * `session_update` frame. Used by:
+   *   - the CLI file-watcher which derives status from the JSONL's mtime +
+   *     tail and never goes through AgentRunner;
+   *   - the manager itself, whenever it flips DB status to `awaiting` or
+   *     `running` via `transitionStatus` so every subscribed tab sees the
+   *     status dot move without waiting for the next runner event.
+   *
+   * The DB status is expected to already be stamped by the caller — this
+   * method is pure broadcast. `starting` and `terminated` are mapped to
+   * `running` / `idle` by the WS bridge; `awaiting` / `error` pass through.
    */
   broadcastStatus(
     sessionId: string,
-    status: "running" | "idle" | "terminated" | "starting",
+    status:
+      | "running"
+      | "idle"
+      | "terminated"
+      | "starting"
+      | "awaiting"
+      | "error",
   ): void {
     this.deps.broadcast(sessionId, { type: "status", status });
   }
@@ -1042,6 +1094,12 @@ export class SessionManager {
       payload: { toolUseId, decision, toolName: pending?.toolName ?? null },
     });
     this.transitionStatus(sessionId, "running", `permission_${decision}`);
+    // Unwind awaiting → running on the wire. The SDK runner won't
+    // emit its own status frame here — the next user-visible event
+    // is whatever the model does next (tool_use, assistant_text, etc.),
+    // and without this broadcast the session list would stay on the
+    // "awaiting" dot until turn_end lands.
+    this.broadcastStatus(sessionId, "running");
     // Back to active — re-arm the silence watchdog.
     this.startWatchdog(sessionId);
     // Audit: every permission decision is security-relevant — the user just
@@ -1082,6 +1140,7 @@ export class SessionManager {
       },
     });
     this.transitionStatus(sessionId, "running", "ask_user_answer");
+    this.broadcastStatus(sessionId, "running");
     this.startWatchdog(sessionId);
   }
 
@@ -1113,6 +1172,7 @@ export class SessionManager {
       payload: { planId, decision },
     });
     this.transitionStatus(sessionId, "running", `plan_accept_${decision}`);
+    this.broadcastStatus(sessionId, "running");
     this.startWatchdog(sessionId);
   }
 

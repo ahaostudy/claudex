@@ -297,6 +297,18 @@ async function onExistingChange(
 
   // Always refresh derived status — the JSONL grew, which is new signal
   // regardless of whether any mapped events got appended.
+  //
+  // Exception: when an AgentRunner is attached, the runner is authoritative
+  // for status. The JSONL-derived heuristic can only return `running` /
+  // `idle` (never `awaiting`), so running it here would overwrite the
+  // awaiting state we just set when e.g. AskUserQuestion / ExitPlanMode /
+  // a permission_request came in. We also lose the briefly-stale "idle"
+  // flicker that the watcher would emit between turns when the SDK writes
+  // a user record before the next assistant chunk. Runner-driven sessions
+  // broadcast every status transition through the manager's event bus
+  // already, so the watcher adds no signal here.
+  if (deps.manager.hasRunner(session.id)) return;
+
   const fresh = deps.sessions.findById(session.id) ?? session;
   const next = await deriveCliStatus(fresh, absPath);
   if (next !== fresh.status) {
@@ -316,6 +328,10 @@ async function backfillStatuses(
   const all = deps.sessions.list({ includeArchived: false, includeSideChats: true });
   for (const s of all) {
     if (!s.sdkSessionId) continue;
+    // Runner-driven sessions: skip status backfill for the same reason
+    // `onExistingChange` skips — the AgentRunner is the source of truth and
+    // the JSONL heuristic can't produce `awaiting`, so it would clobber.
+    if (deps.manager.hasRunner(s.id)) continue;
     const absPath = await locateJsonl(root, s.sdkSessionId);
     if (!absPath) continue;
     try {

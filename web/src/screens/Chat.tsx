@@ -2245,6 +2245,15 @@ function PermissionCard({
 
 // Command block — dark terminal-style rendering. Used by the PermissionCard
 // when the tool isn't a diff-producing Edit/Write/MultiEdit.
+//
+// Long bodies (>12 lines OR >1200 chars) default to a collapsed preview of
+// the first 8 lines with an "Expand ({N} lines)" klein-ink button, matching
+// the plan-accept fold pattern so the permission card doesn't push the
+// Allow/Deny actions off-screen. Short bodies render as-is.
+const COMMAND_FOLD_LINES = 12;
+const COMMAND_FOLD_CHARS = 1200;
+const COMMAND_PREVIEW_LINES = 8;
+
 function CommandBlock({
   command,
   cwd,
@@ -2254,6 +2263,21 @@ function CommandBlock({
   cwd?: string;
   desktop?: boolean;
 }) {
+  const totalLines = command.lines.length;
+  const totalChars = command.lines.reduce((sum, line) => {
+    if (line.kind === "bash-first") {
+      return sum + line.binary.length + line.rest.length;
+    }
+    return sum + line.text.length;
+  }, 0);
+  const shouldFold =
+    totalLines > COMMAND_FOLD_LINES || totalChars > COMMAND_FOLD_CHARS;
+  const [expanded, setExpanded] = useState(false);
+  const visibleLines =
+    shouldFold && !expanded
+      ? command.lines.slice(0, COMMAND_PREVIEW_LINES)
+      : command.lines;
+
   return (
     <div
       className={cn(
@@ -2276,7 +2300,7 @@ function CommandBlock({
           desktop ? "px-4 py-3" : "px-3 py-3",
         )}
       >
-        {command.lines.map((line, i) => (
+        {visibleLines.map((line, i) => (
           <div
             key={i}
             className="whitespace-pre-wrap [overflow-wrap:anywhere] break-all"
@@ -2293,6 +2317,21 @@ function CommandBlock({
             )}
           </div>
         ))}
+        {shouldFold && !expanded && (
+          <div className="text-canvas/50">…</div>
+        )}
+        {shouldFold && (
+          <button
+            type="button"
+            onClick={() => setExpanded((v) => !v)}
+            className="mt-2 text-[11px] mono text-klein-soft underline hover:text-klein-wash"
+            aria-expanded={expanded}
+          >
+            {expanded
+              ? "Collapse"
+              : `Expand (${totalLines.toLocaleString()} lines)`}
+          </button>
+        )}
       </div>
     </div>
   );

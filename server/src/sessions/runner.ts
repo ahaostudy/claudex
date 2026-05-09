@@ -38,7 +38,24 @@ export interface RunnerInitOptions {
 }
 
 export type RunnerEvent =
-  | { type: "status"; status: "starting" | "running" | "idle" | "terminated" }
+  // `starting` / `terminated` are runner-lifecycle values; the WS bridge
+  // maps them to `running` / `idle` respectively. `awaiting` and `error`
+  // are never emitted by the AgentRunner itself — the SessionManager
+  // synthesizes them via `broadcastStatus` when the DB row flips to
+  // those states (e.g. pending permission / ask_user_question /
+  // plan_accept_request, or a watchdog-forced error) so subscribed tabs
+  // see the session's status dot change without waiting for the next
+  // runner event.
+  | {
+      type: "status";
+      status:
+        | "starting"
+        | "running"
+        | "idle"
+        | "terminated"
+        | "awaiting"
+        | "error";
+    }
   | { type: "sdk_session_id"; sdkSessionId: string }
   | { type: "assistant_text"; messageId: string; text: string; done: boolean }
   | { type: "thinking"; text: string }

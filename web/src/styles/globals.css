@@ -13,12 +13,16 @@ html,
 body,
 #root {
   height: 100%;
-  /* Mobile Safari shrinks the layout viewport when the URL bar / keyboard
-     appears, which used to chop the bottom of `h-full` descendants and cut
-     off the chat composer. `100dvh` tracks the dynamic viewport, so the
-     cascade of `h-[100dvh]` in Chat / Login gets a real anchor to measure
-     against instead of a stale `100vh`. */
-  min-height: 100dvh;
+  /* `h-[100dvh]` at the screen boundary (AppShell / Chat / Login) owns
+     the iOS dynamic-viewport tracking. Adding `min-height: 100dvh`
+     here in parallel made root measure slightly taller than viewport
+     on some iOS + browser-chrome states, painting a phantom outer
+     scrollbar. Single source of truth: `height: 100%` on root. */
+}
+
+html,
+body {
+  overflow: hidden;
 }
 
 body {
