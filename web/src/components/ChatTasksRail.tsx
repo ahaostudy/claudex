@@ -157,30 +157,34 @@ export function ChatTasksRail({
 }
 
 function ContextDonut({ pct, known }: { pct: number; known: boolean }) {
-  const r = 15.5;
+  // 24px total; r=9.5 leaves 2.5px of padding for the stroke. The previous
+  // 38px ring felt oversized next to the thin rail typography.
+  const size = 24;
+  const r = 9.5;
+  const cx = size / 2;
   const circumference = 2 * Math.PI * r;
   const offset = circumference * (1 - pct);
   return (
-    <svg width={38} height={38}>
+    <svg width={size} height={size}>
       <circle
-        cx={19}
-        cy={19}
+        cx={cx}
+        cy={cx}
         r={r}
         fill="none"
         stroke="#e8e4d8"
-        strokeWidth={3}
+        strokeWidth={2.5}
       />
       <circle
-        cx={19}
-        cy={19}
+        cx={cx}
+        cy={cx}
         r={r}
         fill="none"
         stroke={known ? "#cc785c" : "#cc785c55"}
-        strokeWidth={3}
+        strokeWidth={2.5}
         strokeLinecap="round"
         strokeDasharray={circumference}
         strokeDashoffset={offset}
-        transform="rotate(-90 19 19)"
+        transform={`rotate(-90 ${cx} ${cx})`}
       />
     </svg>
   );

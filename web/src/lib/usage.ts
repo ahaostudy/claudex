@@ -70,13 +70,19 @@ export interface SessionUsage {
  * changes, update `shared/src/models.ts` first, then mirror it here.
  */
 const CONTEXT_WINDOW_TOKENS: Record<ModelId, number> = {
-  "claude-opus-4-7": 200_000,
-  "claude-sonnet-4-6": 200_000,
+  // Claude 4.x Opus + Sonnet both ship with 1M context windows
+  // (user-confirmed 2026-05-09). Haiku stays at 200k — the family's
+  // cheaper tier keeps the smaller window.
+  "claude-opus-4-7": 1_000_000,
+  "claude-sonnet-4-6": 1_000_000,
   "claude-haiku-4-5": 200_000,
 };
 
-/** Default window used when the model id is unknown to this table. */
-const CONTEXT_WINDOW_FALLBACK = 200_000;
+/** Default window used when the model id is unknown to this table.
+ * 1M is the current flagship default; for genuinely unknown models we
+ * still lean generous — the fallback exists so the ring doesn't render
+ * "100%" on an unmapped SKU. */
+const CONTEXT_WINDOW_FALLBACK = 1_000_000;
 
 /**
  * Context window size (tokens) for a given model id. Returns
