@@ -172,7 +172,7 @@ export function SettingsScreen() {
       {/* Mobile-first header — caps "Settings" + display {tab}. Back button on
           mobile jumps to /sessions (AppShell's default tab). Desktop hides the
           back chevron because the sidebar already provides orientation. */}
-      <header className="sticky top-0 z-10 bg-canvas/90 backdrop-blur border-b border-line px-4 sm:px-5 py-2.5 flex items-center gap-2">
+      <header className="shrink-0 bg-canvas/90 backdrop-blur border-b border-line px-4 sm:px-5 py-2.5 flex items-center gap-2">
         <button
           type="button"
           onClick={() => navigate("/sessions")}
@@ -192,15 +192,22 @@ export function SettingsScreen() {
         </div>
       </header>
 
-      <div className="flex-1 min-h-0 overflow-y-auto">
+      <div className="flex-1 min-h-0 flex flex-col md:min-h-0 overflow-y-auto md:overflow-hidden">
         {/* Profile card — matches mockup lines 2062–2066, honest variant.
-            Rendered on every subtab so the user always sees who they are. */}
-        <ProfileCard />
+            Rendered on every subtab so the user always sees who they are.
+            On desktop it stays pinned above the split rail/content below; on
+            mobile the whole column scrolls as one unit so `overflow-y-auto`
+            only applies below md. */}
+        <div className="shrink-0">
+          <ProfileCard />
+        </div>
 
-        <div className="md:grid md:grid-cols-[240px_minmax(0,1fr)]">
+        <div className="md:grid md:grid-cols-[240px_minmax(0,1fr)] md:flex-1 md:min-h-0">
           {/* Desktop inner rail: 8 entries, active = bg-canvas+border+shadow.
-              Mockup lines 2097–2111. */}
-          <aside className="hidden md:block border-r border-line bg-paper/40 overflow-y-auto">
+              Mockup lines 2097–2111. Independently scrollable on desktop —
+              shrink-0 on its column so a long tab list can't push the content
+              area off-screen. */}
+          <aside className="hidden md:flex md:flex-col border-r border-line bg-paper/40 overflow-y-auto min-h-0 shrink-0">
             <div className="p-4 flex items-center gap-2">
               <svg viewBox="0 0 32 32" className="w-4 h-4">
                 <path d="M9 22 L16 8 L23 22 Z" fill="#cc785c" />
@@ -283,7 +290,7 @@ export function SettingsScreen() {
             </button>
           </nav>
 
-          <section className="min-w-0 p-5 sm:p-8 pb-24 md:pb-10">
+          <section className="min-w-0 p-5 sm:p-8 pb-24 md:pb-10 md:overflow-y-auto md:min-h-0">
             <div className="max-w-[760px]">
               <div className="caps text-ink-muted">
                 Settings · {spec.caps}
@@ -1300,24 +1307,60 @@ function AuditLogCard({
   const [rows, setRows] = useState<AuditEvent[] | null>(null);
   const [totalCount, setTotalCount] = useState(0);
   const [err, setErr] = useState<string | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [reachedEnd, setReachedEnd] = useState(false);
+
+  const PAGE_SIZE = 50;
+  // Initial "inline" view shows up to 6 rows; the full-log sheet shows every
+  // row the card has loaded so far. Stashing the since cutoff in state keeps
+  // pagination calls aligned with the initial query's filter.
+  const sinceRef = useRef<string>("");
 
   useEffect(() => {
     // Last 30 days — matches the card's header phrasing so totalCount is
     // honest about what we're showing.
-    const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
-    const limit = expanded ? 200 : 50;
+    sinceRef.current = new Date(
+      Date.now() - 30 * 24 * 60 * 60 * 1000,
+    ).toISOString();
+    setRows(null);
+    setReachedEnd(false);
+    setErr(null);
     void (async () => {
       try {
-        const res = await api.listAudit({ limit, since });
+        const res = await api.listAudit({
+          limit: PAGE_SIZE,
+          since: sinceRef.current,
+        });
         setRows(res.events);
         setTotalCount(res.totalCount);
+        if (res.events.length < PAGE_SIZE) setReachedEnd(true);
       } catch (e) {
         setErr(e instanceof ApiError ? e.code : "load failed");
       }
     })();
   }, [expanded]);
 
-  if (err) {
+  async function loadMore() {
+    if (!rows || rows.length === 0 || loadingMore || reachedEnd) return;
+    setLoadingMore(true);
+    try {
+      const cursor = rows[rows.length - 1]!.createdAt;
+      const res = await api.listAudit({
+        limit: PAGE_SIZE,
+        since: sinceRef.current,
+        before: cursor,
+      });
+      setRows((prev) => (prev ? [...prev, ...res.events] : res.events));
+      setTotalCount(res.totalCount);
+      if (res.events.length < PAGE_SIZE) setReachedEnd(true);
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.code : "load failed");
+    } finally {
+      setLoadingMore(false);
+    }
+  }
+
+  if (err && rows === null) {
     return (
       <div className="rounded-[12px] border border-line bg-canvas p-5 text-[13px] text-ink-muted">
         Couldn't load audit log: <span className="mono">{err}</span>
@@ -1333,6 +1376,11 @@ function AuditLogCard({
   }
 
   const visible = expanded ? rows : rows.slice(0, 6);
+  // "Show more" is eligible only in the expanded sheet (the inline view
+  // already caps at 6) and disabled once we've either matched totalCount or
+  // seen a short page. The error banner sits above it so a failure during
+  // pagination doesn't swallow already-loaded rows.
+  const hasMore = expanded && !reachedEnd && rows.length < totalCount;
 
   return (
     <div className="rounded-[12px] border border-line bg-canvas p-5">
@@ -1366,13 +1414,29 @@ function AuditLogCard({
           ))}
         </div>
       )}
+      {expanded && err && (
+        <div className="mt-3 text-[12px] text-danger bg-danger-wash rounded-[6px] px-2 py-1 border border-danger/30">
+          {err}
+        </div>
+      )}
       {expanded ? (
-        <button
-          onClick={onCollapse}
-          className="mt-3 h-8 px-3 rounded-[8px] border border-line bg-paper text-[12.5px] w-full"
-        >
-          Collapse
-        </button>
+        <div className="mt-3 flex flex-col gap-2">
+          {hasMore && (
+            <button
+              onClick={() => void loadMore()}
+              disabled={loadingMore}
+              className="h-8 px-3 rounded-[8px] border border-line bg-paper text-[12.5px] w-full disabled:opacity-50"
+            >
+              {loadingMore ? "Loading…" : "Show more"}
+            </button>
+          )}
+          <button
+            onClick={onCollapse}
+            className="h-8 px-3 rounded-[8px] border border-line bg-paper text-[12.5px] w-full"
+          >
+            Collapse
+          </button>
+        </div>
       ) : (
         rows.length > 6 && (
           <button

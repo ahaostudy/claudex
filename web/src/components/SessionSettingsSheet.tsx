@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from "react";
-import { GitBranch, X } from "lucide-react";
+import { GitBranch, Pin, X } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { api, ApiError } from "@/api/client";
 import { Markdown } from "@/components/Markdown";
-import { formatBytes } from "@/lib/format";
+import { formatBytes, timeAgoLong } from "@/lib/format";
 import { useSessions } from "@/state/sessions";
 import type {
   MemoryResponse,
@@ -68,6 +68,10 @@ export function SessionSettingsSheet({
   const [memoryErr, setMemoryErr] = useState<string | null>(null);
   const [exportOpen, setExportOpen] = useState(false);
   const exportMenuRef = useRef<HTMLDivElement | null>(null);
+  // Force-idle escape hatch — visible only when the row has been stuck in
+  // `running` / `error` for more than 2 minutes. See `stuck` computation
+  // below for the guard.
+  const [forcingIdle, setForcingIdle] = useState(false);
 
   // Re-hydrate editable state when the parent swaps a fresh session in.
   useEffect(() => {
@@ -129,6 +133,7 @@ export function SessionSettingsSheet({
     model?: ModelId;
     mode?: PermissionMode;
     tags?: string[];
+    pinned?: boolean;
   }) {
     setSaving(true);
     setErr(null);
@@ -275,6 +280,35 @@ export function SessionSettingsSheet({
     api.exportSession(session.id, format);
   }
 
+  // "Stuck" heuristic for the force-idle link: the session looks active
+  // (`running` / `error`) but nothing has touched it in > 2 minutes. On-boot
+  // sweep + live watchdog normally catch this, but a freshly-restarted
+  // server with rows that were previously active can leave them stranded
+  // until the first new event arrives. Give the user an explicit way out.
+  const ageMs = (() => {
+    const anchor = session.lastMessageAt ?? session.updatedAt;
+    if (!anchor) return 0;
+    const t = Date.parse(anchor);
+    return Number.isFinite(t) ? Math.max(0, Date.now() - t) : 0;
+  })();
+  const looksStuck =
+    (session.status === "running" || session.status === "error") &&
+    ageMs > 2 * 60 * 1000;
+
+  async function handleForceIdle() {
+    if (forcingIdle) return;
+    setForcingIdle(true);
+    setErr(null);
+    try {
+      const r = await api.forceIdleSession(session.id);
+      onUpdated(r.session);
+      onClose();
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.code : "force_idle_failed");
+      setForcingIdle(false);
+    }
+  }
+
   const archived = session.status === "archived";
   const hasWorktree = !!session.worktreePath;
   const archiveLabel = hasWorktree
@@ -353,6 +387,52 @@ export function SessionSettingsSheet({
               This session is archived — settings are read-only.
             </div>
           )}
+
+          {/* Pinned — bumps this session to the top of Home's list regardless
+              of activity recency. Single-toggle row so it's hard to miss and
+              easy to reverse; PATCH round-trips through the shared `patch()`
+              helper so the parent sees the new Session DTO immediately. */}
+          <div>
+            <div className="text-[11px] uppercase tracking-[0.14em] text-ink-muted mb-2">
+              Pinned
+            </div>
+            <button
+              type="button"
+              disabled={archived || saving}
+              onClick={() => patch({ pinned: !session.pinned })}
+              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-[8px] border text-left disabled:opacity-60 ${
+                session.pinned
+                  ? "border-klein/40 bg-klein-wash/40"
+                  : "border-line bg-canvas hover:bg-paper/40"
+              }`}
+              aria-pressed={session.pinned}
+            >
+              <Pin
+                className={`w-4 h-4 shrink-0 ${
+                  session.pinned ? "text-klein-ink" : "text-ink-muted"
+                }`}
+              />
+              <span className="text-[13px] font-medium flex-1">
+                {session.pinned ? "Pinned to top" : "Pin this session"}
+              </span>
+              <span
+                className={`shrink-0 inline-flex h-5 w-9 rounded-full border transition-colors ${
+                  session.pinned
+                    ? "bg-klein border-klein"
+                    : "bg-paper border-line"
+                }`}
+              >
+                <span
+                  className={`h-4 w-4 rounded-full bg-canvas border border-line shadow-sm m-[1px] transition-transform ${
+                    session.pinned ? "translate-x-4" : "translate-x-0"
+                  }`}
+                />
+              </span>
+            </button>
+            <div className="mt-1.5 text-[11px] text-ink-muted">
+              Pinned sessions sort first on Home, regardless of activity.
+            </div>
+          </div>
 
           {/* Model */}
           <div>
@@ -503,6 +583,30 @@ export function SessionSettingsSheet({
                       <span className="text-ink-faint">project root</span>
                     )
                   )}
+                </span>
+              </div>
+              <div className="flex items-baseline gap-3">
+                <span className="text-[11px] uppercase tracking-[0.14em] text-ink-muted w-20 shrink-0">
+                  Created
+                </span>
+                <span
+                  className="mono text-[12px] text-ink-soft truncate min-w-0"
+                  title={new Date(session.createdAt).toLocaleString()}
+                >
+                  {timeAgoLong(session.createdAt)}
+                </span>
+              </div>
+              <div className="flex items-baseline gap-3">
+                <span className="text-[11px] uppercase tracking-[0.14em] text-ink-muted w-20 shrink-0">
+                  Last activity
+                </span>
+                <span
+                  className="mono text-[12px] text-ink-soft truncate min-w-0"
+                  title={new Date(
+                    session.lastMessageAt ?? session.updatedAt,
+                  ).toLocaleString()}
+                >
+                  {timeAgoLong(session.lastMessageAt ?? session.updatedAt)}
                 </span>
               </div>
             </div>
@@ -705,6 +809,26 @@ export function SessionSettingsSheet({
               two-step confirm (click → "Click again to confirm" with a 3s
               timeout) to keep an accidental tap from wiping the transcript.
               Export sits to the left as the only non-destructive action. */}
+          {looksStuck && !archived && (
+            <div className="pt-4 border-t border-line">
+              <div className="text-[11px] uppercase tracking-[0.14em] text-ink-muted mb-1">
+                Stuck?
+              </div>
+              <div className="text-[12px] text-ink-muted leading-snug">
+                This session has been{" "}
+                <span className="mono">{session.status}</span> with no activity
+                for {Math.round(ageMs / 60000)} min.{" "}
+                <button
+                  type="button"
+                  onClick={handleForceIdle}
+                  disabled={forcingIdle}
+                  className="text-klein-ink underline underline-offset-2 hover:text-klein disabled:opacity-60"
+                >
+                  {forcingIdle ? "Resetting…" : "Reset to idle"}
+                </button>
+              </div>
+            </div>
+          )}
           <div className="pt-4 border-t border-line flex flex-wrap gap-2">
             <div className="relative" ref={exportMenuRef}>
               <button

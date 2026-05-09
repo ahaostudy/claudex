@@ -31,7 +31,7 @@ export function AboutScreen() {
 
   return (
     <AppShell tab="settings">
-      <header className="sticky top-0 z-10 bg-canvas/90 backdrop-blur border-b border-line px-4 sm:px-5 py-2.5 flex items-center gap-2">
+      <header className="shrink-0 bg-canvas/90 backdrop-blur border-b border-line px-4 sm:px-5 py-2.5 flex items-center gap-2">
         <button
           type="button"
           onClick={() => navigate("/settings")}

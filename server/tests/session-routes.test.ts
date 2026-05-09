@@ -862,6 +862,135 @@ describe("session HTTP routes", () => {
   });
 
   // ---------------------------------------------------------------------------
+  // POST /api/sessions/:id/force-idle
+  //
+  // Escape hatch for sessions stuck in running/error — user can force the
+  // row back to idle so the composer unlocks. Happy path + auth / not_found /
+  // archived refusal + audit trail.
+  // ---------------------------------------------------------------------------
+  describe("POST /api/sessions/:id/force-idle", () => {
+    async function seedSession(ctx: {
+      app: FastifyInstance;
+      cookie: string;
+      tmpDir: string;
+      dbh: ClaudexDb;
+    }) {
+      const proj = await ctx.app
+        .inject({
+          method: "POST",
+          url: "/api/projects",
+          headers: { cookie: ctx.cookie },
+          payload: { name: "demo", path: ctx.tmpDir },
+        })
+        .then((r) => r.json().project);
+      trustProject(ctx.dbh, proj.id);
+      const s = await ctx.app
+        .inject({
+          method: "POST",
+          url: "/api/sessions",
+          headers: { cookie: ctx.cookie },
+          payload: {
+            projectId: proj.id,
+            title: "stuck",
+            model: "claude-opus-4-7",
+            mode: "default",
+            worktree: false,
+          },
+        })
+        .then((r) => r.json().session as { id: string });
+      return s;
+    }
+
+    it("rejects unauthenticated callers with 401", async () => {
+      const ctx = await bootstrap();
+      disposers.push(ctx.cleanup);
+      const res = await ctx.app.inject({
+        method: "POST",
+        url: "/api/sessions/nope/force-idle",
+      });
+      expect(res.statusCode).toBe(401);
+    });
+
+    it("returns 404 for an unknown session", async () => {
+      const ctx = await bootstrap();
+      disposers.push(ctx.cleanup);
+      const res = await ctx.app.inject({
+        method: "POST",
+        url: "/api/sessions/bogus-id/force-idle",
+        headers: { cookie: ctx.cookie },
+      });
+      expect(res.statusCode).toBe(404);
+      expect(res.json().error).toBe("not_found");
+    });
+
+    it("flips a running session back to idle and audits", async () => {
+      const ctx = await bootstrap();
+      disposers.push(ctx.cleanup);
+      const s = await seedSession(ctx);
+      // Put the row in `running` as if a turn were in flight.
+      ctx.dbh.db
+        .prepare("UPDATE sessions SET status = 'running' WHERE id = ?")
+        .run(s.id);
+
+      const res = await ctx.app.inject({
+        method: "POST",
+        url: `/api/sessions/${s.id}/force-idle`,
+        headers: { cookie: ctx.cookie },
+      });
+      expect(res.statusCode).toBe(200);
+      const body = res.json() as { session: { id: string; status: string } };
+      expect(body.session.status).toBe("idle");
+
+      const dbStatus = ctx.dbh.db
+        .prepare("SELECT status FROM sessions WHERE id = ?")
+        .get(s.id) as { status: string };
+      expect(dbStatus.status).toBe("idle");
+
+      // Audit row written.
+      const auditRows = ctx.dbh.db
+        .prepare(
+          "SELECT event, target, detail FROM audit_events WHERE target = ? AND event = 'session_forced_idle'",
+        )
+        .all(s.id) as Array<{ event: string; target: string; detail: string }>;
+      expect(auditRows).toHaveLength(1);
+      expect(auditRows[0].detail).toBe("from running");
+    });
+
+    it("refuses with 409 archived when the session has been archived", async () => {
+      const ctx = await bootstrap();
+      disposers.push(ctx.cleanup);
+      const s = await seedSession(ctx);
+      ctx.dbh.db
+        .prepare(
+          "UPDATE sessions SET status = 'archived', archived_at = ? WHERE id = ?",
+        )
+        .run(new Date().toISOString(), s.id);
+
+      const res = await ctx.app.inject({
+        method: "POST",
+        url: `/api/sessions/${s.id}/force-idle`,
+        headers: { cookie: ctx.cookie },
+      });
+      expect(res.statusCode).toBe(409);
+      expect(res.json().error).toBe("archived");
+    });
+
+    it("is idempotent on an already-idle session (200, no audit delta)", async () => {
+      const ctx = await bootstrap();
+      disposers.push(ctx.cleanup);
+      const s = await seedSession(ctx);
+      // Row is idle by default.
+      const res = await ctx.app.inject({
+        method: "POST",
+        url: `/api/sessions/${s.id}/force-idle`,
+        headers: { cookie: ctx.cookie },
+      });
+      expect(res.statusCode).toBe(200);
+      expect((res.json().session as { status: string }).status).toBe("idle");
+    });
+  });
+
+  // ---------------------------------------------------------------------------
   // GET /api/sessions/:id/pending-diffs
   //
   // We seed events directly via the SessionStore so the test doesn't need to
@@ -1345,6 +1474,65 @@ describe("session HTTP routes", () => {
       });
       expect(res.statusCode).toBe(400);
       expect(res.json().error).toBe("bad_request");
+    });
+
+    // -----------------------------------------------------------------------
+    // Pinned — backed by migration 16. Pinned sessions sort to the top of
+    // Home's session list regardless of activity recency. Round-trip via GET
+    // to prove the DB bit flipped and the DTO reflects the new value.
+    // -----------------------------------------------------------------------
+    it("pins a session on PATCH and round-trips via GET", async () => {
+      const ctx = await bootstrap();
+      disposers.push(ctx.cleanup);
+      const { s } = await seedSession(ctx);
+      // New sessions default to unpinned.
+      expect(s.pinned).toBe(false);
+      const patched = await ctx.app.inject({
+        method: "PATCH",
+        url: `/api/sessions/${s.id}`,
+        headers: { cookie: ctx.cookie },
+        payload: { pinned: true },
+      });
+      expect(patched.statusCode).toBe(200);
+      expect(patched.json().session.pinned).toBe(true);
+      // DB row reflects the flip.
+      const row = ctx.dbh.db
+        .prepare("SELECT pinned FROM sessions WHERE id = ?")
+        .get(s.id) as { pinned: number };
+      expect(row.pinned).toBe(1);
+      // GET returns the same DTO.
+      const fetched = await ctx.app
+        .inject({
+          method: "GET",
+          url: `/api/sessions/${s.id}`,
+          headers: { cookie: ctx.cookie },
+        })
+        .then((r) => r.json().session);
+      expect(fetched.pinned).toBe(true);
+    });
+
+    it("unpins a previously pinned session", async () => {
+      const ctx = await bootstrap();
+      disposers.push(ctx.cleanup);
+      const { s } = await seedSession(ctx);
+      await ctx.app.inject({
+        method: "PATCH",
+        url: `/api/sessions/${s.id}`,
+        headers: { cookie: ctx.cookie },
+        payload: { pinned: true },
+      });
+      const unpinned = await ctx.app.inject({
+        method: "PATCH",
+        url: `/api/sessions/${s.id}`,
+        headers: { cookie: ctx.cookie },
+        payload: { pinned: false },
+      });
+      expect(unpinned.statusCode).toBe(200);
+      expect(unpinned.json().session.pinned).toBe(false);
+      const row = ctx.dbh.db
+        .prepare("SELECT pinned FROM sessions WHERE id = ?")
+        .get(s.id) as { pinned: number };
+      expect(row.pinned).toBe(0);
     });
   });
 

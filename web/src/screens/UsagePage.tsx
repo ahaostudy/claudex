@@ -124,8 +124,8 @@ export function UsagePage() {
           and a cost estimate. The 7-day bar chart + top-sessions list are
           desktop-only — a 700px SVG bar chart doesn't read at 390px and the
           equivalent info is already a tap away via the session list. */}
-      <div className="md:hidden flex flex-col h-full">
-        <header className="px-4 py-2.5 border-b border-line flex items-center gap-2 bg-canvas">
+      <div className="md:hidden flex-1 min-h-0 flex flex-col">
+        <header className="shrink-0 px-4 py-2.5 border-b border-line flex items-center gap-2 bg-canvas">
           <Link
             to="/sessions"
             aria-label="Back to sessions"
@@ -148,7 +148,7 @@ export function UsagePage() {
             </div>
           </div>
         </header>
-        <div className="flex-1 overflow-y-auto p-4 space-y-4">
+        <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-4">
           {error && (
             <div className="rounded-[8px] border border-danger/30 bg-danger-wash text-[13px] text-[#7a1d21] px-3 py-2">
               Couldn't load usage: {error}
@@ -167,7 +167,7 @@ export function UsagePage() {
         </div>
       </div>
 
-      <div className="hidden md:block p-6 overflow-y-auto">
+      <div className="hidden md:block flex-1 min-h-0 overflow-y-auto p-6">
         <header className="flex items-baseline gap-4 mb-6">
           <div>
             <div className="caps text-ink-muted">Usage</div>

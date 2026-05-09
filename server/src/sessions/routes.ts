@@ -560,7 +560,7 @@ export async function registerSessionRoutes(
       }
 
       const warnings: string[] = [];
-      const { title, model, mode, tags } = parsed.data;
+      const { title, model, mode, tags, pinned } = parsed.data;
 
       if (title !== undefined) sessions.setTitle(id, title);
       if (model !== undefined && model !== existing.model) {
@@ -587,6 +587,9 @@ export async function registerSessionRoutes(
       }
       if (tags !== undefined) {
         sessions.setTags(id, tags);
+      }
+      if (pinned !== undefined) {
+        sessions.setPinned(id, pinned);
       }
 
       const updated = sessions.findById(id)!;
@@ -732,6 +735,48 @@ export async function registerSessionRoutes(
       // our findById and the call — treat it as a 404 for symmetry.
       if (!fork) return reply.code(404).send({ error: "not_found" });
       return reply.send({ session: fork });
+    },
+  );
+
+  // POST /api/sessions/:id/force-idle
+  //
+  // Escape hatch for the "stuck-running" failure mode. When the user sees a
+  // session that's been `running` or `error` for minutes with no activity
+  // (watchdog didn't fire because its in-memory timer was wiped by a
+  // restart, or the SDK died in a way that didn't surface), this endpoint
+  // force-transitions the row back to `idle` so the composer unlocks and a
+  // fresh turn becomes possible.
+  //
+  // Idempotent: a 200 response means the row is now idle, not necessarily
+  // that we flipped anything. We always emit an audit row so forensics can
+  // count how often users are having to bail themselves out — if the
+  // number climbs, the watchdog window or the on-boot sweep needs tuning.
+  app.post(
+    "/api/sessions/:id/force-idle",
+    { preHandler: app.requireAuth as any },
+    async (req, reply) => {
+      const { id } = req.params as { id: string };
+      const existing = sessions.findById(id);
+      if (!existing) return reply.code(404).send({ error: "not_found" });
+      if (existing.status === "archived") {
+        // Archived is a deliberate terminal state — flipping it to idle
+        // here would re-open the composer, which the rest of the archive
+        // flow assumes is locked. Refuse cleanly so the UI can render a
+        // tooltip rather than silently stashing a write.
+        return reply.code(409).send({ error: "archived" });
+      }
+      deps.manager.forceIdle(id, "user_forced_idle");
+      const ctx = getRequestCtx(req);
+      deps.audit.append({
+        userId: ctx.userId,
+        event: "session_forced_idle",
+        target: id,
+        detail: `from ${existing.status}`,
+        ip: ctx.ip,
+        userAgent: ctx.userAgent,
+      });
+      const updated = sessions.findById(id)!;
+      return reply.send({ session: updated });
     },
   );
 

@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import type { Session } from "@claudex/shared";
 import { useSessions } from "@/state/sessions";
 import { cn } from "@/lib/cn";
+import { timeAgoShort } from "@/lib/format";
 
 /**
  * Condensed per-session rail for the desktop Chat screen (mockup s-04,
@@ -78,6 +79,9 @@ function SessionRow({
   const rawBranch = session.branch?.trim();
   const branch = rawBranch && rawBranch !== "-" ? rawBranch : null;
   const title = session.title || "Untitled";
+  const activityIso = session.lastMessageAt ?? session.updatedAt;
+  const activityLabel = timeAgoShort(activityIso);
+  const activityTitle = new Date(activityIso).toLocaleString();
 
   if (active) {
     return (
@@ -85,6 +89,12 @@ function SessionRow({
         <div className="flex items-center gap-1.5">
           <span className={statusDot} />
           <span className="text-[12px] font-medium truncate">{title}</span>
+          <span
+            className="ml-auto mono text-[10px] text-ink-muted shrink-0"
+            title={activityTitle}
+          >
+            {activityLabel}
+          </span>
         </div>
         {branch && (
           <div className="mono text-[10px] text-ink-muted mt-0.5 truncate">
@@ -103,6 +113,12 @@ function SessionRow({
       <div className="flex items-center gap-1.5">
         <span className={statusDot} />
         <span className="text-[12px] truncate">{title}</span>
+        <span
+          className="ml-auto mono text-[10px] text-ink-faint shrink-0"
+          title={activityTitle}
+        >
+          {activityLabel}
+        </span>
       </div>
       {branch && (
         <div className="mono text-[10px] text-ink-muted mt-0.5 truncate">

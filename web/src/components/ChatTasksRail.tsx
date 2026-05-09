@@ -3,6 +3,7 @@ import type { Session, UsageSummaryResponse } from "@claudex/shared";
 import { api } from "@/api/client";
 import { contextWindowTokens } from "@/lib/usage";
 import { cn } from "@/lib/cn";
+import { timeAgoShort } from "@/lib/format";
 import type { UIPiece } from "@/state/sessions";
 
 /**
@@ -164,6 +165,12 @@ interface Task {
   // `perm-<approvalId>`) to avoid collisions across kinds.
   revealAttr: "tool-use-id" | "approval-id";
   revealId: string;
+  // ISO timestamp of the originating piece (tool_use or permission_request).
+  // Rendered as a muted `mm ago` caption so the user can tell a fresh
+  // running task from one that's been stuck for an hour. Undefined for
+  // live pieces that arrived off the WS before being persisted; the card
+  // simply hides the line in that case.
+  startedAt?: string;
 }
 
 function buildTasks(pieces: UIPiece[]): Task[] {
@@ -185,6 +192,7 @@ function buildTasks(pieces: UIPiece[]): Task[] {
         state: matched ? "done" : "running",
         revealAttr: "tool-use-id",
         revealId: p.id,
+        startedAt: p.createdAt,
       });
     } else if (p.kind === "permission_request") {
       tasks.push({
@@ -194,6 +202,7 @@ function buildTasks(pieces: UIPiece[]): Task[] {
         state: "awaiting",
         revealAttr: "approval-id",
         revealId: p.approvalId,
+        startedAt: p.createdAt,
       });
     }
   }
@@ -267,6 +276,14 @@ function TaskCard({
       <div className="text-[12px] mono text-ink-muted mt-1.5 line-clamp-2 break-all">
         {task.summary}
       </div>
+      {task.startedAt && (
+        <div
+          className="mono text-[10px] text-ink-faint mt-1.5"
+          title={new Date(task.startedAt).toLocaleString()}
+        >
+          started {timeAgoShort(task.startedAt)}
+        </div>
+      )}
     </button>
   );
 }

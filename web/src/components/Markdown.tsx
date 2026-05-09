@@ -1,6 +1,9 @@
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { Copy } from "lucide-react";
+import type React from "react";
 import { cn } from "@/lib/cn";
+import { toast } from "@/lib/toast";
 
 // ---------------------------------------------------------------------------
 // Markdown renderer used for assistant text. GitHub-flavored (tables, task
@@ -193,23 +196,71 @@ const COMPONENTS: Components = {
   },
   pre: ({ children }) => {
     // Extract the language off the embedded <code className="language-xxx">
-    // so we can render a tiny tag in the top-right corner. We deliberately
-    // don't syntax-highlight — just present the source cleanly.
+    // so we can render a tiny tag in the top-left corner. We deliberately
+    // don't syntax-highlight — just present the source cleanly. The
+    // top-right corner is reserved for a Copy button so users can grab the
+    // block's raw text without fiddling with text selection on mobile.
     const lang = extractLang(children);
     return (
-      <div className="relative my-2">
+      <div className="relative group my-2">
         {lang && (
-          <span className="absolute right-2 top-1.5 text-[10px] uppercase tracking-[0.14em] text-ink-muted mono pointer-events-none">
+          <span className="absolute left-2 top-1.5 text-[10px] uppercase tracking-[0.14em] text-ink-muted mono pointer-events-none">
             {lang}
           </span>
         )}
         <pre className="mono text-[12.5px] bg-paper text-ink-soft border border-line rounded-[8px] p-3 overflow-x-auto">
           {children}
         </pre>
+        <button
+          type="button"
+          onClick={() => copyCode(extractText(children))}
+          className={cn(
+            "absolute top-1.5 right-1.5 h-6 px-1.5 rounded-[4px] border border-line bg-canvas text-[10px] mono text-ink-muted inline-flex items-center gap-1",
+            "opacity-60 md:opacity-0 md:group-hover:opacity-100 transition-opacity",
+          )}
+          aria-label="Copy code"
+        >
+          <Copy className="w-3 h-3" /> Copy
+        </button>
       </div>
     );
   },
 };
+
+/**
+ * Flatten a React node tree down to its raw text content. Fenced code blocks
+ * render as a single <code> whose children are usually a plain string, but
+ * remark-gfm / plugin variations can wrap spans inside — so we recurse
+ * defensively rather than assuming `children[0]` is a string.
+ */
+function extractText(node: React.ReactNode): string {
+  if (typeof node === "string") return node;
+  if (typeof node === "number") return String(node);
+  if (Array.isArray(node)) return node.map(extractText).join("");
+  if (node && typeof node === "object" && "props" in node) {
+    return extractText(
+      (node as { props: { children?: React.ReactNode } }).props.children,
+    );
+  }
+  return "";
+}
+
+/**
+ * Copy a code block's raw text via the async Clipboard API. We fail loudly
+ * with a toast rather than silently swallowing — matches the existing
+ * MessageActions "Copy failed" convention.
+ */
+function copyCode(text: string): void {
+  const clip = navigator.clipboard;
+  if (!clip || typeof clip.writeText !== "function") {
+    toast("Copy failed");
+    return;
+  }
+  clip.writeText(text).then(
+    () => toast("Copied"),
+    () => toast("Copy failed"),
+  );
+}
 
 /**
  * Dig the `language-xxx` class off the inner <code> node of a <pre>. Falls

@@ -15,12 +15,17 @@ import { cn } from "@/lib/cn";
 export function DiffView({ diff, defaultOpen = false }: { diff: FileDiff; defaultOpen?: boolean }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
-    <div className="rounded-[10px] border border-line bg-canvas overflow-hidden w-full">
+    <div
+      className={cn(
+        "rounded-[10px] border border-line bg-canvas overflow-hidden",
+        open ? "w-full" : "w-fit max-w-full",
+      )}
+    >
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
-        className="w-full flex items-center gap-2 px-3 py-1.5 bg-paper border-b border-line text-left hover:bg-paper/80"
+        className="flex items-center gap-2 px-3 py-1.5 bg-paper border-b border-line text-left hover:bg-paper/80 max-w-full"
       >
         <ChevronRight
           className={cn(

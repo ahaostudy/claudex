@@ -84,6 +84,12 @@ export const Session = z.object({
   // enforced at the route layer (invalid values → 400). Default `[]` for
   // rows created before the column existed.
   tags: z.array(z.string()).default([]),
+  // User-authored pin flag. Pinned sessions sort to the top of the Home list
+  // regardless of activity recency. Backed by migration id=16
+  // (`sessions.pinned INTEGER NOT NULL DEFAULT 0`); flipped via
+  // `PATCH /api/sessions/:id` with `{pinned: boolean}`. Defaults to false so
+  // rows created before the column existed round-trip cleanly.
+  pinned: z.boolean().default(false),
   // aggregate counters, cheap to read
   stats: z.object({
     messages: z.number().int().nonnegative(),
@@ -474,14 +480,18 @@ export const UpdateSessionRequest = z
     // Max 8 tags per session. Each tag is validated by `SessionTag`. Passing
     // an explicit empty array clears all tags.
     tags: z.array(SessionTag).max(8).optional(),
+    // Pin / unpin the session. Pinned sessions sort to the top of Home's
+    // session list regardless of activity.
+    pinned: z.boolean().optional(),
   })
   .refine(
     (v) =>
       v.title !== undefined ||
       v.model !== undefined ||
       v.mode !== undefined ||
-      v.tags !== undefined,
-    { message: "at least one of title, model, mode, or tags is required" },
+      v.tags !== undefined ||
+      v.pinned !== undefined,
+    { message: "at least one of title, model, mode, tags, or pinned is required" },
   );
 export type UpdateSessionRequest = z.infer<typeof UpdateSessionRequest>;
 

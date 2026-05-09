@@ -34,6 +34,7 @@ interface SessionRow {
   stats_context_pct: number;
   cli_jsonl_seq: number;
   tags: string;
+  pinned: number;
 }
 
 function parseTags(raw: string | null | undefined): string[] {
@@ -69,6 +70,7 @@ function toSession(row: SessionRow): Session {
     forkedFromSessionId: row.forked_from_session_id,
     cliJsonlSeq: row.cli_jsonl_seq ?? 0,
     tags: parseTags(row.tags),
+    pinned: row.pinned === 1,
     stats: {
       messages: row.stats_messages,
       filesChanged: row.stats_files_changed,
@@ -114,6 +116,7 @@ export class SessionStore {
     setModel: Statement | null;
     setMode: Statement | null;
     setTags: Statement | null;
+    setPinned: Statement | null;
     setSdkSessionId: Statement | null;
     touchLastMessage: Statement | null;
     forkMaxSeq: Statement | null;
@@ -143,6 +146,7 @@ export class SessionStore {
     setModel: null,
     setMode: null,
     setTags: null,
+    setPinned: null,
     setSdkSessionId: null,
     touchLastMessage: null,
     forkMaxSeq: null,
@@ -235,6 +239,30 @@ export class SessionStore {
     return row ? toSession(row) : null;
   }
 
+  /**
+   * Every session whose status is in `statuses`. Used by the on-boot sweep
+   * in `SessionManager.sweepStuckOnBoot` to locate rows that were active
+   * when the process exited and therefore lost their in-memory watchdog
+   * timer. Ordered by `updated_at DESC` for stable log output.
+   *
+   * Not exposed on the HTTP surface — it's a management primitive only.
+   * Callers pass a non-empty array of status literals; an empty array
+   * short-circuits to `[]` so we don't emit a malformed IN clause.
+   */
+  listByStatuses(statuses: SessionStatus[]): Session[] {
+    if (statuses.length === 0) return [];
+    // Build a parameterized IN clause sized to the input. Can't use
+    // lazyStmt's cache because the arity varies per call; SQLite's prepared
+    // statement parser requires a literal number of `?`.
+    const placeholders = statuses.map(() => "?").join(", ");
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM sessions WHERE status IN (${placeholders}) ORDER BY updated_at DESC`,
+      )
+      .all(...statuses) as SessionRow[];
+    return rows.map(toSession);
+  }
+
   create(input: SessionCreateInput): Session {
     const now = new Date().toISOString();
     const row: SessionRow = {
@@ -260,6 +288,7 @@ export class SessionStore {
       stats_context_pct: 0,
       cli_jsonl_seq: 0,
       tags: "[]",
+      pinned: 0,
     };
     this.lazyStmt(
       "create",
@@ -269,14 +298,14 @@ export class SessionStore {
            parent_session_id, forked_from_session_id,
            stats_messages, stats_files_changed, stats_lines_added,
            stats_lines_removed, stats_context_pct,
-           cli_jsonl_seq, tags
+           cli_jsonl_seq, tags, pinned
          ) VALUES (
            @id, @title, @project_id, @branch, @worktree_path, @status, @model, @mode,
            @created_at, @updated_at, @last_message_at, @archived_at, @sdk_session_id,
            @parent_session_id, @forked_from_session_id,
            @stats_messages, @stats_files_changed, @stats_lines_added,
            @stats_lines_removed, @stats_context_pct,
-           @cli_jsonl_seq, @tags
+           @cli_jsonl_seq, @tags, @pinned
          )`,
     ).run(row);
     this.search.upsertTitle(row.id, row.title);
@@ -332,6 +361,20 @@ export class SessionStore {
       "setTags",
       "UPDATE sessions SET tags = ?, updated_at = ? WHERE id = ?",
     ).run(JSON.stringify(deduped), new Date().toISOString(), id);
+  }
+
+  /**
+   * Pin / unpin a session. Pinned rows sort to the top of Home's list
+   * regardless of activity recency. Idempotent — re-pinning an already-pinned
+   * row still bumps `updated_at` (the route layer checks whether the flag
+   * actually changed before caring about warnings, but the store intentionally
+   * stays dumb).
+   */
+  setPinned(id: string, pinned: boolean): void {
+    this.lazyStmt(
+      "setPinned",
+      "UPDATE sessions SET pinned = ?, updated_at = ? WHERE id = ?",
+    ).run(pinned ? 1 : 0, new Date().toISOString(), id);
   }
 
   /**

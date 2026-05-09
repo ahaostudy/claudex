@@ -19,6 +19,7 @@ import type {
 } from "@claudex/shared";
 import { api, ApiError } from "@/api/client";
 import { AppShell } from "@/components/AppShell";
+import { timeAgoShort } from "@/lib/format";
 import { useFocusReturn } from "@/hooks/useFocusReturn";
 
 /**
@@ -235,7 +236,7 @@ export function QueueScreen() {
 
   return (
     <AppShell tab="queue">
-      <header className="sticky top-0 z-10 bg-canvas/90 backdrop-blur border-b border-line px-5 py-3 flex items-center gap-3">
+      <header className="shrink-0 bg-canvas/90 backdrop-blur border-b border-line px-5 py-3 flex items-center gap-3">
         <div>
           <div className="caps text-ink-muted">Queue</div>
           <h1 className="display text-[1.25rem] leading-tight mt-0.5">Batch</h1>
@@ -571,6 +572,39 @@ function QueueRow({
                 <span>·</span>
                 <span className="mono text-klein">
                   reorder mode — ↑/↓ to move, Esc to exit
+                </span>
+              </>
+            )}
+            {/* Timestamps — always show "queued" for every row (from
+                createdAt). Running/done/cancelled/failed rows also get the
+                matching started / finished caption so the user can tell when
+                a prompt kicked off and how long ago it wrapped up. */}
+            <span>·</span>
+            <span
+              className="mono text-ink-faint"
+              title={new Date(row.createdAt).toLocaleString()}
+            >
+              queued {timeAgoShort(row.createdAt)}
+            </span>
+            {row.startedAt && (
+              <>
+                <span>·</span>
+                <span
+                  className="mono text-ink-faint"
+                  title={new Date(row.startedAt).toLocaleString()}
+                >
+                  started {timeAgoShort(row.startedAt)}
+                </span>
+              </>
+            )}
+            {row.finishedAt && (
+              <>
+                <span>·</span>
+                <span
+                  className="mono text-ink-faint"
+                  title={new Date(row.finishedAt).toLocaleString()}
+                >
+                  finished {timeAgoShort(row.finishedAt)}
                 </span>
               </>
             )}

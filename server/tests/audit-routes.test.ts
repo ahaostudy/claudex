@@ -121,6 +121,59 @@ describe("audit routes", () => {
     expect(body.totalCount).toBe(205);
   });
 
+  it("paginates via the before=<iso> cursor", async () => {
+    // Seed 100 rows with staggered, strictly-increasing createdAt so the
+    // DESC ordering is unambiguous (appending in a tight loop can coin-flip
+    // two rows with the same ms-truncated ISO string). We go straight to the
+    // DB to set created_at explicitly — the public API deliberately stamps
+    // "now" so it can't help us here.
+    const base = Date.UTC(2026, 0, 1, 0, 0, 0);
+    const insert = env.dbh.db.prepare(
+      `INSERT INTO audit_events
+         (id, user_id, event, target, detail, ip, user_agent, created_at)
+       VALUES (?, NULL, 'login', NULL, ?, NULL, NULL, ?)`,
+    );
+    for (let i = 0; i < 100; i += 1) {
+      const ts = new Date(base + i * 1000).toISOString();
+      insert.run(`evt-${String(i).padStart(3, "0")}`, `n=${i}`, ts);
+    }
+
+    // First page: newest 50 (details "n=99" … "n=50").
+    const first = await env.app.inject({
+      method: "GET",
+      url: "/api/audit?limit=50",
+      headers: { cookie: env.cookie },
+    });
+    expect(first.statusCode).toBe(200);
+    const firstBody = first.json();
+    expect(firstBody.events).toHaveLength(50);
+    expect(firstBody.totalCount).toBe(100);
+    expect(firstBody.events[0].detail).toBe("n=99");
+    expect(firstBody.events[49].detail).toBe("n=50");
+
+    // Second page: rows strictly older than the 50th row's createdAt —
+    // "n=49" … "n=0". totalCount stays at 100 (absolute, not page-scoped).
+    const cursor = firstBody.events[49].createdAt as string;
+    const second = await env.app.inject({
+      method: "GET",
+      url: `/api/audit?limit=50&before=${encodeURIComponent(cursor)}`,
+      headers: { cookie: env.cookie },
+    });
+    expect(second.statusCode).toBe(200);
+    const secondBody = second.json();
+    expect(secondBody.events).toHaveLength(50);
+    expect(secondBody.totalCount).toBe(100);
+    expect(secondBody.events[0].detail).toBe("n=49");
+    expect(secondBody.events[49].detail).toBe("n=0");
+    // No overlap with the first page.
+    const firstIds = new Set(
+      (firstBody.events as Array<{ id: string }>).map((e) => e.id),
+    );
+    for (const row of secondBody.events as Array<{ id: string }>) {
+      expect(firstIds.has(row.id)).toBe(false);
+    }
+  });
+
   it("records a password_changed row after a real change-password call", async () => {
     // Drive the actual route rather than calling .append directly — we want
     // to confirm the wire-in in auth/routes.ts fires. bootstrapAuthedApp

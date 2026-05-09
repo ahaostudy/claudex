@@ -438,6 +438,19 @@ const MIGRATIONS: { id: number; name: string; up: string }[] = [
       ALTER TABLE sessions ADD COLUMN tags TEXT NOT NULL DEFAULT '[]';
     `,
   },
+  {
+    id: 16,
+    name: "sessions_pinned",
+    // User-authored pin bit. Pinned rows sort to the top of Home's session
+    // list regardless of activity recency. INTEGER + NOT NULL DEFAULT 0 so
+    // pre-existing rows round-trip cleanly as unpinned. Flipped via
+    // `PATCH /api/sessions/:id` with `{pinned: boolean}`. Not indexed — the
+    // list is already tiny (we have an `updated_at DESC` index from migration
+    // 1 but the pin-first sort happens in JS after the rowset lands).
+    up: `
+      ALTER TABLE sessions ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0;
+    `,
+  },
 ];
 
 export function openDb(config: Config, log: Logger): ClaudexDb {

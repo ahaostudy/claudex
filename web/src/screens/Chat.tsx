@@ -33,6 +33,7 @@ import type {
   SlashClaudexAction,
 } from "@claudex/shared";
 import { cn } from "@/lib/cn";
+import { timeAgoShort } from "@/lib/format";
 import { DiffView, toolCallToDiff } from "@/components/DiffView";
 import { diffForToolCall } from "@/lib/diff";
 import { SessionSettingsSheet } from "@/components/SessionSettingsSheet";
@@ -1156,6 +1157,7 @@ function Piece({
       return (
         <UserBubble
           text={p.text}
+          createdAt={p.createdAt ?? p.at}
           onOpenLightbox={onOpenLightbox}
           editable={
             !!isLastUserMessage &&
@@ -1211,6 +1213,14 @@ function Piece({
               onActionComplete={onClearReveal}
             />
           )}
+          {p.createdAt && (
+            <div
+              className="mono text-[10px] text-ink-faint mt-1"
+              title={new Date(p.createdAt).toLocaleString()}
+            >
+              {timeAgoShort(p.createdAt)}
+            </div>
+          )}
         </div>
       );
     }
@@ -1234,6 +1244,14 @@ function Piece({
             data-event-seq={p.seq}
           >
             <DiffView diff={diff} />
+            {p.createdAt && (
+              <div
+                className="mono text-[10px] text-ink-faint mt-1"
+                title={new Date(p.createdAt).toLocaleString()}
+              >
+                {timeAgoShort(p.createdAt)}
+              </div>
+            )}
           </div>
         );
       }
@@ -1247,6 +1265,14 @@ function Piece({
             verbose={verbose}
             onOpenLightbox={onOpenLightbox}
           />
+          {p.createdAt && (
+            <div
+              className="mono text-[10px] text-ink-faint mt-1"
+              title={new Date(p.createdAt).toLocaleString()}
+            >
+              {timeAgoShort(p.createdAt)}
+            </div>
+          )}
         </div>
       );
     }
@@ -1284,7 +1310,7 @@ function Piece({
     }
     case "permission_request":
       return (
-        <div data-approval-id={p.approvalId}>
+        <div data-approval-id={p.approvalId} className="max-w-full min-w-0">
           <PermissionCard
             approvalId={p.approvalId}
             toolName={p.toolName}
@@ -1294,6 +1320,14 @@ function Piece({
             project={project}
             onDecide={onDecide}
           />
+          {p.createdAt && (
+            <div
+              className="mono text-[10px] text-ink-faint mt-1"
+              title={new Date(p.createdAt).toLocaleString()}
+            >
+              {timeAgoShort(p.createdAt)}
+            </div>
+          )}
         </div>
       );
     case "ask_user_question":
@@ -1641,6 +1675,7 @@ function ToolResultBlock({
 // ---------------------------------------------------------------------------
 function UserBubble({
   text,
+  createdAt,
   onOpenLightbox,
   editable,
   attachmentLock,
@@ -1652,6 +1687,11 @@ function UserBubble({
   onClearReveal,
 }: {
   text: string;
+  /** ISO timestamp of the persisted user_message event. When present, we
+   * render a small muted mono caption BELOW the bubble, right-aligned —
+   * visible on both mobile and desktop. Hover reveals the absolute
+   * timestamp via `title`. */
+  createdAt?: string;
   onOpenLightbox: (images: ImageRef[], index: number) => void;
   /** When true, show a Pencil affordance that opens the inline editor. */
   editable?: boolean;
@@ -1849,6 +1889,14 @@ function UserBubble({
           onActionComplete={onClearReveal}
         />
       )}
+      {createdAt && (
+        <div
+          className="mono text-[10px] text-ink-faint mt-1"
+          title={new Date(createdAt).toLocaleString()}
+        >
+          {timeAgoShort(createdAt)}
+        </div>
+      )}
       {attachmentLock && (
         <div
           className="absolute mt-[52px] -ml-2 hidden md:block text-[11px] text-ink-muted mono"
@@ -1973,7 +2021,7 @@ function PermissionCard({
     <>
       {/* Mobile — bottom-sheet shape */}
       <div
-        className="md:hidden rounded-t-[24px] bg-canvas border-t border-x border-line shadow-lift"
+        className="md:hidden w-full max-w-full min-w-0 rounded-t-[24px] bg-canvas border-t border-x border-line shadow-lift"
         ref={cardRef}
         tabIndex={-1}
       >
@@ -2041,10 +2089,10 @@ function PermissionCard({
             <button
               type="button"
               onClick={() => onDecide(approvalId, "allow_always")}
-              className="w-full h-12 rounded-[8px] bg-canvas border border-line font-medium text-ink flex items-center justify-center gap-2"
+              className="w-full h-12 rounded-[8px] bg-canvas border border-line font-medium text-ink flex items-center justify-center gap-2 px-3 min-w-0 max-w-full"
             >
-              Always allow{" "}
-              <span className="mono text-[12px] text-ink-muted">
+              <span className="shrink-0">Always allow</span>
+              <span className="mono text-[12px] text-ink-muted truncate min-w-0">
                 {alwaysLabel}
               </span>
             </button>
@@ -2160,28 +2208,28 @@ function PermissionCard({
           </div>
         </div>
 
-        <div className="px-6 py-4 border-t border-line flex items-center gap-2">
+        <div className="px-6 py-4 border-t border-line flex items-center gap-2 flex-wrap">
           <button
             type="button"
             onClick={() => onDecide(approvalId, "deny")}
-            className="h-10 px-4 rounded-[8px] border border-line bg-canvas text-danger text-[14px] font-medium"
+            className="h-10 px-4 rounded-[8px] border border-line bg-canvas text-danger text-[14px] font-medium whitespace-nowrap shrink-0"
           >
             Deny
           </button>
           <button
             type="button"
             onClick={() => onDecide(approvalId, "allow_always")}
-            className="h-10 px-4 rounded-[8px] border border-line bg-canvas text-ink text-[14px] font-medium"
+            className="h-10 px-4 rounded-[8px] border border-line bg-canvas text-ink text-[14px] font-medium whitespace-nowrap shrink min-w-0 max-w-full inline-flex items-center gap-1"
           >
-            Always allow{" "}
-            <span className="mono text-[12px] text-ink-muted ml-1">
+            <span>Always allow</span>
+            <span className="mono text-[12px] text-ink-muted truncate">
               {alwaysLabel}
             </span>
           </button>
           <button
             type="button"
             onClick={() => onDecide(approvalId, allowOnceDecision)}
-            className="h-10 px-4 rounded-[8px] bg-ink text-canvas text-[14px] font-medium ml-auto inline-flex items-center gap-1.5"
+            className="h-10 px-4 rounded-[8px] bg-ink text-canvas text-[14px] font-medium ml-auto inline-flex items-center gap-1.5 whitespace-nowrap shrink-0"
           >
             <Check className="w-4 h-4" />
             Allow once

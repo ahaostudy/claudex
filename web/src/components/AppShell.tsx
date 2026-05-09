@@ -94,15 +94,20 @@ export function AppShell({
   );
 
   return (
-    <div className="min-h-[100dvh] bg-canvas flex md:flex-row flex-col">
+    <div className="h-[100dvh] bg-canvas flex md:flex-row flex-col overflow-hidden">
       {/* Desktop sidebar — hidden below md; Chat never renders this because
-          Chat bypasses AppShell entirely. */}
+          Chat bypasses AppShell entirely. Fixed-width column that does not
+          scroll with the content; its own Projects list scrolls internally. */}
       <DesktopSidebar tab={tab} alertCount={alertCount} />
 
-      {/* Main column. The bottom padding on mobile is to keep the tab bar
-          from covering the tail of the content — plus `env(safe-area-inset-
-          bottom)` so the iOS home indicator doesn't eat the last row. */}
-      <main className="flex-1 min-w-0 flex flex-col pb-[calc(58px+env(safe-area-inset-bottom))] md:pb-0">
+      {/* Main column. `min-h-0` + `overflow-hidden` + `flex-col` make this the
+          pass-through flex container whose inner `<section flex-1 min-h-0
+          overflow-y-auto>` becomes the actual scroll surface — so desktop
+          sidebar and mobile bottom tab bar stay fixed while the list scrolls
+          underneath. The bottom padding on mobile is to keep the tab bar from
+          covering the tail of the content — plus `env(safe-area-inset-bottom)`
+          so the iOS home indicator doesn't eat the last row. */}
+      <main className="flex-1 min-w-0 min-h-0 flex flex-col overflow-hidden pb-[calc(58px+env(safe-area-inset-bottom))] md:pb-0">
         {children}
       </main>
 

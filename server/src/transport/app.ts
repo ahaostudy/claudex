@@ -268,6 +268,18 @@ export async function buildApp(
     db: deps.db,
     jwtSecret: deps.jwtSecret,
   });
+  // On-boot sweep over rows stuck in active states. In-memory watchdog
+  // timers don't survive a restart, so any session that was `running` /
+  // `awaiting` when the process exited would otherwise stay that way
+  // forever. Must run AFTER the WS route wires the real broadcaster into
+  // `manager`, otherwise the synthesized `status` / `error` frames get
+  // swallowed by the placeholder broadcast.
+  //
+  // Skipped in test mode — the session-manager tests exercise the sweep
+  // directly against a freshly-constructed manager without the full app.
+  if (process.env.NODE_ENV !== "test") {
+    manager.sweepStuckOnBoot();
+  }
   await registerPtyRoutes(app, {
     db: deps.db,
     jwtSecret: deps.jwtSecret,

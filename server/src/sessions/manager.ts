@@ -11,7 +11,10 @@ import { ToolGrantStore, signatureFor } from "./grants.js";
 import { summarizePermission } from "./permission-summary.js";
 import type { AuditStore } from "../audit/store.js";
 import type { AttachmentStore } from "../uploads/store.js";
-import type { AskUserQuestionAnnotation } from "@claudex/shared";
+import type {
+  AskUserQuestionAnnotation,
+  SessionStatus,
+} from "@claudex/shared";
 
 type Broadcaster = (sessionId: string, event: RunnerEvent) => void;
 
@@ -196,48 +199,123 @@ export class SessionManager {
   constructor(private readonly deps: SessionManagerDeps) {}
 
   /**
+   * On-boot sweep over rows stuck in active states (`running` / `awaiting`).
+   * In-memory watchdog timers don't survive a server restart, so any session
+   * that was active when the process exited would otherwise stay in its
+   * active state forever with no timer to force-transition it.
+   *
+   * Policy per row:
+   *   - `now - updated_at > watchdogMs`  → dead. Flip to `error`, persist a
+   *     watchdog_timeout event, audit `session_watchdog_swept`, broadcast
+   *     error + status.
+   *   - still within the window         → re-arm a watchdog timer for the
+   *     *remaining* time, so it fires at the same wall-clock moment it
+   *     would've on an uninterrupted server.
+   *
+   * Called explicitly by `buildApp` once after the manager is constructed so
+   * tests (which inject a bare manager directly) can run without the sweep
+   * mutating their DB.
+   */
+  sweepStuckOnBoot(): void {
+    const ms = this.watchdogWindowMs();
+    const now = Date.now();
+    const candidates = this.deps.sessions.listByStatuses([
+      "running",
+      "awaiting",
+    ]);
+    for (const row of candidates) {
+      const updatedMs = Date.parse(row.updatedAt);
+      if (!Number.isFinite(updatedMs)) {
+        // Malformed timestamp — treat as stale and flip to error. Better to
+        // show a visible error than leave a row in a permanently-active
+        // state we can't reason about.
+        this.forceWatchdogError(
+          row.id,
+          "boot_sweep_unparseable_updated_at",
+          ms,
+        );
+        continue;
+      }
+      const age = now - updatedMs;
+      if (age > ms) {
+        this.forceWatchdogError(row.id, "boot_sweep_stale", ms, age);
+      } else {
+        // Re-arm for the remaining window so the row doesn't escape
+        // supervision just because of a restart.
+        const remaining = Math.max(1, ms - age);
+        this.armWatchdogFor(row.id, remaining);
+        this.deps.logger?.info?.(
+          { sessionId: row.id, remainingMs: remaining, status: row.status },
+          "session watchdog: re-armed on boot",
+        );
+      }
+    }
+  }
+
+  /**
+   * Route every status mutation through this wrapper so we get a single
+   * place that emits the `session status transition` log line (from / to /
+   * reason). Callers should not invoke `sessions.setStatus` directly.
+   *
+   * Note: `transitionStatus` does NOT broadcast on its own — the
+   * `handleEvent` path already broadcasts the originating RunnerEvent at
+   * the end of the function (which the WS bridge translates to the right
+   * frame), and external callers like the watchdog and force-idle use
+   * `broadcastStatus` or the `error` event directly. Keeps us from
+   * double-broadcasting the same transition.
+   *
+   * Idempotent — re-setting the same status is a no-op (no log) so noisy
+   * callers (e.g. SDK re-emitting `status:running`) don't spam the log.
+   */
+  private transitionStatus(
+    sessionId: string,
+    to: SessionStatus,
+    reason: string,
+  ): void {
+    const current = this.deps.sessions.findById(sessionId);
+    const from = current?.status ?? null;
+    if (from === to) return;
+    this.deps.logger?.info?.(
+      { sessionId, from, to, reason },
+      "session status transition",
+    );
+    try {
+      this.deps.sessions.setStatus(sessionId, to);
+    } catch (err) {
+      this.deps.logger?.debug?.(
+        { err, sessionId, to, reason },
+        "session status transition: setStatus failed",
+      );
+    }
+  }
+
+  /** Resolve the watchdog window, honoring the env override used by tests. */
+  private watchdogWindowMs(): number {
+    const raw = Number(process.env.CLAUDEX_SESSION_WATCHDOG_MS);
+    return Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_SESSION_WATCHDOG_MS;
+  }
+
+  /**
    * Arm (or reset) the silence watchdog for a session. Called whenever we
    * observe runner activity for that sessionId. If the timer fires, we stamp
    * the session as `error` + broadcast a synthesized status so the WS bridge
    * tells every subscribed tab.
    */
   private startWatchdog(sessionId: string): void {
+    this.armWatchdogFor(sessionId, this.watchdogWindowMs());
+  }
+
+  /**
+   * Arm a watchdog timer for this session with an explicit timeout. Used by
+   * both the normal `startWatchdog` path (full window) and the on-boot sweep
+   * (remaining-window re-arm after a restart).
+   */
+  private armWatchdogFor(sessionId: string, ms: number): void {
     this.clearWatchdog(sessionId);
-    const raw = Number(process.env.CLAUDEX_SESSION_WATCHDOG_MS);
-    const ms = Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_SESSION_WATCHDOG_MS;
+    const fullWindow = this.watchdogWindowMs();
     const timer = setTimeout(() => {
       this.watchdogs.delete(sessionId);
-      this.deps.logger?.warn?.(
-        { sessionId, windowMs: ms },
-        "session watchdog: forcing error after silence",
-      );
-      try {
-        this.deps.sessions.setStatus(sessionId, "error");
-      } catch (err) {
-        // The session row may already be gone (deleted). Log + drop.
-        this.deps.logger?.debug?.(
-          { err, sessionId },
-          "session watchdog: setStatus failed",
-        );
-        return;
-      }
-      this.broadcastStatus(sessionId, "idle");
-      this.deps.sessions.appendEvent({
-        sessionId,
-        kind: "error",
-        payload: {
-          code: "watchdog_timeout",
-          message: `Session watchdog fired — no runner activity for ${Math.round(ms / 1000)}s`,
-        },
-      });
-      // Also emit a synthesized `error` runner event so the ws.ts bridge can
-      // translate it to the existing `session_update` / error frame clients
-      // already handle.
-      this.deps.broadcast(sessionId, {
-        type: "error",
-        code: "watchdog_timeout",
-        message: `Session watchdog fired — no runner activity for ${Math.round(ms / 1000)}s`,
-      });
+      this.forceWatchdogError(sessionId, "watchdog_silence", fullWindow);
     }, ms);
     // Don't hold the Node event loop open just for the watchdog; the process
     // should be able to exit cleanly on SIGTERM even if a session has an
@@ -245,6 +323,57 @@ export class SessionManager {
     // their own during normal operation.
     if (typeof timer.unref === "function") timer.unref();
     this.watchdogs.set(sessionId, timer);
+  }
+
+  /**
+   * Force-transition a session to `error` because a watchdog condition was
+   * observed. Used by both the live silence watchdog and the on-boot sweep
+   * (stale row / unparseable timestamp). `reason` goes in the log line and
+   * the persisted error payload so production forensics can tell which path
+   * fired.
+   */
+  private forceWatchdogError(
+    sessionId: string,
+    reason: string,
+    windowMs: number,
+    age?: number,
+  ): void {
+    this.deps.logger?.warn?.(
+      { sessionId, reason, windowMs, age },
+      "session watchdog: forcing error",
+    );
+    const message =
+      age !== undefined
+        ? `Session watchdog fired — row was ${Math.round(age / 1000)}s old past a ${Math.round(windowMs / 1000)}s window`
+        : `Session watchdog fired — no runner activity for ${Math.round(windowMs / 1000)}s`;
+    this.transitionStatus(sessionId, "error", reason);
+    try {
+      this.deps.sessions.appendEvent({
+        sessionId,
+        kind: "error",
+        payload: { code: "watchdog_timeout", message },
+      });
+    } catch (err) {
+      this.deps.logger?.debug?.(
+        { err, sessionId },
+        "session watchdog: appendEvent failed",
+      );
+    }
+    // Synthesize the `error` RunnerEvent so the ws.ts bridge can translate
+    // it to the frame clients already handle.
+    this.deps.broadcast(sessionId, {
+      type: "error",
+      code: "watchdog_timeout",
+      message,
+    });
+    // Audit — boot sweeps especially should leave a visible trail ("we
+    // cleaned up N stuck rows at startup").
+    this.deps.audit?.append({
+      userId: null,
+      event: "session_watchdog_swept",
+      target: sessionId,
+      detail: reason,
+    });
   }
 
   /**
@@ -464,7 +593,7 @@ export class SessionManager {
             toolName: event.toolName,
             input: event.input,
           });
-          this.deps.sessions.setStatus(sessionId, "awaiting");
+          this.transitionStatus(sessionId, "awaiting", "permission_request");
           // Propagate enriched event to subscribers.
           this.deps.broadcast(sessionId, {
             ...event,
@@ -490,7 +619,7 @@ export class SessionManager {
               questions: event.questions,
             },
           });
-          this.deps.sessions.setStatus(sessionId, "awaiting");
+          this.transitionStatus(sessionId, "awaiting", "ask_user_question");
           // Forward the event to the WS layer — ws.ts will translate it into
           // a `ServerAskUserQuestion` frame. Short-circuit the generic
           // broadcast at the bottom of handleEvent so we don't double-send.
@@ -510,7 +639,7 @@ export class SessionManager {
               plan: event.plan,
             },
           });
-          this.deps.sessions.setStatus(sessionId, "awaiting");
+          this.transitionStatus(sessionId, "awaiting", "plan_accept_request");
           this.deps.broadcast(sessionId, event);
           return;
         }
@@ -525,21 +654,21 @@ export class SessionManager {
           });
           this.deps.sessions.bumpStats(sessionId, { messages: 1 });
           this.deps.sessions.touchLastMessage(sessionId);
-          this.deps.sessions.setStatus(sessionId, "idle");
+          this.transitionStatus(sessionId, "idle", "turn_end");
           // Turn wrapped cleanly — cancel the silence watchdog. If a follow-up
           // turn starts, sendUserMessage / status=running will re-arm it.
           this.clearWatchdog(sessionId);
           break;
         case "status":
           if (event.status === "running") {
-            this.deps.sessions.setStatus(sessionId, "running");
+            this.transitionStatus(sessionId, "running", "runner_status_running");
             // Fresh "running" signal → arm (or reset) the silence watchdog.
             this.startWatchdog(sessionId);
           } else if (event.status === "idle") {
-            this.deps.sessions.setStatus(sessionId, "idle");
+            this.transitionStatus(sessionId, "idle", "runner_status_idle");
             this.clearWatchdog(sessionId);
           } else if (event.status === "terminated") {
-            this.deps.sessions.setStatus(sessionId, "idle");
+            this.transitionStatus(sessionId, "idle", "runner_status_terminated");
             this.clearWatchdog(sessionId);
           }
           break;
@@ -549,7 +678,7 @@ export class SessionManager {
             kind: "error",
             payload: { code: event.code, message: event.message },
           });
-          this.deps.sessions.setStatus(sessionId, "error");
+          this.transitionStatus(sessionId, "error", `runner_error:${event.code}`);
           // Runner reported a hard error — no point in keeping the timer
           // armed; the session is already in a terminal-visible state.
           this.clearWatchdog(sessionId);
@@ -766,7 +895,7 @@ export class SessionManager {
       entry.pendingSeed = null;
       await runner.sendUserMessage(seed);
     }
-    this.deps.sessions.setStatus(sessionId, "running");
+    this.transitionStatus(sessionId, "running", "rerun_from_edited_message");
     this.deps.broadcast(sessionId, { type: "refresh_transcript" });
     await runner.sendUserMessage(editedText);
     this.startWatchdog(sessionId);
@@ -845,6 +974,28 @@ export class SessionManager {
   }
 
   /**
+   * Manually drop a session back to `idle`, regardless of its current status.
+   * Used by the `POST /api/sessions/:id/force-idle` escape hatch so a user
+   * staring at a permanently-"running" / errored row can reset it without
+   * creating a new session. Clears any pending watchdog (the row is now idle
+   * — arming a new timer would be wrong), logs the transition, broadcasts
+   * the status so every tab's composer unlocks. Returns `true` if the row
+   * was actually flipped, `false` if it was already idle (no-op) or the
+   * session doesn't exist.
+   */
+  forceIdle(sessionId: string, reason: string): boolean {
+    const row = this.deps.sessions.findById(sessionId);
+    if (!row) return false;
+    if (row.status === "idle") return false;
+    this.clearWatchdog(sessionId);
+    this.transitionStatus(sessionId, "idle", reason);
+    // Tell every subscribed tab to re-render the session row. The WS
+    // bridge translates `status:idle` into a `session_update` frame.
+    this.broadcastStatus(sessionId, "idle");
+    return true;
+  }
+
+  /**
    * Propagate a permission-mode change to the live runner, if any.
    * The caller is expected to have already persisted the new mode to the DB.
    * Returns true when a running runner got the call, false otherwise.
@@ -890,7 +1041,7 @@ export class SessionManager {
       kind: "permission_decision",
       payload: { toolUseId, decision, toolName: pending?.toolName ?? null },
     });
-    this.deps.sessions.setStatus(sessionId, "running");
+    this.transitionStatus(sessionId, "running", `permission_${decision}`);
     // Back to active — re-arm the silence watchdog.
     this.startWatchdog(sessionId);
     // Audit: every permission decision is security-relevant — the user just
@@ -930,7 +1081,7 @@ export class SessionManager {
         ...(annotations ? { annotations } : {}),
       },
     });
-    this.deps.sessions.setStatus(sessionId, "running");
+    this.transitionStatus(sessionId, "running", "ask_user_answer");
     this.startWatchdog(sessionId);
   }
 
@@ -961,7 +1112,7 @@ export class SessionManager {
       kind: "plan_accept_decision",
       payload: { planId, decision },
     });
-    this.deps.sessions.setStatus(sessionId, "running");
+    this.transitionStatus(sessionId, "running", `plan_accept_${decision}`);
     this.startWatchdog(sessionId);
   }
 

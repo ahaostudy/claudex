@@ -128,7 +128,7 @@ export function RoutinesScreen() {
 
   return (
     <AppShell tab="routines">
-      <header className="sticky top-0 z-10 bg-canvas/90 backdrop-blur border-b border-line px-5 py-3 flex items-center gap-3">
+      <header className="shrink-0 bg-canvas/90 backdrop-blur border-b border-line px-5 py-3 flex items-center gap-3">
         <div>
           <div className="caps text-ink-muted">Routines</div>
           <h1 className="display text-[1.25rem] leading-tight mt-0.5">

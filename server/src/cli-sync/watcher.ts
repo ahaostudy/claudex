@@ -217,7 +217,13 @@ async function onNewJsonl(
     // idle; the status heuristic below will upgrade if the file is fresh.
     const derived = await deriveCliStatus(result.session, absPath);
     if (derived !== result.session.status) {
-      deps.sessions.setStatus(result.session.id, derived);
+      logAndSetStatus(
+        deps,
+        result.session.id,
+        result.session.status,
+        derived,
+        "cli_sync_new_jsonl",
+      );
     }
     // Tell subscribed tabs to refetch the transcript (initial events have
     // been seeded) and Home to refresh status.
@@ -294,7 +300,7 @@ async function onExistingChange(
   const fresh = deps.sessions.findById(session.id) ?? session;
   const next = await deriveCliStatus(fresh, absPath);
   if (next !== fresh.status) {
-    deps.sessions.setStatus(session.id, next);
+    logAndSetStatus(deps, session.id, fresh.status, next, "cli_sync_change");
     notifyStatus(deps, session.id, next);
   }
 }
@@ -315,7 +321,7 @@ async function backfillStatuses(
     try {
       const next = await deriveCliStatus(s, absPath);
       if (next !== s.status) {
-        deps.sessions.setStatus(s.id, next);
+        logAndSetStatus(deps, s.id, s.status, next, "cli_sync_backfill");
         notifyStatus(deps, s.id, next);
       }
     } catch (err) {
@@ -600,4 +606,24 @@ function notifyStatus(
   else if (status === "idle") rtStatus = "idle";
   else rtStatus = "idle"; // awaiting/error/archived ride the row itself; we don't synthesize those here
   deps.manager.broadcastStatus(sessionId, rtStatus);
+}
+
+/**
+ * Persist + log a status transition driven by the CLI-sync watcher. Mirrors
+ * the `session status transition` log line the `SessionManager` emits for
+ * runner-driven transitions so a grep across `{ sessionId, from, to, reason }`
+ * surfaces every state change regardless of who triggered it.
+ */
+function logAndSetStatus(
+  deps: CliSyncWatcherDeps,
+  sessionId: string,
+  from: SessionStatus,
+  to: SessionStatus,
+  reason: string,
+): void {
+  deps.logger?.info?.(
+    { sessionId, from, to, reason },
+    "session status transition",
+  );
+  deps.sessions.setStatus(sessionId, to);
 }

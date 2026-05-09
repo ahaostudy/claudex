@@ -20,6 +20,11 @@ export type UIPiece =
       id: string;
       text: string;
       at: string;
+      // ISO timestamp of the persisted event. Mirrors `at` on user
+      // pieces for consistency with other piece kinds, all of which
+      // carry `createdAt` so the Chat + rails can render timestamps
+      // uniformly without caring which kind of piece is in hand.
+      createdAt?: string;
       // Persisted event seq when this piece came off the server. Undefined
       // for optimistic echoes that haven't been acked yet. Used by
       // MessageActions to build permalinks (`#seq-<n>`).
@@ -49,13 +54,14 @@ export type UIPiece =
         size: number;
       }>;
     }
-  | { kind: "assistant_text"; id: string; text: string; seq?: number }
+  | { kind: "assistant_text"; id: string; text: string; seq?: number; createdAt?: string }
   | {
       kind: "tool_use";
       id: string;
       name: string;
       input: Record<string, unknown>;
       seq?: number;
+      createdAt?: string;
     }
   | {
       kind: "tool_result";
@@ -63,8 +69,9 @@ export type UIPiece =
       content: string;
       isError: boolean;
       seq?: number;
+      createdAt?: string;
     }
-  | { kind: "thinking"; text: string; seq?: number }
+  | { kind: "thinking"; text: string; seq?: number; createdAt?: string }
   | {
       kind: "permission_request";
       approvalId: string;
@@ -72,6 +79,7 @@ export type UIPiece =
       input: Record<string, unknown>;
       summary: string;
       seq?: number;
+      createdAt?: string;
     }
   // SDK's AskUserQuestion tool — rendered as an in-transcript multiple-choice
   // card. Distinct from permission_request because it's an interaction, not a
@@ -83,6 +91,7 @@ export type UIPiece =
       askId: string;
       questions: AskUserQuestionItem[];
       seq?: number;
+      createdAt?: string;
       answers?: Record<string, string>;
       annotations?: Record<string, AskUserQuestionAnnotation>;
       answerSeq?: number;
@@ -98,6 +107,7 @@ export type UIPiece =
       planId: string;
       plan: string;
       seq?: number;
+      createdAt?: string;
       decision?: "accept" | "reject";
       decisionSeq?: number;
     }
@@ -210,6 +220,7 @@ function eventToPiece(ev: SessionEvent): UIPiece | null {
         id: ev.id,
         text: String(p.text ?? ""),
         at: ev.createdAt,
+        createdAt: ev.createdAt,
         seq: ev.seq,
         serverAcked: true,
         // Pass attachments straight through from the persisted payload.
@@ -229,9 +240,10 @@ function eventToPiece(ev: SessionEvent): UIPiece | null {
         id: String(p.messageId ?? ev.id),
         text: String(p.text ?? ""),
         seq: ev.seq,
+        createdAt: ev.createdAt,
       };
     case "assistant_thinking":
-      return { kind: "thinking", text: String(p.text ?? ""), seq: ev.seq };
+      return { kind: "thinking", text: String(p.text ?? ""), seq: ev.seq, createdAt: ev.createdAt };
     case "tool_use":
       return {
         kind: "tool_use",
@@ -239,6 +251,7 @@ function eventToPiece(ev: SessionEvent): UIPiece | null {
         name: String(p.name ?? "unknown"),
         input: (p.input as Record<string, unknown>) ?? {},
         seq: ev.seq,
+        createdAt: ev.createdAt,
       };
     case "tool_result":
       return {
@@ -247,6 +260,7 @@ function eventToPiece(ev: SessionEvent): UIPiece | null {
         content: String(p.content ?? ""),
         isError: Boolean(p.isError),
         seq: ev.seq,
+        createdAt: ev.createdAt,
       };
     case "permission_request":
       return {
@@ -256,6 +270,7 @@ function eventToPiece(ev: SessionEvent): UIPiece | null {
         input: (p.input as Record<string, unknown>) ?? {},
         summary: String(p.title ?? ""),
         seq: ev.seq,
+        createdAt: ev.createdAt,
       };
     case "ask_user_question":
       return {
@@ -265,6 +280,7 @@ function eventToPiece(ev: SessionEvent): UIPiece | null {
           ? (p.questions as AskUserQuestionItem[])
           : [],
         seq: ev.seq,
+        createdAt: ev.createdAt,
       };
     case "ask_user_answer":
       // Answers land as a sibling event; we don't render them as a
@@ -278,6 +294,7 @@ function eventToPiece(ev: SessionEvent): UIPiece | null {
         planId: String(p.planId ?? ""),
         plan: String(p.plan ?? ""),
         seq: ev.seq,
+        createdAt: ev.createdAt,
       };
     case "plan_accept_decision":
       // Decisions land as a sibling event; the reducer folds them into the
@@ -575,6 +592,7 @@ export const useSessions = create<SessionState>((set, get) => {
             next[matchIdx] = {
               ...(existing as UIPiece & { kind: "user" }),
               at: frame.createdAt,
+              createdAt: frame.createdAt,
               serverAcked: true,
             };
             return { transcripts: { ...s.transcripts, [sid]: next } };
@@ -587,6 +605,7 @@ export const useSessions = create<SessionState>((set, get) => {
             id: `remote-${ts}`,
             text: frame.content,
             at: frame.createdAt,
+            createdAt: frame.createdAt,
             serverAcked: true,
           };
           const tailIsPending =
@@ -856,10 +875,14 @@ export const useSessions = create<SessionState>((set, get) => {
   sendUserMessage(sessionId, text, attachmentIds) {
     const pendingId = `pending-${Date.now()}`;
     // Per-send nonce for stable de-dupe against the server's echoed
-    // `user_message` broadcast. `crypto.randomUUID` is available in every
-    // browser we target (Safari 15.4+, Chrome 92+) and already shipped in
-    // the rest of the codebase — no extra dep.
-    const echoId = crypto.randomUUID();
+    // `user_message` broadcast. `crypto.randomUUID` is only available in
+    // secure contexts (HTTPS/localhost) — over plain HTTP through frp it's
+    // undefined, so fall back to a time+random composite that's unique
+    // enough for broadcast matching.
+    const echoId =
+      typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+        ? crypto.randomUUID()
+        : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}-${Math.random().toString(36).slice(2, 10)}`;
     // Optimistic local echo + a pending placeholder so the user sees that
     // claude received the message and is thinking. We intentionally do NOT
     // wait for the first WS frame before showing this — the goal is to fill
@@ -874,6 +897,7 @@ export const useSessions = create<SessionState>((set, get) => {
             id: `local-${Date.now()}`,
             text,
             at: new Date().toISOString(),
+            createdAt: new Date().toISOString(),
             serverAcked: false,
             echoId,
           },

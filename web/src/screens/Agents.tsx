@@ -10,6 +10,7 @@ import type {
 import { api, ApiError } from "@/api/client";
 import { AppShell } from "@/components/AppShell";
 import { cn } from "@/lib/cn";
+import { timeAgoShort } from "@/lib/format";
 
 // ---------------------------------------------------------------------------
 // /agents — Subagent monitor.
@@ -114,7 +115,7 @@ export function AgentsScreen() {
 
   return (
     <AppShell tab="agents">
-      <header className="sticky top-0 z-10 bg-canvas/90 backdrop-blur border-b border-line px-5 py-3">
+      <header className="shrink-0 bg-canvas/90 backdrop-blur border-b border-line px-5 py-3">
         <div className="caps text-ink-muted">Subagents</div>
         <h1 className="display text-[1.25rem] leading-tight mt-0.5">
           What claude is delegating.
@@ -290,12 +291,20 @@ function AgentRow({
             )}
           </div>
         </div>
-        <div className="shrink-0 mono text-[12px] text-ink-muted tabular-nums">
-          {row.status === "running"
-            ? "running"
-            : row.durationMs !== null
-              ? formatDurationShort(row.durationMs)
-              : "—"}
+        <div className="shrink-0 mono text-[12px] text-ink-muted tabular-nums text-right">
+          <div>
+            {row.status === "running"
+              ? "running"
+              : row.durationMs !== null
+                ? formatDurationShort(row.durationMs)
+                : "—"}
+          </div>
+          <div
+            className="mono text-[10px] text-ink-faint mt-0.5"
+            title={new Date(row.startedAt).toLocaleString()}
+          >
+            started {timeAgoShort(row.startedAt)}
+          </div>
         </div>
       </button>
       {expanded && (

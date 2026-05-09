@@ -115,6 +115,7 @@ function selectSessions(db: Database.Database): Session[] {
     stats_context_pct: number;
     cli_jsonl_seq: number;
     tags: string;
+    pinned: number;
   }>;
   return rows.map((r) => ({
     id: r.id,
@@ -134,6 +135,7 @@ function selectSessions(db: Database.Database): Session[] {
     forkedFromSessionId: r.forked_from_session_id,
     cliJsonlSeq: r.cli_jsonl_seq ?? 0,
     tags: parseTagsBlob(r.tags),
+    pinned: r.pinned === 1,
     stats: {
       messages: r.stats_messages,
       filesChanged: r.stats_files_changed,

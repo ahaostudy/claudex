@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { Plus, GitBranch, Pencil, Trash2, FolderOpen, Settings2, X, Download, Search, BarChart3 } from "lucide-react";
+import { Plus, GitBranch, Pencil, Pin, Trash2, FolderOpen, Settings2, X, Download, Search, BarChart3 } from "lucide-react";
 import { useAuth } from "@/state/auth";
 import { useSessions } from "@/state/sessions";
 import { api, ApiError } from "@/api/client";
@@ -246,18 +246,32 @@ export function HomeScreen() {
     }
     const sortKey = (s: Session) =>
       Date.parse(s.lastMessageAt ?? s.updatedAt) || 0;
+    // Session-level ordering is pinned-first, then activity-desc. Within
+    // each project group the pinned rows float; at the group level we bucket
+    // groups by whether they contain any pinned session so projects with
+    // pinned work surface above the rest, then break ties on the newest
+    // session's activity.
+    const sessionSort = (a: Session, b: Session) => {
+      const pa = a.pinned ? 1 : 0;
+      const pb = b.pinned ? 1 : 0;
+      if (pa !== pb) return pb - pa;
+      return sortKey(b) - sortKey(a);
+    };
     const out: Array<{ project: Project | null; projectId: string; sessions: Session[] }> = [];
     for (const [projectId, list] of byProject) {
-      list.sort((a, b) => sortKey(b) - sortKey(a));
+      list.sort(sessionSort);
       out.push({
         project: projectLookup.get(projectId) ?? null,
         projectId,
         sessions: list,
       });
     }
-    out.sort(
-      (a, b) => sortKey(b.sessions[0]) - sortKey(a.sessions[0]),
-    );
+    out.sort((a, b) => {
+      const ap = a.sessions.some((s) => s.pinned) ? 1 : 0;
+      const bp = b.sessions.some((s) => s.pinned) ? 1 : 0;
+      if (ap !== bp) return bp - ap;
+      return sortKey(b.sessions[0]) - sortKey(a.sessions[0]);
+    });
     return out;
   }, [sourceSessions, projects, activeFilter, searchQuery, activeTag]);
 
@@ -311,7 +325,7 @@ export function HomeScreen() {
 
   return (
     <AppShell tab="sessions">
-      <header className="sticky top-0 z-10 bg-canvas/90 backdrop-blur border-b border-line px-5 py-3 flex items-center gap-3">
+      <header className="shrink-0 bg-canvas/90 backdrop-blur border-b border-line px-5 py-3 flex items-center gap-3">
         <div>
           <div className="caps text-ink-muted">Sessions</div>
           <h1 className="display text-[1.25rem] md:text-[22px] leading-tight mt-0.5">
@@ -649,6 +663,16 @@ function SessionRow({
   const rel = formatRel(s.lastMessageAt ?? s.updatedAt);
   const branch = s.branch ?? "main";
   const { linesAdded, linesRemoved, filesChanged, contextPct } = s.stats;
+  // "Looks stuck" — session reports `running` but its last activity timestamp
+  // is > 5 min old. Normally the server watchdog catches this; on a recent
+  // restart the in-memory timer can be missing until on-boot sweep fires, so
+  // we surface a subtle `?` badge next to the status dot so the user knows
+  // the row might be lying. The SessionSettingsSheet exposes a "Reset to
+  // idle" link that calls POST /api/sessions/:id/force-idle.
+  const anchorIso = s.lastMessageAt ?? s.updatedAt;
+  const anchorMs = anchorIso ? Date.parse(anchorIso) : Number.NaN;
+  const ageMs = Number.isFinite(anchorMs) ? Date.now() - anchorMs : 0;
+  const looksStuck = s.status === "running" && ageMs > 5 * 60 * 1000;
   // Up to 3 tag chips are rendered next to the title on desktop; mobile has
   // no room. Clicking a chip activates the `?tag=` filter on Home. The
   // chip intercepts the row's <Link> navigation via stopPropagation +
@@ -685,9 +709,24 @@ function SessionRow({
           <span className="text-[11px] caps text-ink-muted">
             {statusPillLabel(s.status)}
           </span>
+          {looksStuck && (
+            <span
+              className="text-[11px] text-ink-faint"
+              aria-label="Running with no activity — session may be stuck"
+              title="Running with no activity — session may be stuck. Open Settings to reset."
+            >
+              ?
+            </span>
+          )}
           <span className="ml-auto text-[11px] text-ink-faint">{rel}</span>
         </div>
         <div className="mt-1 flex items-center gap-2">
+          {s.pinned && (
+            <Pin
+              className="w-3.5 h-3.5 text-klein-ink shrink-0"
+              aria-label="Pinned"
+            />
+          )}
           <div className="text-[15px] font-medium leading-snug truncate flex-1 min-w-0">
             {s.title || "Untitled"}
           </div>
@@ -761,6 +800,12 @@ function SessionRow({
           />
           <div className="min-w-0">
             <div className="flex items-center gap-2">
+              {s.pinned && (
+                <Pin
+                  className="w-3.5 h-3.5 text-klein-ink shrink-0"
+                  aria-label="Pinned"
+                />
+              )}
               <span className="text-[15px] font-medium truncate">
                 {s.title || "Untitled"}
               </span>
@@ -820,6 +865,15 @@ function SessionRow({
                 <span className={cn("h-1.5 w-1.5 rounded-full", dotTone)} />
               )}
               {statusPillLabel(s.status)}
+              {looksStuck && (
+                <span
+                  className="text-ink-faint"
+                  aria-label="Running with no activity — session may be stuck"
+                  title="Running with no activity — session may be stuck. Open Settings to reset."
+                >
+                  ?
+                </span>
+              )}
             </span>
           </div>
           <div className="flex items-center justify-end">

@@ -192,6 +192,18 @@ export const api = {
     // 204 No Content — `request` returns `undefined` for 204 by design.
     return request<void>(`/api/sessions/${id}`, { method: "DELETE" });
   },
+  /**
+   * Escape hatch for sessions stuck in `running` / `error`. The server
+   * normally watchdogs silent runners, but a restart wipes the in-memory
+   * timers; this endpoint lets the user manually bail out a row so the
+   * composer unlocks. Refused with 409 `archived` on archived sessions.
+   */
+  forceIdleSession(id: string) {
+    return request<{ session: Session }>(
+      `/api/sessions/${id}/force-idle`,
+      { method: "POST" },
+    );
+  },
   getSideSession(parentId: string) {
     return request<{ session: Session | null }>(
       `/api/sessions/${parentId}/side`,
@@ -487,12 +499,13 @@ export const api = {
       method: "DELETE",
     });
   },
-  listAudit(opts?: { limit?: number; since?: string; events?: string[] }) {
+  listAudit(opts?: { limit?: number; since?: string; events?: string[]; before?: string }) {
     const qs = new URLSearchParams();
     if (opts?.limit !== undefined) qs.set("limit", String(opts.limit));
     if (opts?.since) qs.set("since", opts.since);
     if (opts?.events && opts.events.length > 0)
       qs.set("events", opts.events.join(","));
+    if (opts?.before) qs.set("before", opts.before);
     const q = qs.toString();
     return request<AuditListResponse>(`/api/audit${q ? `?${q}` : ""}`);
   },

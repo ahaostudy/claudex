@@ -61,6 +61,12 @@ export interface AuditListOpts {
   limit?: number;
   since?: string;
   events?: string[];
+  // ISO cursor for pagination: return rows strictly older than this
+  // createdAt. Caller passes the oldest row's createdAt from the previous
+  // page to get the next page. `totalCount` (via countFiltered) stays
+  // absolute and does not honor `before` — the count describes the filter,
+  // not the current page.
+  before?: string;
 }
 
 // Keep free-form strings from ballooning the table. 140 mirrors the
@@ -147,13 +153,18 @@ export class AuditStore {
    * rendering — we just return rows.
    */
   list(opts: AuditListOpts = {}): AuditRow[] {
-    // Cap at 200 — the UI shows 6 inline and up to 200 in the full-log sheet.
+    // Cap at 200 — the UI shows 6 inline and paginates the Security card via
+    // `before` cursor for anything beyond the first page.
     const limit = Math.max(1, Math.min(opts.limit ?? 50, 200));
     const clauses: string[] = [];
     const params: unknown[] = [];
     if (opts.since) {
       clauses.push("created_at >= ?");
       params.push(opts.since);
+    }
+    if (opts.before) {
+      clauses.push("created_at < ?");
+      params.push(opts.before);
     }
     if (opts.events && opts.events.length > 0) {
       const placeholders = opts.events.map(() => "?").join(",");

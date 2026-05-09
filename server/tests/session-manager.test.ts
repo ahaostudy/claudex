@@ -703,4 +703,112 @@ describe("SessionManager", () => {
       .filter((b) => b.event.type === "error");
     expect(newErrors).toHaveLength(0);
   });
+
+  // ---- Boot sweep ----------------------------------------------------------
+
+  it("sweepStuckOnBoot flips a row whose updated_at is older than the watchdog window to error", async () => {
+    // Default 5-min window — force updated_at 10 min in the past so the
+    // sweep counts the row as dead. Clock math is done in-DB via UPDATE.
+    const s = setupManager();
+    cleanups.push(s.cleanup);
+    // Stamp the seeded session as running with a stale updated_at.
+    const stale = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+    s.sessions.setStatus(s.session.id, "running");
+    (s.manager as unknown as { deps: { sessions: unknown } }).deps;
+    // Direct UPDATE — SessionStore doesn't expose a way to set updated_at.
+    const dbh = (s.sessions as unknown as { db: import("better-sqlite3").Database }).db;
+    dbh.prepare("UPDATE sessions SET updated_at = ? WHERE id = ?").run(
+      stale,
+      s.session.id,
+    );
+
+    s.manager.sweepStuckOnBoot();
+
+    const fresh = s.sessions.findById(s.session.id)!;
+    expect(fresh.status).toBe("error");
+    // A watchdog_timeout error event was appended so the transcript shows why.
+    const errors = s.sessions
+      .listEvents(s.session.id)
+      .filter((e) => e.kind === "error");
+    expect(errors).toHaveLength(1);
+    expect(errors[0].payload).toMatchObject({ code: "watchdog_timeout" });
+    // Synthesized error broadcast fired.
+    const errBroadcasts = s.broadcasts.filter(
+      (b) => b.event.type === "error" && b.sessionId === s.session.id,
+    );
+    expect(errBroadcasts).toHaveLength(1);
+  });
+
+  it("sweepStuckOnBoot re-arms the watchdog for in-window rows for the remaining time", async () => {
+    const prev = process.env.CLAUDEX_SESSION_WATCHDOG_MS;
+    process.env.CLAUDEX_SESSION_WATCHDOG_MS = "2000";
+    vi.useFakeTimers();
+    const s = setupManager();
+    cleanups.push(() => {
+      vi.useRealTimers();
+      if (prev === undefined) delete process.env.CLAUDEX_SESSION_WATCHDOG_MS;
+      else process.env.CLAUDEX_SESSION_WATCHDOG_MS = prev;
+      s.cleanup();
+    });
+    // Seed the row as running with updated_at 1500ms ago — sweep should
+    // re-arm for the remaining ~500ms.
+    s.sessions.setStatus(s.session.id, "running");
+    const inWindow = new Date(Date.now() - 1500).toISOString();
+    const dbh = (s.sessions as unknown as { db: import("better-sqlite3").Database }).db;
+    dbh.prepare("UPDATE sessions SET updated_at = ? WHERE id = ?").run(
+      inWindow,
+      s.session.id,
+    );
+
+    s.manager.sweepStuckOnBoot();
+
+    // Still running right after sweep — re-armed, not force-flipped.
+    expect(s.sessions.findById(s.session.id)!.status).toBe("running");
+    // Advance past the remaining window — timer fires, row flips to error.
+    await vi.advanceTimersByTimeAsync(700);
+    expect(s.sessions.findById(s.session.id)!.status).toBe("error");
+  });
+
+  it("sweepStuckOnBoot is a no-op for idle rows", () => {
+    const s = setupManager();
+    cleanups.push(s.cleanup);
+    // Fresh session is already idle; sweep shouldn't touch it.
+    s.manager.sweepStuckOnBoot();
+    expect(s.sessions.findById(s.session.id)!.status).toBe("idle");
+    // No error broadcasts fired for an idle row.
+    const errs = s.broadcasts.filter((b) => b.event.type === "error");
+    expect(errs).toHaveLength(0);
+  });
+
+  // ---- Force idle ----------------------------------------------------------
+
+  it("forceIdle flips an errored session back to idle and broadcasts", () => {
+    const s = setupManager();
+    cleanups.push(s.cleanup);
+    s.sessions.setStatus(s.session.id, "error");
+    s.broadcasts.length = 0;
+    const flipped = s.manager.forceIdle(s.session.id, "user_forced_idle");
+    expect(flipped).toBe(true);
+    expect(s.sessions.findById(s.session.id)!.status).toBe("idle");
+    const statusBroadcasts = s.broadcasts.filter(
+      (b) =>
+        b.event.type === "status" &&
+        b.sessionId === s.session.id &&
+        (b.event as { status: string }).status === "idle",
+    );
+    expect(statusBroadcasts).toHaveLength(1);
+  });
+
+  it("forceIdle is a no-op on an already-idle session", () => {
+    const s = setupManager();
+    cleanups.push(s.cleanup);
+    const flipped = s.manager.forceIdle(s.session.id, "user_forced_idle");
+    expect(flipped).toBe(false);
+  });
+
+  it("forceIdle returns false for unknown session", () => {
+    const s = setupManager();
+    cleanups.push(s.cleanup);
+    expect(s.manager.forceIdle("bogus", "user_forced_idle")).toBe(false);
+  });
 });

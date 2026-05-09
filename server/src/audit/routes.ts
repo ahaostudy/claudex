@@ -7,12 +7,18 @@ import { AuditStore } from "./store.js";
 // -----------------------------------------------------------------------------
 // Audit routes
 //
-//   GET /api/audit?limit=50&since=<iso>&events=login,password_changed
+//   GET /api/audit?limit=50&since=<iso>&events=login,password_changed&before=<iso>
 //
 // Login-gated. Surfaces an audit snapshot for the Settings → Security tab. The
 // UI composes the human-readable sentence per row from `event` + `target` +
 // `detail` + `userAgent` — this route just returns the raw rows plus a total
 // count so the card can show "N events · past 30 days" honestly.
+//
+// `before` is a pagination cursor — the client passes the oldest row's
+// `createdAt` from the previous page to fetch the next page of older rows.
+// `totalCount` stays absolute (filter-scoped, not page-scoped) so the card
+// header keeps reading "N events · past 30 days" even after the user clicks
+// "Show more".
 // -----------------------------------------------------------------------------
 
 export interface AuditRoutesDeps {
@@ -43,6 +49,7 @@ export async function registerAuditRoutes(
         limit?: string;
         since?: string;
         events?: string;
+        before?: string;
       };
       const rawLimit = q?.limit ? Number(q.limit) : undefined;
       const limit =
@@ -51,7 +58,8 @@ export async function registerAuditRoutes(
           : 50;
       const events = parseEventsParam(q?.events);
       const since = q?.since;
-      const rows = deps.audit.list({ limit, since, events });
+      const before = q?.before;
+      const rows = deps.audit.list({ limit, since, events, before });
 
       // Resolve userIds lazily — most events will share a handful of ids in
       // a single-user deployment, but we still memoize to avoid N lookups for
