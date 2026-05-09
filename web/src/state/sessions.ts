@@ -663,12 +663,15 @@ export const useSessions = create<SessionState>((set, get) => {
         ) {
           notifiedStatus.set(sid, frame.status);
           const title = prevSession.title || "Session";
-          const msg =
-            frame.status === "error"
-              ? `${title} — session error`
-              : `${title} — session finished`;
-          toast(msg);
-          flashTitle();
+          // Normal completions go to the Alerts bucket silently — the
+          // bottom toast was getting noisy when you had multiple runs
+          // finishing in quick succession. Errors still toast + flash
+          // the tab title because they're a real interrupt worth
+          // pulling the user's eye.
+          if (frame.status === "error") {
+            toast(`${title} — session error`);
+            flashTitle();
+          }
           // Also surface this on the Alerts screen as a "recently
           // completed" entry. One slot per session; re-completing
           // overwrites. Cleared when the user opens that session via
