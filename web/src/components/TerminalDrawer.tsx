@@ -51,8 +51,47 @@ export function TerminalDrawer({
     "connecting" | "open" | "closed" | "error"
   >("connecting");
   const [errMsg, setErrMsg] = useState<string | null>(null);
+  const [ctrlArmed, setCtrlArmed] = useState(false);
+  // Show the mobile keybar on touch devices or narrow viewports. Re-evaluate
+  // on orientation / window resize so an iPad going landscape can fall back
+  // to hardware keys if the user attaches one.
+  const [showKeybar, setShowKeybar] = useState<boolean>(() => detectMobile());
+  useEffect(() => {
+    const update = () => setShowKeybar(detectMobile());
+    window.addEventListener("resize", update);
+    return () => window.removeEventListener("resize", update);
+  }, []);
 
   const cwd = session.worktreePath ?? projectPath ?? "(project)";
+
+  // Send a raw byte sequence to the PTY as if the user had typed it. Mirrors
+  // the term.onData path so everything funnels through the same server code.
+  const sendSeq = (seq: string) => {
+    const ws = wsRef.current;
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: "data", data: seq }));
+    }
+    // Return focus to the terminal so the user can keep typing afterwards.
+    termRef.current?.focus();
+  };
+
+  // Handle a "printable" keybar tap. If Ctrl is armed, translate to the
+  // corresponding control byte (Ctrl+a = 0x01, Ctrl+z = 0x1a, Ctrl+[ = 0x1b,
+  // Ctrl+c = 0x03, …). Otherwise send the character as-is.
+  const tapPrintable = (ch: string) => {
+    if (ctrlArmed) {
+      const code = ch.toUpperCase().charCodeAt(0) - 64;
+      if (code >= 0 && code <= 31) {
+        sendSeq(String.fromCharCode(code));
+      } else {
+        // Not a control-mappable char; fall back to the literal.
+        sendSeq(ch);
+      }
+      setCtrlArmed(false);
+      return;
+    }
+    sendSeq(ch);
+  };
 
   useEffect(() => {
     const host = hostRef.current;
@@ -65,6 +104,10 @@ export function TerminalDrawer({
       lineHeight: 1.25,
       cursorBlink: true,
       convertEol: true,
+      // Desktop-only improvement: let Option-x on macOS emit Meta-x so vim
+      // M-combos work. Harmless on mobile (no Option key).
+      macOptionIsMeta: true,
+      allowProposedApi: false,
       // Match the app's light palette (see web/tailwind.config / globals.css).
       // background == canvas, foreground == ink, cursor == klein.
       theme: {
@@ -119,6 +162,24 @@ export function TerminalDrawer({
       // might not actually pop the keyboard until the user taps — that's
       // expected.
       requestAnimationFrame(() => term.focus());
+      // Send an explicit resize frame right after open. On iOS the
+      // ResizeObserver doesn't always fire until user interaction, which
+      // leaves vim/less reading the initial ioctl geometry from the query
+      // string only — and if the drawer animates in, that geometry can be
+      // stale. Re-fit and publish the true terminal size so TUIs lay out
+      // correctly from the first frame.
+      try {
+        fit.fit();
+      } catch {
+        /* host may not be laid out yet; ResizeObserver will retry */
+      }
+      const cols = term.cols || initialCols;
+      const rows = term.rows || initialRows;
+      try {
+        ws.send(JSON.stringify({ type: "resize", cols, rows }));
+      } catch {
+        /* ignore */
+      }
     };
     ws.onmessage = (ev) => {
       let frame: { type?: string; data?: unknown; code?: string; message?: string; exitCode?: number };
@@ -274,6 +335,49 @@ export function TerminalDrawer({
             onClick={() => termRef.current?.focus()}
           />
         </div>
+        {showKeybar && (
+          <MobileKeybar
+            ctrlArmed={ctrlArmed}
+            onToggleCtrl={() => setCtrlArmed((v) => !v)}
+            onEsc={() => {
+              // Esc is also a natural "cancel Ctrl" signal.
+              sendSeq("\x1b");
+              setCtrlArmed(false);
+            }}
+            onTab={() => sendSeq("\t")}
+            onColon={() => tapPrintable(":")}
+            onSlash={() => tapPrintable("/")}
+            onQuestion={() => tapPrintable("?")}
+            onArrow={(dir) => {
+              const map = {
+                up: "\x1b[A",
+                down: "\x1b[B",
+                right: "\x1b[C",
+                left: "\x1b[D",
+              } as const;
+              sendSeq(map[dir]);
+              setCtrlArmed(false);
+            }}
+            onCtrlLetter={(letter) => {
+              // Explicit Ctrl+<letter> tap when the sticky toggle feels clunky.
+              const code = letter.toUpperCase().charCodeAt(0) - 64;
+              if (code >= 0 && code <= 31) {
+                sendSeq(String.fromCharCode(code));
+              }
+              setCtrlArmed(false);
+            }}
+            onSaveQuit={() => {
+              // Esc + :wq + CR — a common "get me out" sequence. Sent as one
+              // stream so vim sees a clean command line.
+              sendSeq("\x1b:wq\r");
+              setCtrlArmed(false);
+            }}
+            onEnter={() => {
+              sendSeq("\r");
+              setCtrlArmed(false);
+            }}
+          />
+        )}
       </aside>
     </div>
   );
@@ -292,4 +396,131 @@ function buildWsUrl(
     rows: String(rows),
   });
   return `${proto}//${loc.host}/pty?${params.toString()}`;
+}
+
+// Touch device OR narrow viewport counts as mobile. We show the keybar there
+// because iOS/Android soft keyboards don't expose Esc, arrows, Ctrl, etc.
+function detectMobile(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    if (window.matchMedia("(pointer: coarse)").matches) return true;
+  } catch {
+    /* older browsers — fall through to viewport check */
+  }
+  return window.innerWidth < 768;
+}
+
+/**
+ * A single-row, horizontally scrollable keybar for keys that the iOS/Android
+ * soft keyboard doesn't surface. Minimal by design — the goal is "vim is
+ * usable on a phone", not "replicate a full keyboard".
+ *
+ * Ctrl is a sticky modifier: tap Ctrl, then the next C/D/Z/etc. is translated
+ * to the corresponding control byte by the parent's tapPrintable().
+ */
+function MobileKeybar({
+  ctrlArmed,
+  onToggleCtrl,
+  onEsc,
+  onTab,
+  onColon,
+  onSlash,
+  onQuestion,
+  onArrow,
+  onCtrlLetter,
+  onSaveQuit,
+  onEnter,
+}: {
+  ctrlArmed: boolean;
+  onToggleCtrl: () => void;
+  onEsc: () => void;
+  onTab: () => void;
+  onColon: () => void;
+  onSlash: () => void;
+  onQuestion: () => void;
+  onArrow: (dir: "up" | "down" | "left" | "right") => void;
+  onCtrlLetter: (letter: string) => void;
+  onSaveQuit: () => void;
+  onEnter: () => void;
+}) {
+  const keyBase =
+    "mono text-[12px] h-9 min-w-9 px-2 rounded-[6px] border border-line bg-paper text-ink active:bg-line/60 flex items-center justify-center shrink-0 select-none";
+  return (
+    <div
+      // Keep taps from stealing focus from the xterm textarea (so the keybar
+      // buttons don't dismiss the iOS keyboard between presses). The actual
+      // send path re-focuses the terminal anyway.
+      onMouseDown={(e) => e.preventDefault()}
+      onTouchStart={(e) => {
+        // Allow scroll in the bar itself, but prevent focus loss on taps.
+        const t = e.target as HTMLElement;
+        if (t.tagName === "BUTTON") e.preventDefault();
+      }}
+      className="shrink-0 border-t border-line bg-canvas/95 backdrop-blur px-2 py-1.5 flex items-center gap-1.5 overflow-x-auto"
+      role="toolbar"
+      aria-label="Terminal keybar"
+    >
+      <button type="button" className={keyBase} onClick={onEsc} aria-label="Escape">
+        Esc
+      </button>
+      <button type="button" className={keyBase} onClick={onTab} aria-label="Tab">
+        Tab
+      </button>
+      <button
+        type="button"
+        className={cn(
+          keyBase,
+          ctrlArmed && "bg-klein text-white border-klein",
+        )}
+        onClick={onToggleCtrl}
+        aria-pressed={ctrlArmed}
+        aria-label="Control (sticky)"
+        title="Tap, then tap a letter to send Ctrl+letter"
+      >
+        Ctrl
+      </button>
+      <button type="button" className={keyBase} onClick={() => onCtrlLetter("c")} aria-label="Control C">
+        ^C
+      </button>
+      <button type="button" className={keyBase} onClick={() => onCtrlLetter("d")} aria-label="Control D">
+        ^D
+      </button>
+      <span className="w-px h-5 bg-line shrink-0" aria-hidden />
+      <button type="button" className={keyBase} onClick={onColon} aria-label="Colon">
+        :
+      </button>
+      <button type="button" className={keyBase} onClick={onSlash} aria-label="Slash">
+        /
+      </button>
+      <button type="button" className={keyBase} onClick={onQuestion} aria-label="Question mark">
+        ?
+      </button>
+      <span className="w-px h-5 bg-line shrink-0" aria-hidden />
+      <button type="button" className={keyBase} onClick={() => onArrow("left")} aria-label="Left arrow">
+        ←
+      </button>
+      <button type="button" className={keyBase} onClick={() => onArrow("down")} aria-label="Down arrow">
+        ↓
+      </button>
+      <button type="button" className={keyBase} onClick={() => onArrow("up")} aria-label="Up arrow">
+        ↑
+      </button>
+      <button type="button" className={keyBase} onClick={() => onArrow("right")} aria-label="Right arrow">
+        →
+      </button>
+      <span className="w-px h-5 bg-line shrink-0" aria-hidden />
+      <button type="button" className={keyBase} onClick={onEnter} aria-label="Enter">
+        ↵
+      </button>
+      <button
+        type="button"
+        className={keyBase}
+        onClick={onSaveQuit}
+        aria-label="Escape, then :wq, then Enter"
+        title="vim: save and quit"
+      >
+        Esc:wq↵
+      </button>
+    </div>
+  );
 }
