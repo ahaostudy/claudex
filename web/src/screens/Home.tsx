@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { Plus, GitBranch, Pencil, Pin, Trash2, FolderOpen, Settings2, X, Download, Search, BarChart3 } from "lucide-react";
+import { Plus, GitBranch, Pencil, Pin, Trash2, FolderOpen, Settings2, X, Download, Search, BarChart3, MoreHorizontal } from "lucide-react";
 import { useAuth } from "@/state/auth";
 import { useSessions } from "@/state/sessions";
 import { api, ApiError } from "@/api/client";
@@ -353,7 +353,7 @@ export function HomeScreen() {
             ⌘K
           </span>
         </button>
-        <div className="ml-auto flex items-center gap-2">
+        <div className="ml-auto flex items-center gap-2 min-w-0">
           {/* Mobile-only full-text search trigger. Desktop uses the inline
               input above (which also carries the ⌘K hint); on touch there's
               no keyboard shortcut, so an explicit tappable icon is the only
@@ -363,15 +363,18 @@ export function HomeScreen() {
             onClick={() => setShowSearchSheet(true)}
             aria-label="Search"
             title="Search"
-            className="md:hidden h-9 w-9 rounded-[8px] border border-line bg-canvas flex items-center justify-center hover:bg-paper"
+            className="md:hidden h-9 w-9 rounded-[8px] border border-line bg-canvas flex items-center justify-center hover:bg-paper shrink-0"
           >
             <Search className="w-4 h-4 text-ink-soft" />
           </button>
+          {/* Desktop keeps all three utilities visible. Mobile collapses
+              Import / Stats / Projects into the overflow menu below so the
+              New-session primary action is never clipped off-screen. */}
           <button
             onClick={() => setShowImport(true)}
             title="Import existing CLI sessions"
             aria-label="Import CLI sessions"
-            className="h-9 w-9 rounded-[8px] border border-line bg-canvas flex items-center justify-center hover:bg-paper"
+            className="hidden md:flex h-9 w-9 rounded-[8px] border border-line bg-canvas items-center justify-center hover:bg-paper shrink-0"
           >
             <Download className="w-4 h-4 text-ink-soft" />
           </button>
@@ -379,20 +382,28 @@ export function HomeScreen() {
             onClick={() => setShowStats(true)}
             title="Statistics"
             aria-label="Statistics"
-            className="h-9 w-9 rounded-[8px] border border-line bg-canvas flex items-center justify-center hover:bg-paper"
+            className="hidden md:flex h-9 w-9 rounded-[8px] border border-line bg-canvas items-center justify-center hover:bg-paper shrink-0"
           >
             <BarChart3 className="w-4 h-4 text-ink-soft" />
           </button>
           <button
             onClick={() => setShowProjects(true)}
             title="Manage projects"
-            className="h-9 w-9 rounded-[8px] border border-line bg-canvas flex items-center justify-center hover:bg-paper"
+            className="hidden md:flex h-9 w-9 rounded-[8px] border border-line bg-canvas items-center justify-center hover:bg-paper shrink-0"
           >
             <Settings2 className="w-4 h-4 text-ink-soft" />
           </button>
+          {/* Mobile overflow menu — Import / Stats / Projects live here so
+              the header fits on a 390px viewport without pushing the
+              primary "New" button off-screen. */}
+          <HeaderOverflowMenu
+            onImport={() => setShowImport(true)}
+            onStats={() => setShowStats(true)}
+            onProjects={() => setShowProjects(true)}
+          />
           <button
             onClick={() => setShowNew(true)}
-            className="inline-flex items-center gap-1.5 h-9 px-3 rounded-[8px] bg-klein text-canvas text-[13px] font-medium shadow-card"
+            className="inline-flex items-center gap-1.5 h-9 px-3 rounded-[8px] bg-klein text-canvas text-[13px] font-medium shadow-card shrink-0"
           >
             <Plus className="w-4 h-4" />
             <span className="hidden sm:inline">New session</span>
@@ -535,6 +546,89 @@ export function HomeScreen() {
       )}
       {showStats && <StatsSheet onClose={() => setShowStats(false)} />}
     </AppShell>
+  );
+}
+
+// Mobile overflow menu used by the Home header — collapses Import / Stats /
+// Projects into a single `⋯` button so the New-session primary action
+// always fits on a 390px viewport. Hidden on desktop (md:hidden).
+function HeaderOverflowMenu({
+  onImport,
+  onStats,
+  onProjects,
+}: {
+  onImport: () => void;
+  onStats: () => void;
+  onProjects: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (ev: MouseEvent) => {
+      if (ref.current && !ref.current.contains(ev.target as Node)) {
+        setOpen(false);
+      }
+    };
+    const onKey = (ev: KeyboardEvent) => {
+      if (ev.key === "Escape") setOpen(false);
+    };
+    window.addEventListener("mousedown", onDoc);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", onDoc);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+  const pick = (fn: () => void) => {
+    setOpen(false);
+    fn();
+  };
+  return (
+    <div ref={ref} className="relative md:hidden shrink-0">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-label="More actions"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        title="More"
+        className="h-9 w-9 rounded-[8px] border border-line bg-canvas flex items-center justify-center hover:bg-paper"
+      >
+        <MoreHorizontal className="w-4 h-4 text-ink-soft" />
+      </button>
+      {open && (
+        <div
+          role="menu"
+          className="absolute right-0 mt-1.5 z-30 w-[180px] rounded-[10px] border border-line bg-canvas shadow-lift p-1"
+        >
+          <button
+            role="menuitem"
+            onClick={() => pick(onImport)}
+            className="w-full flex items-center gap-2 px-2 py-1.5 rounded-[6px] text-left text-[13px] text-ink-soft hover:bg-paper/60"
+          >
+            <Download className="w-3.5 h-3.5 text-ink-soft" />
+            Import sessions
+          </button>
+          <button
+            role="menuitem"
+            onClick={() => pick(onStats)}
+            className="w-full flex items-center gap-2 px-2 py-1.5 rounded-[6px] text-left text-[13px] text-ink-soft hover:bg-paper/60"
+          >
+            <BarChart3 className="w-3.5 h-3.5 text-ink-soft" />
+            Statistics
+          </button>
+          <button
+            role="menuitem"
+            onClick={() => pick(onProjects)}
+            className="w-full flex items-center gap-2 px-2 py-1.5 rounded-[6px] text-left text-[13px] text-ink-soft hover:bg-paper/60"
+          >
+            <Settings2 className="w-3.5 h-3.5 text-ink-soft" />
+            Manage projects
+          </button>
+        </div>
+      )}
+    </div>
   );
 }
 

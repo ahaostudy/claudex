@@ -2105,32 +2105,45 @@ function PermissionCard({
             </div>
           </div>
 
-          {/* Actions — stacked on mobile */}
-          <div className="mt-4 space-y-2">
-            <button
-              type="button"
-              onClick={() => onDecide(approvalId, "allow_once")}
-              className="w-full h-12 rounded-[8px] bg-ink text-canvas font-medium flex items-center justify-center gap-2"
-            >
-              <Check className="w-4 h-4" />
-              Allow once
-            </button>
-            <button
-              type="button"
-              onClick={() => onDecide(approvalId, "allow_always")}
-              className="w-full h-12 rounded-[8px] bg-canvas border border-line font-medium text-ink flex items-center justify-center gap-2 px-3 min-w-0 max-w-full"
-            >
-              <span className="shrink-0">Always allow</span>
-              <span className="mono text-[12px] text-ink-muted truncate min-w-0">
+          {/* Remember toggle — mirrors the desktop card so the primary
+              action can upgrade to "Always allow" without needing a
+              separate button. Upgrades `allow_once` → `allow_always` at
+              decision time via allowOnceDecision. */}
+          <label className="mt-4 flex items-center gap-2 text-[13px] select-none">
+            <span className="h-4 w-4 rounded-[4px] border border-line-strong bg-canvas flex items-center justify-center shrink-0">
+              {remember && <span className="h-2 w-2 bg-klein rounded-[1px]" />}
+            </span>
+            <input
+              type="checkbox"
+              className="sr-only"
+              checked={remember}
+              onChange={(e) => setRemember(e.target.checked)}
+            />
+            <span className="flex-1 min-w-0">
+              Remember{" "}
+              <span className="mono text-[12px] text-ink-muted truncate">
                 {alwaysLabel}
               </span>
-            </button>
+            </span>
+          </label>
+
+          {/* Actions — Deny + primary on one row, primary upgrades to
+              Always allow when the remember checkbox is set. */}
+          <div className="mt-3 flex items-center gap-2">
             <button
               type="button"
               onClick={() => onDecide(approvalId, "deny")}
-              className="w-full h-12 rounded-[8px] bg-canvas border border-line font-medium text-danger"
+              className="h-12 px-4 rounded-[8px] bg-canvas border border-line font-medium text-danger whitespace-nowrap shrink-0"
             >
               Deny
+            </button>
+            <button
+              type="button"
+              onClick={() => onDecide(approvalId, allowOnceDecision)}
+              className="flex-1 min-w-0 h-12 rounded-[8px] bg-ink text-canvas font-medium flex items-center justify-center gap-2 whitespace-nowrap"
+            >
+              <Check className="w-4 h-4" />
+              {remember ? "Always allow" : "Allow once"}
             </button>
           </div>
           <div className="mt-3 text-[11px] text-ink-muted flex items-center justify-between">
@@ -2249,21 +2262,11 @@ function PermissionCard({
           </button>
           <button
             type="button"
-            onClick={() => onDecide(approvalId, "allow_always")}
-            className="h-10 px-3 rounded-[8px] border border-line bg-canvas text-ink text-[14px] font-medium flex-1 min-w-0 inline-flex items-center gap-1 justify-center"
-          >
-            <span className="shrink-0 whitespace-nowrap">Always allow</span>
-            <span className="mono text-[12px] text-ink-muted truncate min-w-0">
-              {alwaysLabel}
-            </span>
-          </button>
-          <button
-            type="button"
             onClick={() => onDecide(approvalId, allowOnceDecision)}
-            className="h-10 px-4 rounded-[8px] bg-ink text-canvas text-[14px] font-medium inline-flex items-center gap-1.5 whitespace-nowrap shrink-0"
+            className="h-10 px-4 rounded-[8px] bg-ink text-canvas text-[14px] font-medium ml-auto inline-flex items-center gap-1.5 whitespace-nowrap shrink-0"
           >
             <Check className="w-4 h-4" />
-            Allow once
+            {remember ? "Always allow" : "Allow once"}
             <kbd className="ml-1 mono text-[11px] px-1 py-0.5 rounded border border-canvas/20 text-canvas/70">
               ⏎
             </kbd>
