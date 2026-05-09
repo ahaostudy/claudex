@@ -998,7 +998,8 @@ export class SessionManager {
       | "terminated"
       | "starting"
       | "awaiting"
-      | "error",
+      | "error"
+      | "cli_running",
   ): void {
     this.deps.broadcast(sessionId, { type: "status", status });
   }

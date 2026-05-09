@@ -41,6 +41,19 @@ export function decodeSlug(slug: string): string {
 }
 
 /**
+ * Encode an absolute cwd into the CLI's slug convention: every `/` becomes
+ * `-`, so `/Users/hao/Code/foo` becomes `-Users-hao-Code-foo`. Inverse of
+ * `decodeSlug`. Lossy in the same way the CLI is: real `-` in directory
+ * names will collide with the separator. Returns the input unchanged if it
+ * isn't an absolute path (defensive — callers should pass cwds that came
+ * from `lsof -p <pid> -d cwd` or similar).
+ */
+export function encodeCwdToSlug(cwd: string): string {
+  if (!cwd.startsWith("/")) return cwd;
+  return cwd.split("/").join("-");
+}
+
+/**
  * Enumerate every CLI session jsonl under `root` and return summaries. The
  * directory is usually small (dozens of cwds, tens of sessions each) so
  * doing this synchronously-ish is fine; we still stream-read each file to

@@ -518,6 +518,7 @@ export function ChatScreen() {
   const statusDot = cn(
     "h-2 w-2 rounded-full shrink-0",
     session?.status === "running" && "bg-success animate-pulse",
+    session?.status === "cli_running" && "bg-klein animate-pulse",
     session?.status === "awaiting" && "bg-warn",
     session?.status === "idle" && "bg-ink-faint",
     session?.status === "archived" && "bg-line-strong",
@@ -3803,6 +3804,8 @@ function outcomeFor(session: Session | null): string {
   switch (session.status) {
     case "running":
       return "Session in progress.";
+    case "cli_running":
+      return "External `claude` CLI is running for this session.";
     case "awaiting":
       return "Waiting on you — permission or reply required.";
     case "idle":

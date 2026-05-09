@@ -44,6 +44,11 @@ function shouldNotifyCompletion(
   // `running` is a start-of-turn transition.
   if (next !== "idle" && next !== "error") return false;
   if (prev === next) return false;
+  // `cli_running` is a purely external-process observation; when it flips
+  // back to idle the user's SDK-side turn was already over before it ever
+  // entered cli_running, so treating the demotion as a "session finished"
+  // would spam the user every time their external `claude` CLI exits.
+  if (prev === "cli_running") return false;
   return true;
 }
 

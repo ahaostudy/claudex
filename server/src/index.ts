@@ -8,6 +8,10 @@ import { ProjectStore } from "./sessions/projects.js";
 import { backfillSessionTitles } from "./sessions/backfill-titles.js";
 import { loadOrCreateVapidKeys } from "./push/vapid.js";
 import { startCliSyncWatcher, type CliSyncWatcher } from "./cli-sync/watcher.js";
+import {
+  startProcessScanner,
+  type ProcessScanner,
+} from "./cli-sync/process-scanner.js";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -46,12 +50,14 @@ async function main() {
   // Declared ahead of `shutdown` so the closure below can `.close()` it.
   // Assignment happens a few lines down, after the scheduler block.
   let cliSync: CliSyncWatcher | null = null;
+  let cliProcScanner: ProcessScanner | null = null;
 
   const shutdown = async (signal: string) => {
     log.info({ signal }, "shutting down");
     try {
       scheduler.dispose();
       if (cliSync) await cliSync.close();
+      if (cliProcScanner) cliProcScanner.stop();
       await manager.disposeAll();
       await app.close();
     } finally {
@@ -87,6 +93,32 @@ async function main() {
       });
     } catch (err) {
       log.error({ err }, "failed to start cli-sync watcher");
+    }
+  }
+
+  // CLI process scanner — every 5s, walk `ps` + `lsof` to find live `claude`
+  // CLI processes and flip idle claudex rows to `cli_running` when there's
+  // a live external process attached to the same SDK session. Pure
+  // observability — composer is NOT locked by this status. Disabled in
+  // tests and under the same `CLAUDEX_WATCH_CLI=0` kill switch as the
+  // watcher.
+  if (
+    process.env.NODE_ENV !== "test" &&
+    process.env.CLAUDEX_WATCH_CLI !== "0"
+  ) {
+    try {
+      cliProcScanner = startProcessScanner({
+        sessions: new SessionStore(db),
+        manager,
+        logger: log as unknown as {
+          debug?: (obj: unknown, msg?: string) => void;
+          info?: (obj: unknown, msg?: string) => void;
+          warn?: (obj: unknown, msg?: string) => void;
+        },
+      });
+      log.info("cli process scanner started");
+    } catch (err) {
+      log.error({ err }, "failed to start cli process scanner");
     }
   }
 

@@ -310,6 +310,13 @@ async function onExistingChange(
   if (deps.manager.hasRunner(session.id)) return;
 
   const fresh = deps.sessions.findById(session.id) ?? session;
+  // `cli_running` is owned by the process scanner — the JSONL-heuristic has
+  // no visibility into whether the external CLI is still alive, so leave
+  // the row alone and let the scanner demote it back to idle when the
+  // process dies. Without this guard, a stale mtime on the JSONL would
+  // flip the row back to idle here before the next scanner tick could
+  // re-promote it, producing a flapping dot on the UI.
+  if (fresh.status === "cli_running") return;
   const next = await deriveCliStatus(fresh, absPath);
   if (next !== fresh.status) {
     logAndSetStatus(deps, session.id, fresh.status, next, "cli_sync_change");
@@ -332,6 +339,11 @@ async function backfillStatuses(
     // `onExistingChange` skips — the AgentRunner is the source of truth and
     // the JSONL heuristic can't produce `awaiting`, so it would clobber.
     if (deps.manager.hasRunner(s.id)) continue;
+    // `cli_running` is owned by the CLI process scanner (see
+    // cli-sync/process-scanner.ts). The JSONL heuristic below only produces
+    // `idle` / `running` and would clobber it on boot; leave it alone so
+    // the scanner's next tick is authoritative.
+    if (s.status === "cli_running") continue;
     const absPath = await locateJsonl(root, s.sdkSessionId);
     if (!absPath) continue;
     try {

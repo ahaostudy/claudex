@@ -334,6 +334,7 @@ function SessionRow({
   const dotTone = cn(
     "h-1.5 w-1.5 rounded-full shrink-0",
     session.status === "running" && "bg-success animate-pulse",
+    session.status === "cli_running" && "bg-klein animate-pulse",
     session.status === "awaiting" && "bg-warn",
     session.status === "idle" && "bg-ink-faint",
     session.status === "error" && "bg-danger",

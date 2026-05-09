@@ -22,7 +22,16 @@ export type ModelId = z.infer<typeof ModelId>;
 
 export const SessionStatus = z.enum([
   "idle", // no turn in progress
-  "running", // claude is working
+  "running", // claude is working (driven by claudex's SDK runner)
+  // An external `claude` CLI process is currently alive for this session
+  // (detected via `ps` + cwd → jsonl mapping in
+  // `server/src/cli-sync/process-scanner.ts`). The claudex composer is NOT
+  // locked in this state — the user can still submit a message; this status
+  // is purely an observability signal that a CLI terminal may be typing into
+  // the same JSONL. Only sessions currently `idle` are eligible for
+  // promotion; when the external process exits the scanner flips the row
+  // back to `idle`. Never set by the SDK runner.
+  "cli_running",
   "awaiting", // waiting on user (permission / input)
   "archived", // closed, read-only
   "error", // terminal error state

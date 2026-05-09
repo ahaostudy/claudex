@@ -16,8 +16,12 @@ import { useFocusReturn } from "@/hooks/useFocusReturn";
 
 // Status dot colors for the flat row layout. `running` and `awaiting` get a
 // soft glow ring (box-shadow) to match the mockup (s-02 lines 513, 533).
+// `cli_running` uses the klein tone so it's visually distinct from `running`
+// (SDK-driven) — signals "external `claude` CLI process is alive against
+// this session" without implying claudex's composer is busy.
 const STATUS_DOT: Record<string, string> = {
   running: "bg-success",
+  cli_running: "bg-klein",
   awaiting: "bg-warn",
   idle: "bg-ink-faint",
   archived: "bg-line-strong",
@@ -25,6 +29,7 @@ const STATUS_DOT: Record<string, string> = {
 };
 const DOT_GLOW: Record<string, string> = {
   running: "0 0 0 4px rgba(63,145,66,0.18)",
+  cli_running: "0 0 0 4px rgba(204,120,92,0.22)",
   awaiting: "0 0 0 4px rgba(217,119,6,0.18)",
   idle: "",
   archived: "",
@@ -683,6 +688,8 @@ function statusPillClass(status: string): string {
   switch (status) {
     case "running":
       return "border border-success/30 bg-success-wash text-[#1f5f21]";
+    case "cli_running":
+      return "border border-klein/30 bg-klein-wash text-klein-ink";
     case "awaiting":
       return "border border-warn/30 bg-warn-wash text-[#7a4700]";
     case "error":
@@ -695,6 +702,7 @@ function statusPillClass(status: string): string {
 }
 function statusPillLabel(status: string): string {
   if (status === "awaiting") return "NEEDS YOU";
+  if (status === "cli_running") return "CLI · RUNNING";
   return status.toUpperCase();
 }
 
@@ -814,7 +822,7 @@ function SessionRow({
       <div className="md:hidden px-4 py-3">
         <div className="flex items-center gap-2">
           <span
-            className={cn("h-2 w-2 rounded-full shrink-0", dotTone, s.status === "running" && "animate-pulse")}
+            className={cn("h-2 w-2 rounded-full shrink-0", dotTone, (s.status === "running" || s.status === "cli_running") && "animate-pulse")}
             style={dotGlow ? { boxShadow: dotGlow } : undefined}
           />
           <span className="text-[11px] caps text-ink-muted">
@@ -905,7 +913,7 @@ function SessionRow({
             className={cn(
               "h-2 w-2 rounded-full",
               dotTone,
-              s.status === "running" && "animate-pulse",
+              (s.status === "running" || s.status === "cli_running") && "animate-pulse",
             )}
             style={dotGlow ? { boxShadow: dotGlow } : undefined}
           />
@@ -972,7 +980,7 @@ function SessionRow({
                 statusPillClass(s.status),
               )}
             >
-              {(s.status === "running" || s.status === "awaiting") && (
+              {(s.status === "running" || s.status === "awaiting" || s.status === "cli_running") && (
                 <span className={cn("h-1.5 w-1.5 rounded-full", dotTone)} />
               )}
               {statusPillLabel(s.status)}

@@ -54,7 +54,12 @@ export type RunnerEvent =
         | "idle"
         | "terminated"
         | "awaiting"
-        | "error";
+        | "error"
+        // Manager-synthesized from the CLI process scanner
+        // (server/src/cli-sync/process-scanner.ts). Flips idle sessions that
+        // have a live external `claude` CLI process attached. Never emitted
+        // by the AgentRunner.
+        | "cli_running";
     }
   | { type: "sdk_session_id"; sdkSessionId: string }
   | { type: "assistant_text"; messageId: string; text: string; done: boolean }

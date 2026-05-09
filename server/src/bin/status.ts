@@ -344,6 +344,7 @@ async function main(): Promise<void> {
     const s = snap.sessionByStatus;
     const sessionBreakdown =
       `${formatInt(s.running ?? 0)} running · ` +
+      `${formatInt(s.cli_running ?? 0)} cli_running · ` +
       `${formatInt(s.awaiting ?? 0)} awaiting · ` +
       `${formatInt(s.idle ?? 0)} idle · ` +
       `${formatInt(s.archived ?? 0)} archived` +
