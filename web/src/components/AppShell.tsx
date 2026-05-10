@@ -512,7 +512,7 @@ function MobileTabBar({ tab, alertCount }: { tab: ShellTab; alertCount: number }
             type="button"
             onClick={() => navigate(href)}
             className={cn(
-              "flex flex-col items-center gap-0.5 px-3 py-1 relative",
+              "flex flex-col items-center gap-0.5 px-3 py-1",
               active ? "text-ink" : "text-ink-muted",
             )}
             aria-current={active ? "page" : undefined}
@@ -532,9 +532,18 @@ function MobileTabBar({ tab, alertCount }: { tab: ShellTab; alertCount: number }
               )}
             </span>
             <span className="text-[10px] font-medium">{label}</span>
-            {active && (
-              <span className="absolute -bottom-1 h-[3px] w-8 bg-klein rounded-full" />
-            )}
+            {/* Active indicator. Rendered as a transparent placeholder for
+                inactive tabs so every button has the same content height —
+                otherwise the nav's `items-center` would shift the active
+                column down by 3px + gap-0.5 relative to its neighbors,
+                producing the visual "border misalignment" users see. */}
+            <span
+              aria-hidden="true"
+              className={cn(
+                "h-[3px] w-8 rounded-full",
+                active ? "bg-klein" : "bg-transparent",
+              )}
+            />
           </button>
         );
       })}

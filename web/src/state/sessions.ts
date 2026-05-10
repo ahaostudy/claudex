@@ -534,9 +534,14 @@ function eventsToPieces(events: SessionEvent[]): UIPiece[] {
 export const useSessions = create<SessionState>((set, get) => {
   // Per-session "stall watchdog" timers. The *first* substantive WS frame
   // clears the timer; if nothing arrives in STALL_MS we flip the pending
-  // piece to `stalled: true` (renders red) but we DON'T remove it — the
-  // user still needs to know claude never replied so they can retry / stop.
-  const STALL_MS = 30_000;
+  // piece to `stalled: true` but we DON'T remove it — the user still needs
+  // to know claude hasn't replied so they can decide whether to keep
+  // waiting or hit Stop. Rendered as a muted informational hint, NOT an
+  // error — the agent is usually still running (long thinking, slow tool).
+  // Threshold is deliberately generous: short tool calls and normal
+  // thinking finish well under this, so the hint only appears when
+  // silence is actually worth surfacing.
+  const STALL_MS = 90_000;
   const stallTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   function clearStallTimer(sessionId: string) {
@@ -611,12 +616,24 @@ export const useSessions = create<SessionState>((set, get) => {
       set({ wsDiag: diag, connected: diag.phase === "acked" });
     });
     // Recovery hook: every time the socket reaches `acked` (initial connect
-    // AND every reconnect), re-subscribe the active session and refetch its
-    // event tail. This is how we recover frames dropped while the socket
-    // was down — the server paginates `/events` cheaply, so pulling the
-    // last 200 on every ack is fine. Testing deterministically would need
-    // vi fake timers + a mock socket; skipped intentionally.
+    // AND every reconnect), re-subscribe the active session, refetch its
+    // event tail, and resync session metadata. This is how we recover
+    // frames dropped while the socket was down — the server paginates
+    // `/events` cheaply, so pulling the last 200 on every ack is fine.
+    // Testing deterministically would need vi fake timers + a mock socket;
+    // skipped intentionally.
+    //
+    // `refreshSessions()` is what fixes the common mobile case: user sends
+    // a prompt, backgrounds the tab; server finishes and fires a
+    // `session_update` → idle frame that the closed socket never receives;
+    // when the tab comes back the detail view still reads `running` from
+    // the stale store. Pulling `GET /api/sessions` on ack realigns every
+    // session's status with the SQLite source of truth — the active one
+    // and anything else the user had running during the offline window.
     client.onAcked(() => {
+      // Resync all session statuses on every ack, even if no session is
+      // active — the list view may be the one the user returns to.
+      void get().refreshSessions();
       const sid = get().activeSessionId;
       if (!sid) return;
       // Resubscribe first so any frames arriving mid-refetch still land in

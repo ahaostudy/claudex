@@ -1469,18 +1469,20 @@ function Piece({
 // is alive. The Agent SDK doesn't surface partial message text, so there's
 // nothing to stream in between; the dots are the whole signal.
 //
-// The `stalled` branch surfaces a short red hint after ~30s of silence (see
-// armStallTimer in state/sessions.ts) so the user knows to hit Stop.
+// The `stalled` branch surfaces a muted informational hint after a long
+// stretch of silence (see armStallTimer in state/sessions.ts). This is NOT
+// an error — claude is almost always still running (long thinking / slow
+// tool) — so the styling is intentionally low-key: muted foreground, no
+// red, no border. The user can keep waiting or hit Stop.
 // ---------------------------------------------------------------------------
 function PendingBlock({ stalled }: { stalled: boolean }) {
   if (stalled) {
     return (
-      <div
-        className="mono text-[12.5px] text-danger pl-3 border-l-2 border-danger/60 max-w-[72ch]"
-        role="status"
-      >
-        no response in 30s — the request may be stuck. you can keep typing
-        or hit Stop above to cancel.
+      <div className="flex items-center gap-2 max-w-[72ch]" role="status">
+        <RunningDots />
+        <span className="mono text-[12px] text-ink-muted">
+          still working — no output yet. hit Stop above to cancel.
+        </span>
       </div>
     );
   }
@@ -3362,6 +3364,31 @@ function Composer({
           setIsDragging(false);
           void onFilesPicked(e.dataTransfer.files);
         }}
+        onPaste={(e) => {
+          // Image paste → run it through the same upload path as the
+          // Attach button and drag/drop. Pastes bubble up from the child
+          // textarea; we only preventDefault when we actually find an
+          // image item so plain-text pastes still insert normally.
+          //
+          // `onPaste` + `ClipboardEvent.clipboardData.items` works on plain
+          // HTTP (the site is not a secure context — see CLAUDE.md). Do
+          // NOT switch this to `navigator.clipboard.read()`, which is
+          // secure-context-only and will silently fail behind the frpc
+          // HTTP tunnel.
+          if (!session || isLocked) return;
+          const items = e.clipboardData?.items;
+          if (!items) return;
+          const imageFiles: File[] = [];
+          for (const item of Array.from(items)) {
+            if (item.kind === "file" && item.type.startsWith("image/")) {
+              const f = item.getAsFile();
+              if (f) imageFiles.push(f);
+            }
+          }
+          if (imageFiles.length === 0) return;
+          e.preventDefault();
+          void onFilesPicked(imageFiles);
+        }}
       >
         <div
           className={cn(
@@ -3716,7 +3743,7 @@ function HighlightedComposer({
         spellCheck={false}
         disabled={disabled}
         className={cn(
-          "relative w-full bg-transparent outline-none text-[15px] leading-[1.5] resize-none min-h-[24px] max-h-40 overflow-y-auto py-1 px-2 text-transparent caret-ink selection:bg-klein/20 selection:text-transparent placeholder:text-ink-muted",
+          "relative w-full bg-transparent outline-none font-sans text-[15px] leading-[1.5] resize-none min-h-[24px] max-h-40 overflow-y-auto py-1 px-2 text-transparent caret-ink selection:bg-klein/20 selection:text-transparent placeholder:text-ink-muted",
           disabled && "opacity-70 cursor-not-allowed",
         )}
       />
