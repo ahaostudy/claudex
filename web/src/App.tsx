@@ -11,6 +11,7 @@ import { RoutinesScreen } from "@/screens/Routines";
 import { QueueScreen } from "@/screens/Queue";
 import { AlertsScreen } from "@/screens/Alerts";
 import { UsagePage } from "@/screens/UsagePage";
+import { ClientErrorsScreen } from "@/screens/ClientErrors";
 import { KeyboardHelp } from "@/components/KeyboardHelp";
 
 // Force a full remount of <ChatScreen /> whenever the route :id changes.
@@ -84,6 +85,14 @@ export default function App() {
         element={
           <Guard>
             <UsagePage />
+          </Guard>
+        }
+      />
+      <Route
+        path="/errors"
+        element={
+          <Guard>
+            <ClientErrorsScreen />
           </Guard>
         }
       />

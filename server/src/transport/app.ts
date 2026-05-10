@@ -31,6 +31,8 @@ import { AuditStore } from "../audit/store.js";
 import { registerAuditRoutes } from "../audit/routes.js";
 import { registerBackupRoutes } from "../backup/routes.js";
 import { registerAdminRoutes } from "../admin/routes.js";
+import { ClientErrorStore } from "../client-errors/store.js";
+import { registerClientErrorRoutes } from "../client-errors/routes.js";
 import { registerWsRoute } from "./ws.js";
 import { registerPtyRoutes } from "./pty.js";
 import { agentRunnerFactory } from "../sessions/agent-runner.js";
@@ -233,6 +235,13 @@ export async function buildApp(
   await registerAgentsRoutes(app, { db: deps.db });
   await registerAuditRoutes(app, { db: deps.db, audit });
   await registerBackupRoutes(app, { db: deps.db });
+  await registerClientErrorRoutes(app, {
+    db: deps.db,
+    store: new ClientErrorStore(
+      deps.db,
+      deps.logger === false ? undefined : (deps.logger as any),
+    ),
+  });
   await registerAdminRoutes(app, {
     audit,
     port: deps.port ?? 5179,

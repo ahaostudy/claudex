@@ -1059,6 +1059,70 @@ export const AuditListResponse = z.object({
 export type AuditListResponse = z.infer<typeof AuditListResponse>;
 
 // ============================================================================
+// Client errors — browser-side crash capture
+//
+// The web UI runs on HTTP over an frpc tunnel, so the user can't open the real
+// browser DevTools on a phone. When React render crashes or a global
+// unhandledrejection fires, the frontend POSTs the payload to
+// `/api/client-errors` and the server persists it. The `/errors` screen then
+// surfaces the queue so the user can inspect stack traces and mark entries
+// resolved once they've been investigated / fixed.
+//
+// Grouping: identical errors (same fingerprint = sha1 of kind + 1st line of
+// message + 1st stack frame) increment `count` and bump `lastSeenAt`, instead
+// of creating a brand-new row — otherwise a render loop would fill the table
+// in seconds.
+// ============================================================================
+
+export const ClientErrorKind = z.enum([
+  "render", // React render crash caught by RootErrorBoundary
+  "uncaught", // window.error (sync throw outside React)
+  "unhandledrejection", // unhandled Promise rejection
+  "console-error", // console.error — includes React warnings
+]);
+export type ClientErrorKind = z.infer<typeof ClientErrorKind>;
+
+// Input payload shape — what the browser POSTs. Server fills in id, times,
+// count, resolvedAt, fingerprint.
+export const ClientErrorReport = z.object({
+  kind: ClientErrorKind,
+  message: z.string().min(1).max(4000),
+  stack: z.string().max(16000).optional(),
+  componentStack: z.string().max(16000).optional(),
+  url: z.string().max(2000).optional(),
+  userAgent: z.string().max(500).optional(),
+  // Client's own wall-clock at the time of the error. Server trusts this
+  // loosely — it's shown alongside the server-side `createdAt` so the UI can
+  // show "browser time" without letting a skewed client influence storage
+  // ordering.
+  clientTime: z.number().int().nonnegative().optional(),
+});
+export type ClientErrorReport = z.infer<typeof ClientErrorReport>;
+
+export const ClientError = z.object({
+  id: z.string(),
+  kind: ClientErrorKind,
+  message: z.string(),
+  stack: z.string().nullable(),
+  componentStack: z.string().nullable(),
+  url: z.string().nullable(),
+  userAgent: z.string().nullable(),
+  fingerprint: z.string(),
+  count: z.number().int().positive(),
+  firstSeenAt: z.string(), // ISO, server time of first occurrence
+  lastSeenAt: z.string(), // ISO, server time of most recent occurrence
+  resolvedAt: z.string().nullable(), // null = open; ISO when marked resolved
+});
+export type ClientError = z.infer<typeof ClientError>;
+
+export const ClientErrorListResponse = z.object({
+  errors: z.array(ClientError),
+  openCount: z.number().int().nonnegative(),
+  resolvedCount: z.number().int().nonnegative(),
+});
+export type ClientErrorListResponse = z.infer<typeof ClientErrorListResponse>;
+
+// ============================================================================
 // Project memory (CLAUDE.md preview)
 //
 // Returned by `GET /api/projects/:id/memory` — read-only surfacing of the

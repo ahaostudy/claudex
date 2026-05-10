@@ -506,6 +506,39 @@ const MIGRATIONS: { id: number; name: string; up: string }[] = [
          AND strip_harness_noise(body) <> body;
     `,
   },
+  {
+    id: 18,
+    name: "client_errors",
+    // Browser-side crash queue. claudex runs on HTTP through an frpc tunnel,
+    // so the user can't pop DevTools on their phone when the UI white-screens.
+    // Frontend RootErrorBoundary + global handlers POST here; the `/errors`
+    // screen surfaces the queue and lets the user resolve / delete entries.
+    //
+    // Dedup by `fingerprint` (hash of kind + first-line message + first stack
+    // frame) — identical errors bump `count` and `last_seen_at` instead of
+    // creating a new row, so a render loop doesn't flood the table. Resolving
+    // clears `resolved_at`; a new occurrence on a resolved fingerprint
+    // auto-reopens it (sets `resolved_at` back to NULL) so the user sees
+    // regressions of errors they thought they'd fixed.
+    up: `
+      CREATE TABLE client_errors (
+        id TEXT PRIMARY KEY,
+        kind TEXT NOT NULL,
+        message TEXT NOT NULL,
+        stack TEXT,
+        component_stack TEXT,
+        url TEXT,
+        user_agent TEXT,
+        fingerprint TEXT NOT NULL UNIQUE,
+        count INTEGER NOT NULL DEFAULT 1,
+        first_seen_at TEXT NOT NULL,
+        last_seen_at TEXT NOT NULL,
+        resolved_at TEXT
+      );
+      CREATE INDEX idx_client_errors_last_seen ON client_errors(last_seen_at DESC);
+      CREATE INDEX idx_client_errors_resolved ON client_errors(resolved_at);
+    `,
+  },
 ];
 
 export function openDb(config: Config, log: Logger): ClaudexDb {

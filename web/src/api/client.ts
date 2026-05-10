@@ -510,6 +510,51 @@ export const api = {
     const q = qs.toString();
     return request<AuditListResponse>(`/api/audit${q ? `?${q}` : ""}`);
   },
+  // --- Client errors ----------------------------------------------------
+  listClientErrors(opts?: {
+    status?: "open" | "resolved" | "all";
+    limit?: number;
+    before?: string;
+  }) {
+    const qs = new URLSearchParams();
+    if (opts?.status) qs.set("status", opts.status);
+    if (opts?.limit !== undefined) qs.set("limit", String(opts.limit));
+    if (opts?.before) qs.set("before", opts.before);
+    const q = qs.toString();
+    return request<
+      import("@claudex/shared").ClientErrorListResponse
+    >(`/api/client-errors${q ? `?${q}` : ""}`);
+  },
+  resolveClientError(id: string) {
+    return request<{ ok: true }>(
+      `/api/client-errors/${encodeURIComponent(id)}/resolve`,
+      { method: "POST" },
+    );
+  },
+  reopenClientError(id: string) {
+    return request<{ ok: true }>(
+      `/api/client-errors/${encodeURIComponent(id)}/reopen`,
+      { method: "POST" },
+    );
+  },
+  deleteClientError(id: string) {
+    return request<{ ok: true }>(
+      `/api/client-errors/${encodeURIComponent(id)}`,
+      { method: "DELETE" },
+    );
+  },
+  resolveAllClientErrors() {
+    return request<{ ok: true; resolved: number }>(
+      "/api/client-errors/resolve-all",
+      { method: "POST" },
+    );
+  },
+  deleteResolvedClientErrors() {
+    return request<{ ok: true; deleted: number }>(
+      "/api/client-errors/resolved",
+      { method: "DELETE" },
+    );
+  },
   /**
    * Read-only CLAUDE.md preview for a project. Backs the "Memory" section in
    * the session settings sheet. Returns an empty `files` array when neither
