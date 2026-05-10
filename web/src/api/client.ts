@@ -33,6 +33,7 @@ import type {
   StatsResponse,
   MetaResponse,
   ListSubagentsResponse,
+  AlertsListResponse,
 } from "@claudex/shared";
 
 export class ApiError extends Error {
@@ -409,6 +410,31 @@ export const api = {
    */
   getMeta() {
     return request<MetaResponse>("/api/meta");
+  },
+
+  // ---------------------------------------------------------------------------
+  // Alerts — persistent queue of "needs your attention" rows, keyed on
+  // session status transitions. The badge in AppShell and the dedicated
+  // /alerts screen both consume this.
+  // ---------------------------------------------------------------------------
+  listAlerts() {
+    return request<AlertsListResponse>("/api/alerts");
+  },
+  markAlertSeen(id: string) {
+    return request<{ ok: true }>(`/api/alerts/${encodeURIComponent(id)}/seen`, {
+      method: "POST",
+    });
+  },
+  markAllAlertsSeen() {
+    return request<{ ok: true; touched: number }>(`/api/alerts/seen-all`, {
+      method: "POST",
+    });
+  },
+  dismissAlert(id: string) {
+    return request<{ ok: true }>(
+      `/api/alerts/${encodeURIComponent(id)}/dismiss`,
+      { method: "POST" },
+    );
   },
   /**
    * Read-only observability feed for subagent tool invocations (the SDK's

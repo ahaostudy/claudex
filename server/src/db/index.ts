@@ -573,6 +573,52 @@ const MIGRATIONS: { id: number; name: string; up: string }[] = [
         ON pending_restart_results(session_id);
     `,
   },
+  {
+    id: 20,
+    name: "alerts",
+    // Persistent alert queue — replaces the earlier in-memory `completions`
+    // map that only tracked "finished while user was away" and evaporated
+    // on page reload. Three kinds today:
+    //
+    //   permission_pending  — session transitioned into `awaiting`
+    //   session_error       — session transitioned into `error`
+    //   session_completed   — session finished a turn (idle) while the user
+    //                         wasn't actively looking at it (best-effort;
+    //                         the "was away" heuristic is a hint, not a
+    //                         gate — worst case the user sees one stale row)
+    //
+    // Design is state-transition, NOT deletion. Rows never disappear just
+    // because the underlying condition cleared — they flip to resolved
+    // with a timestamp and stick around so the user can review what
+    // happened while they were off the app. `seen_at` tracks whether the
+    // user has *looked* at the alert; `resolved_at` tracks whether the
+    // underlying condition has cleared. Both can be set independently.
+    //
+    // Retention: a boot-time prune removes rows where resolved_at IS NOT
+    // NULL AND created_at < now - 30 days, so the table stays bounded
+    // without the user having to manually clean up.
+    up: `
+      CREATE TABLE alerts (
+        id TEXT PRIMARY KEY,
+        kind TEXT NOT NULL,
+        session_id TEXT,
+        project_id TEXT,
+        title TEXT NOT NULL,
+        body TEXT,
+        payload_json TEXT,
+        created_at TEXT NOT NULL,
+        seen_at TEXT,
+        resolved_at TEXT,
+        FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE SET NULL
+      );
+      CREATE INDEX idx_alerts_created ON alerts(created_at DESC);
+      CREATE INDEX idx_alerts_session ON alerts(session_id);
+      CREATE INDEX idx_alerts_unresolved
+        ON alerts(resolved_at) WHERE resolved_at IS NULL;
+      CREATE INDEX idx_alerts_unseen
+        ON alerts(seen_at) WHERE seen_at IS NULL;
+    `,
+  },
 ];
 
 export function openDb(config: Config, log: Logger): ClaudexDb {

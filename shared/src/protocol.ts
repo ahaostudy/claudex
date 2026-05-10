@@ -236,6 +236,17 @@ export const ServerQueueUpdate = z.object({
   at: z.string(),
 });
 
+// Global-channel ping telling every authenticated tab that the alerts list
+// has changed (a new alert landed, an existing alert was marked seen, or an
+// alert auto-resolved because the underlying session left `awaiting` /
+// `error`). Clients call `GET /api/alerts` to reconcile. We don't ship the
+// row inline because the alerts list is bounded and one extra REST round-
+// trip is cheaper than keeping a cross-tab snapshot in sync.
+export const ServerAlertsUpdate = z.object({
+  type: z.literal("alerts_update"),
+  at: z.string(),
+});
+
 // Broadcast when the server has appended events to a session out-of-band —
 // notably the CLI-JSONL resync-on-open path, which discovers new CLI turns
 // and streams them into `session_events` without going through the live
@@ -270,6 +281,7 @@ export const ServerFrame = z.discriminatedUnion("type", [
   ServerUserMessage,
   ServerRefreshTranscript,
   ServerQueueUpdate,
+  ServerAlertsUpdate,
   ServerError,
 ]);
 export type ServerFrame = z.infer<typeof ServerFrame>;

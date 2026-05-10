@@ -847,6 +847,16 @@ export const useSessions = create<SessionState>((set, get) => {
         }
         return;
       }
+      // Global alerts_update ping — server says "the alerts list changed".
+      // Dynamic import to avoid a cycle with web/src/state/alerts.ts (which
+      // imports the API client, which is the opposite direction from here).
+      // Fire-and-forget; the alerts store handles error cases itself.
+      if (frame.type === "alerts_update") {
+        void import("./alerts").then(({ useAlerts }) => {
+          void useAlerts.getState().fetchAlerts();
+        });
+        return;
+      }
       // Any substantive reply frame means the pending placeholder did its job.
       if (
         frame.type === "assistant_text_delta" ||

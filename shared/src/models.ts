@@ -1456,3 +1456,54 @@ export const AdminRestartResponse = z.object({
     .optional(),
 });
 export type AdminRestartResponse = z.infer<typeof AdminRestartResponse>;
+
+// ============================================================================
+// Alerts
+//
+// Persistent queue of "things that happened while the user may or may not
+// have been looking". Replaces the earlier in-memory `completions` map on
+// the web side; see migration 20 for the table shape and migration doc for
+// the state-transition (not deletion) design.
+//
+// Each alert has two orthogonal state bits:
+//   seen_at     — user opened the alerts screen / tapped the row
+//   resolved_at — underlying condition cleared (e.g. session left `awaiting`)
+//
+// `AlertKind` is open-ended today — the three kinds below cover everything
+// emitted by the status-transition hook, but we keep the union extensible
+// for future kinds (routine failures, push delivery failures, …) without a
+// schema bump.
+// ============================================================================
+
+export const AlertKind = z.enum([
+  "permission_pending",
+  "session_error",
+  "session_completed",
+]);
+export type AlertKind = z.infer<typeof AlertKind>;
+
+export const Alert = z.object({
+  id: z.string(),
+  kind: AlertKind,
+  sessionId: z.string().nullable(),
+  projectId: z.string().nullable(),
+  title: z.string(),
+  body: z.string().nullable(),
+  /** Kind-specific extras. Shape is left to the producer; consumers that
+   *  care extract the fields they know about. `null` when there's nothing
+   *  extra to carry. */
+  payload: z.record(z.string(), z.unknown()).nullable(),
+  createdAt: z.string(),
+  /** null = user has not looked yet. The badge count uses this. */
+  seenAt: z.string().nullable(),
+  /** null = the underlying condition is still active. */
+  resolvedAt: z.string().nullable(),
+});
+export type Alert = z.infer<typeof Alert>;
+
+// Response for GET /api/alerts
+export const AlertsListResponse = z.object({
+  alerts: z.array(Alert),
+  unseenCount: z.number().int().nonnegative(),
+});
+export type AlertsListResponse = z.infer<typeof AlertsListResponse>;

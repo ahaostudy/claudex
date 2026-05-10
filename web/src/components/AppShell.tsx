@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { useAuth } from "@/state/auth";
 import { useSessions } from "@/state/sessions";
+import { useAlerts } from "@/state/alerts";
 import { api } from "@/api/client";
 import type { Project } from "@claudex/shared";
 import { cn } from "@/lib/cn";
@@ -74,33 +75,23 @@ export function AppShell({
   tab: ShellTab;
   children: React.ReactNode;
 }) {
-  // Alerts badge count: sessions that need the user — permission pending
-  // (`awaiting`) or errored, plus "recently completed" sessions surfaced
-  // via the sessions-store `completions` map (session finished while the
-  // user was elsewhere). Mirrored in both the mobile tab bar and the
-  // desktop sidebar so the number is never hidden. Side-chat children
-  // are excluded because the parent surfaces its own alerts already.
-  const { sessions, completions } = useSessions();
-  const awaitingOrErrorIds = new Set(
-    sessions
-      .filter(
-        (s) =>
-          !s.parentSessionId && (s.status === "awaiting" || s.status === "error"),
-      )
-      .map((s) => s.id),
-  );
-  // Completions that aren't already counted via awaiting/error — an
-  // errored session is on both lists and we shouldn't double-count.
-  // Also skip entries the user has already acknowledged (seen=true); those
-  // stick around on the Alerts screen as archival rows but shouldn't drive
-  // the red badge count.
-  let completionCount = 0;
-  for (const [sid, c] of Object.entries(completions)) {
-    if (awaitingOrErrorIds.has(sid)) continue;
-    if (c.seen) continue;
-    completionCount += 1;
-  }
-  const alertCount = awaitingOrErrorIds.size + completionCount;
+  // Alerts badge count comes from the persistent alerts store (migration
+  // 20 + Zustand slice in @/state/alerts). Counting unseen rows gives us
+  // the right-sized red dot: rows the user has already looked at (seenAt
+  // set) don't drive the badge even if the underlying condition is still
+  // active, and rows that were resolved but never seen still count (the
+  // user should know the thing happened, even if it's already cleared).
+  //
+  // Fetched once on shell mount; kept fresh by the `alerts_update` WS
+  // frame handler in @/state/sessions. Falls back to `0` on first paint
+  // before the initial REST round-trip lands — that's fine, the badge
+  // just lights up a beat later.
+  const unseenCount = useAlerts((s) => s.unseenCount);
+  const fetchAlerts = useAlerts((s) => s.fetchAlerts);
+  useEffect(() => {
+    void fetchAlerts();
+  }, [fetchAlerts]);
+  const alertCount = unseenCount;
 
   return (
     <div className="h-[100dvh] bg-canvas flex md:flex-row flex-col overflow-hidden">

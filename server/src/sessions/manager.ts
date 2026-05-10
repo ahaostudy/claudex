@@ -196,6 +196,28 @@ export class SessionManager {
   // permanently-"running" row.
   private watchdogs = new Map<string, NodeJS.Timeout>();
 
+  /**
+   * Optional hook fired after every session status transition. Wired by
+   * the app layer to the alerts store so that:
+   *   - a transition INTO `awaiting` / `error`  → insert an alert row
+   *   - a transition OUT OF `awaiting` / `error`  → auto-resolve the
+   *     matching open alert(s) for that session
+   *   - a transition INTO `idle` after `running`  → best-effort insert a
+   *     session_completed alert (the hook decides whether to emit based on
+   *     its own "was the user looking?" heuristic)
+   *
+   * The hook must never throw — errors are swallowed upstream so a flaky
+   * alerts path can't crash the runner event loop. Null when the app
+   * doesn't wire alerts (tests that build a bare manager).
+   */
+  private alertHook:
+    | ((
+        sessionId: string,
+        from: SessionStatus | null,
+        to: SessionStatus,
+      ) => void)
+    | null = null;
+
   constructor(private readonly deps: SessionManagerDeps) {}
 
   /**
@@ -291,6 +313,31 @@ export class SessionManager {
         "session status transition: setStatus failed",
       );
     }
+    // Fire the alert hook AFTER the row is stamped so any downstream read
+    // (inside the hook) sees the post-transition status. Never throws —
+    // any alert-path failure is non-fatal to the session itself.
+    if (this.alertHook) {
+      try {
+        this.alertHook(sessionId, from, to);
+      } catch (err) {
+        this.deps.logger?.debug?.(
+          { err, sessionId, from, to, reason },
+          "session status transition: alertHook failed",
+        );
+      }
+    }
+  }
+
+  /** Attach (or replace) the alert hook. See the `alertHook` field for the
+   *  contract. Called once at app boot after the AlertStore is constructed. */
+  setAlertHook(
+    hook: (
+      sessionId: string,
+      from: SessionStatus | null,
+      to: SessionStatus,
+    ) => void,
+  ): void {
+    this.alertHook = hook;
   }
 
   /** Resolve the watchdog window, honoring the env override used by tests. */
@@ -1016,6 +1063,20 @@ export class SessionManager {
   notifyQueueUpdate(): void {
     this.deps.broadcast("", {
       type: "queue_update",
+      at: new Date().toISOString(),
+    });
+  }
+
+  /**
+   * Broadcast an `alerts_update` frame to every authenticated tab via the
+   * global WS channel. Same pattern as `notifyQueueUpdate` — payload-free
+   * beyond a server-side timestamp, clients refetch `GET /api/alerts` to
+   * reconcile. Called by the AlertStore's own mutation paths (insert,
+   * markSeen, markResolved) so every list-mutation fans out to every tab.
+   */
+  notifyAlertsUpdate(): void {
+    this.deps.broadcast("", {
+      type: "alerts_update",
       at: new Date().toISOString(),
     });
   }

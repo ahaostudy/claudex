@@ -77,6 +77,7 @@ export async function registerWsRoute(
     "user_message",
     "refresh_transcript",
     "queue_update",
+    "alerts_update",
   ]);
 
   // Wire the runner-event broadcast into the ws layer. This is a one-time
@@ -451,6 +452,11 @@ function runnerEventToFrame(
     case "queue_update":
       return {
         type: "queue_update",
+        at: event.at,
+      };
+    case "alerts_update":
+      return {
+        type: "alerts_update",
         at: event.at,
       };
     case "error":

@@ -32,6 +32,9 @@ import { registerAuditRoutes } from "../audit/routes.js";
 import { registerBackupRoutes } from "../backup/routes.js";
 import { registerAdminRoutes } from "../admin/routes.js";
 import { resolvePendingRestartResults } from "./pending-restart-sweep.js";
+import { AlertStore } from "../alerts/store.js";
+import { createAlertHook } from "../alerts/events.js";
+import { registerAlertsRoutes } from "../alerts/routes.js";
 import { ClientErrorStore } from "../client-errors/store.js";
 import { registerClientErrorRoutes } from "../client-errors/routes.js";
 import { registerWsRoute } from "./ws.js";
@@ -157,6 +160,30 @@ export async function buildApp(
     ),
   });
 
+  // Alerts — persistent queue keyed on session-status transitions. Wire
+  // the hook BEFORE any code path that could transitionStatus (the runner
+  // factory above doesn't start sessions immediately; the routes/scheduler
+  // below are what eventually drive transitions). Hook is fire-and-forget
+  // and cannot throw — see createAlertHook for guarantees.
+  const alertStore = new AlertStore(deps.db);
+  manager.setAlertHook(
+    createAlertHook({
+      alerts: alertStore,
+      sessions: new SessionStore(deps.db),
+      notifyUpdate: () => manager.notifyAlertsUpdate(),
+      logger: deps.logger === false ? undefined : deps.logger,
+    }),
+  );
+  // Prune old resolved alerts on boot so the table stays bounded (30-day
+  // retention for rows where resolved_at IS NOT NULL).
+  if (process.env.NODE_ENV !== "test") {
+    try {
+      alertStore.pruneOld();
+    } catch {
+      /* best-effort */
+    }
+  }
+
   // Push notifications. We only wire the real web-push sender when VAPID
   // keys are configured — tests skip them to avoid the cost of ECC keygen
   // and to keep the send path deterministic. Without keys we register the
@@ -249,6 +276,7 @@ export async function buildApp(
     stateDir,
     db: deps.db,
   });
+  await registerAlertsRoutes(app, { alerts: alertStore, manager });
 
   // Routines: periodic cron-driven session spawns. The scheduler owns a single
   // timer chained across all active routines and reloads itself on any CRUD.

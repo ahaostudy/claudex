@@ -136,6 +136,10 @@ export type RunnerEvent =
   // to a specific session — the WS layer routes it through the global
   // channel so every authenticated tab's Queue screen can refetch.
   | { type: "queue_update"; at: string }
+  // Alerts list changed (new row, seen/resolved/dismissed, or auto-resolved
+  // by a session status transition). Cross-session by design — routed
+  // through the global WS channel just like queue_update.
+  | { type: "alerts_update"; at: string }
   | { type: "error"; code: string; message: string };
 
 export type RunnerListener = (event: RunnerEvent) => void;
