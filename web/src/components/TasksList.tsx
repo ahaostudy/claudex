@@ -3,7 +3,7 @@ import { ChevronRight, Loader2 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { timeAgoShort } from "@/lib/format";
 import { summarizeToolCall, toolIcon } from "@/lib/tool-summary";
-import type { UIPiece } from "@/state/sessions";
+import { SUBAGENT_PARENT_TOOLS, type UIPiece } from "@/state/sessions";
 
 /**
  * TasksList — shared grouped-by-tool list of every tool call in the current
@@ -11,11 +11,16 @@ import type { UIPiece } from "@/state/sessions";
  * the mobile bottom-sheet (TasksDrawer) so behavior is identical on both.
  *
  * Grouping:
- *   - "Subagents" is pinned to the top and contains every row whose tool
- *     name is one of {Task, Agent, Explore}. The user wants these up top
- *     because they're the most salient activity for a running turn.
- *   - Every other tool name gets its own group; the groups are rendered in
- *     alphabetical order (Bash, Edit, Glob, Grep, Read, Write, …).
+ *   - Task / Agent / Explore tool_use rows are never surfaced here — they
+ *     all live in SubagentsPanel (the store's `computeSubagentRuns`
+ *     synthesizes legacy ones for pre-Phase-1 sessions too).
+ *   - MCP tools (`mcp__<server>__<tool>`) are collapsed into one group
+ *     per server — e.g. `mcp__chrome-devtools__close_page` and
+ *     `mcp__chrome-devtools__list_pages` share a `MCP · chrome-devtools`
+ *     bucket, but each row still chips its full raw name so the user
+ *     can see which MCP tool actually fired.
+ *   - Every other tool name gets its own group; groups are rendered in
+ *     alphabetical order (Bash, Edit, Glob, Grep, …).
  *
  * Each row re-implements the mockup s-13 sub-row tile:
  *   - 3px colored left strip (klein running, success done, danger failed)
@@ -30,10 +35,6 @@ import type { UIPiece } from "@/state/sessions";
  * purely reactive to `pieces` means it survives transcript refetches for
  * free.
  */
-
-// Tool names the SDK uses for agent-spawning / explore calls — pinned to
-// the top of the rail under a single "Subagents" group. Case-sensitive.
-const SUBAGENT_TOOLS = new Set(["Task", "Agent", "Explore"]);
 
 export type TaskState = "running" | "done" | "failed";
 
@@ -63,29 +64,25 @@ export interface TaskRow {
  * (if any) by toolUseId. Orphan tool_results (no preceding tool_use) are
  * ignored — they'd have no row to attach to anyway.
  *
- * Subagent-family (`Task` / `Agent` / `Explore`) tool_use events whose
- * toolUseId is claimed by a `subagent_start` piece are skipped here —
- * SubagentsPanel owns them and renders the expandable live stream. Legacy
- * runs that pre-date the s-17 SDK opt-in never get a `subagent_start`
- * event, so they still surface under the "Subagents" group in this list
- * (where their row behavior is the old "click to jump to message").
+ * Task / Agent / Explore tool_use events are always skipped here — they
+ * live in SubagentsPanel, which synthesizes legacy rows (pre-Phase-1 SDK)
+ * on top of the live `subagent_start`-driven rows so the panel is the
+ * single canonical subagents surface.
  *
  * Rows are returned in no particular order; the group renderer sorts them
  * (newest first within a group) so callers can trust display order.
  */
 export function buildTaskRows(pieces: UIPiece[]): TaskRow[] {
   const resultsById = new Map<string, UIPiece & { kind: "tool_result" }>();
-  const claimedByPanel = new Set<string>();
   for (const p of pieces) {
     if (p.kind === "tool_result") resultsById.set(p.toolUseId, p);
-    if (p.kind === "subagent_start" && p.parentToolUseId) {
-      claimedByPanel.add(p.parentToolUseId);
-    }
   }
   const rows: TaskRow[] = [];
   for (const p of pieces) {
     if (p.kind !== "tool_use") continue;
-    if (SUBAGENT_TOOLS.has(p.name) && claimedByPanel.has(p.id)) continue;
+    // Every Task/Agent/Explore row is handled by SubagentsPanel now
+    // (including legacy rows via `computeSubagentRuns`'s synthesis pass).
+    if (SUBAGENT_PARENT_TOOLS.has(p.name)) continue;
     const matched = resultsById.get(p.id);
     let state: TaskState = "running";
     if (matched) state = matched.isError ? "failed" : "done";
@@ -103,36 +100,42 @@ export function buildTaskRows(pieces: UIPiece[]): TaskRow[] {
 }
 
 interface TaskGroup {
-  /** Display label — "Subagents" for the pinned bucket, raw tool name
-   * otherwise. */
+  /** Display label — e.g. `"Bash"` for a regular tool, or
+   * `"MCP · chrome-devtools"` for an MCP bucket. */
   label: string;
   rows: TaskRow[];
 }
 
+/**
+ * Extract the MCP server name from a tool name like `mcp__<server>__<tool>`.
+ * Returns `null` if the name doesn't match the MCP naming shape.
+ */
+function mcpServerFromToolName(name: string): string | null {
+  if (!name.startsWith("mcp__")) return null;
+  const parts = name.split("__");
+  if (parts.length < 3) return null;
+  const server = parts[1];
+  return server && server.length > 0 ? server : null;
+}
+
 function groupRows(rows: TaskRow[]): TaskGroup[] {
-  const subagents: TaskRow[] = [];
-  const byTool = new Map<string, TaskRow[]>();
+  const byLabel = new Map<string, TaskRow[]>();
   for (const r of rows) {
-    if (SUBAGENT_TOOLS.has(r.name)) {
-      subagents.push(r);
-      continue;
-    }
-    const list = byTool.get(r.name);
+    const mcpServer = mcpServerFromToolName(r.name);
+    const label = mcpServer ? `MCP · ${mcpServer}` : r.name;
+    const list = byLabel.get(label);
     if (list) list.push(r);
-    else byTool.set(r.name, [r]);
+    else byLabel.set(label, [r]);
   }
   // Newest-first within a group. We don't have a reliable seq on every
   // UIPiece (pending / optimistic pieces can lack it) so we use the
   // position in the pieces array by proxy — rows were pushed in piece
   // order, so reverse gets us newest-first.
   const sortNewestFirst = (arr: TaskRow[]) => arr.slice().reverse();
+  const alpha = [...byLabel.entries()].sort(([a], [b]) => a.localeCompare(b));
   const out: TaskGroup[] = [];
-  if (subagents.length > 0) {
-    out.push({ label: "Subagents", rows: sortNewestFirst(subagents) });
-  }
-  const alpha = [...byTool.entries()].sort(([a], [b]) => a.localeCompare(b));
-  for (const [name, rs] of alpha) {
-    if (rs.length > 0) out.push({ label: name, rows: sortNewestFirst(rs) });
+  for (const [label, rs] of alpha) {
+    if (rs.length > 0) out.push({ label, rows: sortNewestFirst(rs) });
   }
   return out;
 }

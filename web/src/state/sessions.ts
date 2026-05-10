@@ -1602,16 +1602,39 @@ export function computeSubagentRuns(pieces: UIPiece[]): SubagentRun[] {
   if (cached && cached.transcript === pieces) return cached.runs;
   const byTaskId = new Map<string, SubagentRun>();
   const byParentToolUseId = new Map<string, SubagentRun>();
+  // Pre-pass: index parent Task/Agent/Explore tool_use pieces by their
+  // id so we can read `subagent_type` out of the input payload when
+  // building the run (the SDK's task_started gives us an opaque
+  // task_type like "local_agent" which isn't human-friendly; the user
+  // names the subagent via the Task tool's `subagent_type` field).
+  const parentToolUses = new Map<
+    string,
+    Extract<UIPiece, { kind: "tool_use" }>
+  >();
+  for (const p of pieces) {
+    if (p.kind === "tool_use" && SUBAGENT_PARENT_TOOLS.has(p.name)) {
+      parentToolUses.set(p.id, p);
+    }
+  }
   // First pass — seed runs from `subagent_start` and apply subsequent
-  // lifecycle pieces.
+  // lifecycle pieces. Runs whose task_type is a backgrounded bash
+  // command (async SDK bookkeeping, not a real subagent) are skipped
+  // entirely: they'd render with an empty stream + garble the panel.
   for (const piece of pieces) {
     if (piece.kind === "subagent_start") {
+      if (isAsyncBashTask(piece.taskType)) continue;
+      const parent = piece.parentToolUseId
+        ? parentToolUses.get(piece.parentToolUseId)
+        : undefined;
+      const subagentTypeFromInput = parent
+        ? extractSubagentType(parent.input)
+        : null;
       const run: SubagentRun = {
         taskId: piece.taskId,
         parentToolUseId: piece.parentToolUseId,
         description: piece.description,
         status: "running",
-        agentType: piece.agentType ?? null,
+        agentType: subagentTypeFromInput ?? piece.agentType ?? null,
         taskType: piece.taskType ?? null,
         workflowName: piece.workflowName ?? null,
         prompt: piece.prompt ?? null,
@@ -1705,6 +1728,65 @@ export function computeSubagentRuns(pieces: UIPiece[]): SubagentRun[] {
       run.lastActivityAt = piece.createdAt;
     }
   }
+  // Third pass — LEGACY SYNTHESIS. For every Task/Agent/Explore
+  // `tool_use` piece that didn't land on a `subagent_start` event
+  // (recorded before Phase 1 shipped the new SDK options, or against
+  // an older SDK that doesn't emit task_* events), fabricate a
+  // SubagentRun so the panel is the canonical subagents surface — no
+  // more "some runs live in TasksList's Subagents group, others here"
+  // split-brain. Stream is empty (no data was captured), but the
+  // matching `tool_result` gives us a summary + status.
+  const resultsByToolUseId = new Map<
+    string,
+    Extract<UIPiece, { kind: "tool_result" }>
+  >();
+  for (const p of pieces) {
+    if (p.kind === "tool_result") resultsByToolUseId.set(p.toolUseId, p);
+  }
+  for (const p of pieces) {
+    if (p.kind !== "tool_use") continue;
+    if (!SUBAGENT_PARENT_TOOLS.has(p.name)) continue;
+    if (byParentToolUseId.has(p.id)) continue; // already handled above
+    const res = resultsByToolUseId.get(p.id);
+    let status: SubagentLifecycleStatus = "running";
+    let endedAt: string | null = null;
+    let summary: string | null = null;
+    if (res) {
+      status = res.isError ? "failed" : "completed";
+      endedAt = res.createdAt ?? null;
+      summary = res.content;
+    }
+    const input = p.input as Record<string, unknown>;
+    const description = pickInputString(
+      input,
+      "description",
+      "title",
+      "subagent_type",
+      "prompt",
+      "task",
+    );
+    const synthetic: SubagentRun = {
+      taskId: `legacy-${p.id}`,
+      parentToolUseId: p.id,
+      description: description ?? p.name,
+      status,
+      agentType: extractSubagentType(input),
+      taskType: null,
+      workflowName: null,
+      prompt: pickInputString(input, "prompt") ?? null,
+      isBackgrounded: false,
+      startedAt: p.createdAt ?? new Date(0).toISOString(),
+      endedAt,
+      lastToolName: null,
+      usage: {},
+      summary,
+      outputFile: null,
+      error: null,
+      stream: [],
+      lastActivityAt: endedAt ?? p.createdAt ?? new Date(0).toISOString(),
+    };
+    byTaskId.set(synthetic.taskId, synthetic);
+  }
   // Sort each run's stream by seq — the first pass preserves insertion
   // order but a refetched transcript may have interleaved live + history.
   for (const run of byTaskId.values()) {
@@ -1715,6 +1797,43 @@ export function computeSubagentRuns(pieces: UIPiece[]): SubagentRun[] {
   );
   runCache.set(pieces, { transcript: pieces, runs });
   return runs;
+}
+
+/** Tools on the parent session whose tool_use launches a subagent run.
+ * Mirror of `SUBAGENT_TOOL_NAMES` in `server/src/agents/routes.ts` — kept
+ * in sync by convention; adding one here without updating the server
+ * means /api/agents won't pick up the new tool. */
+export const SUBAGENT_PARENT_TOOLS = new Set(["Task", "Agent", "Explore"]);
+
+/** SDK `task_type` values that are NOT real subagents — async bash
+ * bookkeeping, mostly. Filtered out of the panel since they have no
+ * nested transcript and the user doesn't think of them as "subagents". */
+function isAsyncBashTask(taskType: string | undefined | null): boolean {
+  return taskType === "bash" || taskType === "local_bash";
+}
+
+/** Human-readable subagent type from a Task/Agent/Explore tool_use input.
+ * The SDK lets users write `subagent_type: "code-explorer"` etc — that's
+ * what shows on the row as "code-explorer" (not the SDK-internal
+ * "local_agent"). Falls back through common field name synonyms. */
+function extractSubagentType(input: Record<string, unknown>): string | null {
+  const v =
+    pickInputString(input, "subagent_type") ??
+    pickInputString(input, "agent_type");
+  return v;
+}
+
+function pickInputString(
+  input: Record<string, unknown>,
+  ...keys: string[]
+): string | null {
+  for (const k of keys) {
+    const v = input[k];
+    if (typeof v === "string" && v.trim().length > 0) {
+      return v.trim();
+    }
+  }
+  return null;
 }
 
 /** Hook-friendly selector — memoized per transcript array reference. */

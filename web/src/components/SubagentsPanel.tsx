@@ -44,13 +44,27 @@ export function SubagentsPanel({
 
   if (runs.length === 0) return null;
 
-  // Reverse-chronological ordering so the freshest run is on top —
-  // matches how the chat thread reads "latest action first" when the
-  // user scrolls to the end.
-  const running = runs.filter((r) => r.status === "running").reverse();
-  const stopped = runs.filter((r) => r.status === "stopped").reverse();
-  const failed = runs.filter((r) => r.status === "failed").reverse();
-  const done = runs.filter((r) => r.status === "completed").reverse();
+  // Flat ordering: all running runs first (newest-first), then everything
+  // else by endedAt → startedAt (newest-first). The user-facing cue for
+  // status is the row's colored strip + status icon — a grouping header
+  // like "DONE · 3" was redundant and visually competed with the
+  // TasksList group headers below.
+  const running = runs.filter((r) => r.status === "running");
+  const rest = runs.filter((r) => r.status !== "running");
+  const toTime = (iso: string | null | undefined): number => {
+    if (!iso) return 0;
+    const t = Date.parse(iso);
+    return Number.isFinite(t) ? t : 0;
+  };
+  const runningSorted = running
+    .slice()
+    .sort((a, b) => toTime(b.startedAt) - toTime(a.startedAt));
+  const restSorted = rest.slice().sort((a, b) => {
+    const bt = toTime(b.endedAt) || toTime(b.startedAt);
+    const at = toTime(a.endedAt) || toTime(a.startedAt);
+    return bt - at;
+  });
+  const ordered = [...runningSorted, ...restSorted];
 
   return (
     <div className="flex flex-col border-b border-line bg-paper/30">
@@ -66,8 +80,8 @@ export function SubagentsPanel({
           Agents
         </span>
         <span className="ml-2 mono text-[11px] text-ink-muted">
-          {running.length > 0
-            ? `${running.length} live · ${runs.length} total`
+          {runningSorted.length > 0
+            ? `${runningSorted.length} live · ${runs.length} total`
             : `${runs.length} ${runs.length === 1 ? "run" : "runs"}`}
         </span>
         <span className="ml-auto mono text-[10px] text-ink-faint hidden sm:inline">
@@ -75,88 +89,16 @@ export function SubagentsPanel({
         </span>
       </div>
       <div className="flex flex-col py-1">
-        {running.length > 0 && (
-          <Group label="Running" accent="klein" count={running.length}>
-            {running.map((run) => (
-              <RunCard
-                key={run.taskId}
-                run={run}
-                defaultExpanded
-                onRevealToolUse={onRevealToolUse}
-              />
-            ))}
-          </Group>
-        )}
-        {failed.length > 0 && (
-          <Group label="Failed" accent="danger" count={failed.length}>
-            {failed.map((run) => (
-              <RunCard
-                key={run.taskId}
-                run={run}
-                onRevealToolUse={onRevealToolUse}
-              />
-            ))}
-          </Group>
-        )}
-        {stopped.length > 0 && (
-          <Group label="Stopped" accent="muted" count={stopped.length}>
-            {stopped.map((run) => (
-              <RunCard
-                key={run.taskId}
-                run={run}
-                onRevealToolUse={onRevealToolUse}
-              />
-            ))}
-          </Group>
-        )}
-        {done.length > 0 && (
-          <Group label="Done" accent="success" count={done.length}>
-            {done.map((run) => (
-              <RunCard
-                key={run.taskId}
-                run={run}
-                onRevealToolUse={onRevealToolUse}
-              />
-            ))}
-          </Group>
-        )}
+        {ordered.map((run) => (
+          <RunCard
+            key={run.taskId}
+            run={run}
+            defaultExpanded={run.status === "running"}
+            onRevealToolUse={onRevealToolUse}
+          />
+        ))}
       </div>
     </div>
-  );
-}
-
-function Group({
-  label,
-  accent,
-  count,
-  children,
-}: {
-  label: string;
-  accent: "klein" | "success" | "danger" | "muted";
-  count: number;
-  children: React.ReactNode;
-}) {
-  const accentClass = {
-    klein: "text-klein",
-    success: "text-ink-soft",
-    danger: "text-danger",
-    muted: "text-ink-muted",
-  }[accent];
-  return (
-    <section>
-      <div className="px-4 pt-2.5 pb-1 flex items-baseline gap-2">
-        <span
-          className={cn(
-            "uppercase tracking-[0.12em] text-[10px] font-medium",
-            accentClass,
-          )}
-        >
-          {label}
-        </span>
-        <span className="mono text-[10.5px] text-ink-muted">· {count}</span>
-      </div>
-      <div className="px-0.5">{children}</div>
-    </section>
   );
 }
 
@@ -346,11 +288,7 @@ function LiveStream({
         </span>
       </div>
       {renderable.length === 0 ? (
-        <div className="text-[11.5px] text-ink-muted italic pl-4 pb-1">
-          {isLive
-            ? "Waiting for the first tool call…"
-            : "No inline activity — open source turn for details."}
-        </div>
+        <EmptyStreamFallback run={run} isLive={isLive} />
       ) : (
         <div className="relative pl-4 space-y-2">
           <span
@@ -371,6 +309,55 @@ function LiveStream({
               onRevealToolUse={onRevealToolUse}
             />
           ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function EmptyStreamFallback({
+  run,
+  isLive,
+}: {
+  run: SubagentRun;
+  isLive: boolean;
+}) {
+  // Legacy runs (pre-Phase-1 SDK opt-in) and skipped-bash tasks land
+  // here with an empty stream. The `tool_result` summary on the parent
+  // Task/Agent tool_use is the only post-mortem we have — surface it
+  // with the same typography as the live-stream assistant_text blocks
+  // so the panel still reads like a transcript. `outputFile` is
+  // emitted by backgrounded subagents and gives the user the on-disk
+  // hand-off path. TODO(s-17): click-to-copy / jump once we have a
+  // file-viewer surface.
+  const summary = run.summary?.trim() || "";
+  if (!summary && !run.outputFile) {
+    return (
+      <div className="text-[11.5px] text-ink-muted italic pl-4 pb-1">
+        {isLive
+          ? "Waiting for the first tool call…"
+          : "No inline activity — open source turn for details."}
+      </div>
+    );
+  }
+  return (
+    <div className="pl-4 pb-1 space-y-2">
+      {summary && (
+        <div>
+          <div className="uppercase tracking-[0.12em] text-[10px] font-medium text-ink-muted mb-1">
+            Summary
+          </div>
+          <div className="text-[12px] leading-[1.55] text-ink-soft whitespace-pre-wrap break-words">
+            {summary}
+          </div>
+        </div>
+      )}
+      {run.outputFile && (
+        <div
+          className="mono text-[11px] text-ink-muted truncate"
+          title={run.outputFile}
+        >
+          → {run.outputFile}
         </div>
       )}
     </div>
