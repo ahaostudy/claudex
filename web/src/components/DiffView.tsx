@@ -30,13 +30,13 @@ export function DiffView({
 
   if (headerless) {
     return (
-      <div className="overflow-x-auto bg-canvas">
+      <div className="w-full overflow-x-auto bg-canvas">
         {diff.hunks.map((h, hi) => (
-          <div key={hi}>
-            <div className="mono text-[11px] px-3 py-1 bg-paper/60 text-ink-muted border-t border-b border-line/60">
+          <div key={hi} className="w-max min-w-full">
+            <div className="mono text-[11px] px-3 py-1 bg-paper/60 text-ink-muted border-t border-b border-line/60 min-w-full">
               {h.header}
             </div>
-            <div className="mono text-[12px] w-max min-w-full">
+            <div className="mono text-[12px] min-w-full">
               {h.lines.map((ln, i) => (
                 <div
                   key={i}
@@ -98,13 +98,13 @@ export function DiffView({
         </span>
       </button>
       {open && (
-        <div className="overflow-x-auto">
+        <div className="w-full overflow-x-auto">
           {diff.hunks.map((h, hi) => (
-            <div key={hi}>
-              <div className="mono text-[11px] px-3 py-1 bg-paper/60 text-ink-muted border-b border-line/60">
+            <div key={hi} className="w-max min-w-full">
+              <div className="mono text-[11px] px-3 py-1 bg-paper/60 text-ink-muted border-b border-line/60 min-w-full">
                 {h.header}
               </div>
-              <div className="mono text-[12px] w-max min-w-full">
+              <div className="mono text-[12px] min-w-full">
                 {h.lines.map((ln, i) => (
                   <div
                     key={i}
