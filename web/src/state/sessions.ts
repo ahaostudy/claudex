@@ -11,6 +11,13 @@ import type {
   SessionEvent,
   ServerFrame,
   SessionStatus,
+  SubagentEndPayload,
+  SubagentLifecycleStatus,
+  SubagentProgressPayload,
+  SubagentStartPayload,
+  SubagentToolProgressPayload,
+  SubagentUpdatePayload,
+  SubagentUsage,
 } from "@claudex/shared";
 
 // ---------------------------------------------------------------------------
@@ -138,7 +145,18 @@ export type UIPiece =
         size: number;
       }>;
     }
-  | { kind: "assistant_text"; id: string; text: string; seq?: number; createdAt?: string }
+  | {
+      kind: "assistant_text";
+      id: string;
+      text: string;
+      seq?: number;
+      createdAt?: string;
+      /** Non-null when this text block came from a subagent's turn
+       * (SDK `SDKAssistantMessage.parent_tool_use_id`). Used by the s-17
+       * rail selector to gather nested child output under its SubagentRun.
+       * Undefined on main-thread text — treat as main thread. */
+      parentToolUseId?: string;
+    }
   | {
       kind: "tool_use";
       id: string;
@@ -146,6 +164,7 @@ export type UIPiece =
       input: Record<string, unknown>;
       seq?: number;
       createdAt?: string;
+      parentToolUseId?: string;
     }
   | {
       kind: "tool_result";
@@ -154,8 +173,15 @@ export type UIPiece =
       isError: boolean;
       seq?: number;
       createdAt?: string;
+      parentToolUseId?: string;
     }
-  | { kind: "thinking"; text: string; seq?: number; createdAt?: string }
+  | {
+      kind: "thinking";
+      text: string;
+      seq?: number;
+      createdAt?: string;
+      parentToolUseId?: string;
+    }
   | {
       kind: "permission_request";
       approvalId: string;
@@ -195,6 +221,22 @@ export type UIPiece =
       decision?: "accept" | "reject";
       decisionSeq?: number;
     }
+  // ------------------------------------------------------------------
+  // Live subagents (s-17). Five pieces per subagent run lifecycle —
+  // start / progress / update / end / tool_progress. They land in the
+  // transcript like any other piece, but the s-17 rail aggregates them
+  // by `taskId` via the `useSubagentRuns(sessionId)` selector rather
+  // than rendering them inline in the main chat thread.
+  // ------------------------------------------------------------------
+  | ({ kind: "subagent_start"; seq?: number; createdAt?: string } & SubagentStartPayload)
+  | ({ kind: "subagent_progress"; seq?: number; createdAt?: string } & SubagentProgressPayload)
+  | ({ kind: "subagent_update"; seq?: number; createdAt?: string } & SubagentUpdatePayload)
+  | ({ kind: "subagent_end"; seq?: number; createdAt?: string } & SubagentEndPayload)
+  | ({
+      kind: "subagent_tool_progress";
+      seq?: number;
+      createdAt?: string;
+    } & SubagentToolProgressPayload)
   // `pending` is a UI-only piece (never persisted, never comes off the wire).
   // Inserted right after a user_message echo to give the user immediate
   // feedback that claude is processing. Removed as soon as any substantive
@@ -335,9 +377,20 @@ function eventToPiece(ev: SessionEvent): UIPiece | null {
         text: String(p.text ?? ""),
         seq: ev.seq,
         createdAt: ev.createdAt,
+        ...(typeof p.parentToolUseId === "string"
+          ? { parentToolUseId: p.parentToolUseId }
+          : {}),
       };
     case "assistant_thinking":
-      return { kind: "thinking", text: String(p.text ?? ""), seq: ev.seq, createdAt: ev.createdAt };
+      return {
+        kind: "thinking",
+        text: String(p.text ?? ""),
+        seq: ev.seq,
+        createdAt: ev.createdAt,
+        ...(typeof p.parentToolUseId === "string"
+          ? { parentToolUseId: p.parentToolUseId }
+          : {}),
+      };
     case "tool_use":
       return {
         kind: "tool_use",
@@ -346,6 +399,9 @@ function eventToPiece(ev: SessionEvent): UIPiece | null {
         input: (p.input as Record<string, unknown>) ?? {},
         seq: ev.seq,
         createdAt: ev.createdAt,
+        ...(typeof p.parentToolUseId === "string"
+          ? { parentToolUseId: p.parentToolUseId }
+          : {}),
       };
     case "tool_result":
       return {
@@ -355,6 +411,9 @@ function eventToPiece(ev: SessionEvent): UIPiece | null {
         isError: Boolean(p.isError),
         seq: ev.seq,
         createdAt: ev.createdAt,
+        ...(typeof p.parentToolUseId === "string"
+          ? { parentToolUseId: p.parentToolUseId }
+          : {}),
       };
     case "permission_request":
       return {
@@ -394,9 +453,99 @@ function eventToPiece(ev: SessionEvent): UIPiece | null {
       // Decisions land as a sibling event; the reducer folds them into the
       // matching plan_accept_request piece. Skip in the default builder.
       return null;
+    case "subagent_start": {
+      // Five new live-subagent kinds (s-17). We surface them as
+      // transcript pieces so they persist through reload / resume; the
+      // rail selector (useSubagentRuns) groups them by taskId.
+      const usage = (p.usage as SubagentUsage | undefined) ?? {};
+      void usage;
+      return {
+        kind: "subagent_start",
+        seq: ev.seq,
+        createdAt: ev.createdAt,
+        taskId: String(p.taskId ?? ""),
+        parentToolUseId:
+          typeof p.parentToolUseId === "string" ? p.parentToolUseId : null,
+        description: String(p.description ?? ""),
+        ...(typeof p.agentType === "string" ? { agentType: p.agentType } : {}),
+        ...(typeof p.taskType === "string" ? { taskType: p.taskType } : {}),
+        ...(typeof p.workflowName === "string"
+          ? { workflowName: p.workflowName }
+          : {}),
+        ...(typeof p.prompt === "string" ? { prompt: p.prompt } : {}),
+        ...(typeof p.isBackgrounded === "boolean"
+          ? { isBackgrounded: p.isBackgrounded }
+          : {}),
+        at: String(p.at ?? ev.createdAt),
+      };
+    }
+    case "subagent_progress":
+      return {
+        kind: "subagent_progress",
+        seq: ev.seq,
+        createdAt: ev.createdAt,
+        taskId: String(p.taskId ?? ""),
+        description: String(p.description ?? ""),
+        ...(typeof p.lastToolName === "string"
+          ? { lastToolName: p.lastToolName }
+          : {}),
+        ...(typeof p.summary === "string" ? { summary: p.summary } : {}),
+        usage: (p.usage as SubagentUsage | undefined) ?? {},
+        at: String(p.at ?? ev.createdAt),
+      };
+    case "subagent_update":
+      return {
+        kind: "subagent_update",
+        seq: ev.seq,
+        createdAt: ev.createdAt,
+        taskId: String(p.taskId ?? ""),
+        patch: (p.patch as Record<string, unknown> | undefined) ?? {},
+        at: String(p.at ?? ev.createdAt),
+      } as UIPiece;
+    case "subagent_end": {
+      const status = isLifecycleStatus(p.status)
+        ? (p.status as SubagentLifecycleStatus)
+        : "completed";
+      return {
+        kind: "subagent_end",
+        seq: ev.seq,
+        createdAt: ev.createdAt,
+        taskId: String(p.taskId ?? ""),
+        status,
+        summary: String(p.summary ?? ""),
+        ...(typeof p.outputFile === "string"
+          ? { outputFile: p.outputFile }
+          : {}),
+        ...(typeof p.toolUseId === "string" ? { toolUseId: p.toolUseId } : {}),
+        ...(p.usage ? { usage: p.usage as SubagentUsage } : {}),
+        at: String(p.at ?? ev.createdAt),
+      };
+    }
+    case "subagent_tool_progress":
+      // Not normally persisted (see server/src/sessions/manager.ts —
+      // we broadcast but skip the DB row). Here for completeness in
+      // case a future change starts persisting them.
+      return {
+        kind: "subagent_tool_progress",
+        seq: ev.seq,
+        createdAt: ev.createdAt,
+        toolUseId: String(p.toolUseId ?? ""),
+        toolName: String(p.toolName ?? ""),
+        parentToolUseId:
+          typeof p.parentToolUseId === "string" ? p.parentToolUseId : null,
+        elapsedSeconds: Number(p.elapsedSeconds ?? 0),
+        ...(typeof p.taskId === "string" ? { taskId: p.taskId } : {}),
+        at: String(p.at ?? ev.createdAt),
+      };
     default:
       return null;
   }
+}
+
+function isLifecycleStatus(v: unknown): v is SubagentLifecycleStatus {
+  return (
+    v === "running" || v === "completed" || v === "failed" || v === "stopped"
+  );
 }
 
 function frameToPiece(frame: ServerFrame): UIPiece | null {
@@ -406,15 +555,27 @@ function frameToPiece(frame: ServerFrame): UIPiece | null {
         kind: "assistant_text",
         id: frame.messageId,
         text: frame.text,
+        ...(frame.parentToolUseId !== undefined
+          ? { parentToolUseId: frame.parentToolUseId }
+          : {}),
       };
     case "thinking":
-      return { kind: "thinking", text: frame.text };
+      return {
+        kind: "thinking",
+        text: frame.text,
+        ...(frame.parentToolUseId !== undefined
+          ? { parentToolUseId: frame.parentToolUseId }
+          : {}),
+      };
     case "tool_use":
       return {
         kind: "tool_use",
         id: frame.toolUseId,
         name: frame.name,
         input: frame.input,
+        ...(frame.parentToolUseId !== undefined
+          ? { parentToolUseId: frame.parentToolUseId }
+          : {}),
       };
     case "tool_result":
       return {
@@ -422,6 +583,9 @@ function frameToPiece(frame: ServerFrame): UIPiece | null {
         toolUseId: frame.toolUseId,
         content: frame.content,
         isError: frame.isError,
+        ...(frame.parentToolUseId !== undefined
+          ? { parentToolUseId: frame.parentToolUseId }
+          : {}),
       };
     case "permission_request":
       return {
@@ -442,6 +606,65 @@ function frameToPiece(frame: ServerFrame): UIPiece | null {
         kind: "plan_accept_request",
         planId: frame.planId,
         plan: frame.plan,
+      };
+    case "subagent_start":
+      return {
+        kind: "subagent_start",
+        taskId: frame.taskId,
+        parentToolUseId: frame.parentToolUseId,
+        description: frame.description,
+        ...(frame.agentType !== undefined ? { agentType: frame.agentType } : {}),
+        ...(frame.taskType !== undefined ? { taskType: frame.taskType } : {}),
+        ...(frame.workflowName !== undefined
+          ? { workflowName: frame.workflowName }
+          : {}),
+        ...(frame.prompt !== undefined ? { prompt: frame.prompt } : {}),
+        ...(frame.isBackgrounded !== undefined
+          ? { isBackgrounded: frame.isBackgrounded }
+          : {}),
+        at: frame.at,
+      };
+    case "subagent_progress":
+      return {
+        kind: "subagent_progress",
+        taskId: frame.taskId,
+        description: frame.description,
+        ...(frame.lastToolName !== undefined
+          ? { lastToolName: frame.lastToolName }
+          : {}),
+        ...(frame.summary !== undefined ? { summary: frame.summary } : {}),
+        usage: frame.usage,
+        at: frame.at,
+      };
+    case "subagent_update":
+      return {
+        kind: "subagent_update",
+        taskId: frame.taskId,
+        patch: frame.patch,
+        at: frame.at,
+      };
+    case "subagent_end":
+      return {
+        kind: "subagent_end",
+        taskId: frame.taskId,
+        status: frame.status,
+        summary: frame.summary,
+        ...(frame.outputFile !== undefined
+          ? { outputFile: frame.outputFile }
+          : {}),
+        ...(frame.toolUseId !== undefined ? { toolUseId: frame.toolUseId } : {}),
+        ...(frame.usage !== undefined ? { usage: frame.usage } : {}),
+        at: frame.at,
+      };
+    case "subagent_tool_progress":
+      return {
+        kind: "subagent_tool_progress",
+        toolUseId: frame.toolUseId,
+        toolName: frame.toolName,
+        parentToolUseId: frame.parentToolUseId,
+        elapsedSeconds: frame.elapsedSeconds,
+        ...(frame.taskId !== undefined ? { taskId: frame.taskId } : {}),
+        at: frame.at,
       };
     default:
       return null;
@@ -1313,3 +1536,194 @@ export const useSessions = create<SessionState>((set, get) => {
   },
   };
 });
+
+// ---------------------------------------------------------------------------
+// Subagent run aggregation (s-17)
+//
+// The rail surfaces one row per subagent task_id. Each row carries the
+// latest description ("activeForm"), cumulative usage, status, and a
+// chronological stream of the child's text chunks + nested tool_use /
+// tool_result pairs — anything whose `parentToolUseId` matches this
+// run's parent tool_use id.
+//
+// Built by walking the session's UIPiece[] twice:
+//   1. First pass seeds a `SubagentRun` per `subagent_start` piece
+//      (taskId → run). `subagent_progress` / `subagent_update` mutate
+//      the latest description and status. `subagent_end` flips status
+//      to the terminal value and fills summary/outputFile.
+//   2. Second pass gathers every text / thinking / tool_use / tool_result
+//      piece whose `parentToolUseId` matches one of the run's parent
+//      ids, pushing them into that run's `stream` in original order.
+//
+// Memoization: the selector pattern below caches per (sessionId,
+// transcript-array-reference). Since the transcript array is replaced
+// immutably on every update, a simple reference-identity cache is
+// enough — no deep compare.
+// ---------------------------------------------------------------------------
+
+export interface SubagentStreamEvent {
+  /** Ordering key — the UIPiece's `seq`, or a fallback if missing. */
+  seq: number;
+  piece: UIPiece;
+}
+
+export interface SubagentRun {
+  taskId: string;
+  parentToolUseId: string | null;
+  description: string;
+  status: SubagentLifecycleStatus;
+  agentType: string | null;
+  taskType: string | null;
+  workflowName: string | null;
+  prompt: string | null;
+  isBackgrounded: boolean;
+  startedAt: string;
+  endedAt: string | null;
+  lastToolName: string | null;
+  usage: SubagentUsage;
+  summary: string | null;
+  outputFile: string | null;
+  error: string | null;
+  /** Ordered child events (nested tool chips, text chunks, thinking). */
+  stream: SubagentStreamEvent[];
+  /** Liveness hint for the rail ticker — last time we saw any update
+   * (progress tick, tool_progress heartbeat, nested child message). */
+  lastActivityAt: string;
+}
+
+interface RunCacheEntry {
+  transcript: UIPiece[];
+  runs: SubagentRun[];
+}
+const runCache = new WeakMap<UIPiece[], RunCacheEntry>();
+
+export function computeSubagentRuns(pieces: UIPiece[]): SubagentRun[] {
+  const cached = runCache.get(pieces);
+  if (cached && cached.transcript === pieces) return cached.runs;
+  const byTaskId = new Map<string, SubagentRun>();
+  const byParentToolUseId = new Map<string, SubagentRun>();
+  // First pass — seed runs from `subagent_start` and apply subsequent
+  // lifecycle pieces.
+  for (const piece of pieces) {
+    if (piece.kind === "subagent_start") {
+      const run: SubagentRun = {
+        taskId: piece.taskId,
+        parentToolUseId: piece.parentToolUseId,
+        description: piece.description,
+        status: "running",
+        agentType: piece.agentType ?? null,
+        taskType: piece.taskType ?? null,
+        workflowName: piece.workflowName ?? null,
+        prompt: piece.prompt ?? null,
+        isBackgrounded: piece.isBackgrounded ?? false,
+        startedAt: piece.at,
+        endedAt: null,
+        lastToolName: null,
+        usage: {},
+        summary: null,
+        outputFile: null,
+        error: null,
+        stream: [],
+        lastActivityAt: piece.at,
+      };
+      byTaskId.set(piece.taskId, run);
+      if (piece.parentToolUseId) byParentToolUseId.set(piece.parentToolUseId, run);
+      continue;
+    }
+    if (piece.kind === "subagent_progress") {
+      const run = byTaskId.get(piece.taskId);
+      if (!run) continue;
+      run.description = piece.description || run.description;
+      if (piece.lastToolName) run.lastToolName = piece.lastToolName;
+      if (piece.summary) run.summary = piece.summary;
+      run.usage = { ...run.usage, ...piece.usage };
+      run.lastActivityAt = piece.at;
+      continue;
+    }
+    if (piece.kind === "subagent_update") {
+      const run = byTaskId.get(piece.taskId);
+      if (!run) continue;
+      const patch = piece.patch;
+      if (typeof patch.status === "string" && isLifecycleStatus(patch.status)) {
+        run.status = patch.status as SubagentLifecycleStatus;
+      }
+      if (typeof patch.description === "string") {
+        run.description = patch.description;
+      }
+      if (typeof patch.isBackgrounded === "boolean") {
+        run.isBackgrounded = patch.isBackgrounded;
+      }
+      if (typeof patch.error === "string") run.error = patch.error;
+      run.lastActivityAt = piece.at;
+      continue;
+    }
+    if (piece.kind === "subagent_end") {
+      const run = byTaskId.get(piece.taskId);
+      if (!run) continue;
+      run.status = piece.status;
+      run.endedAt = piece.at;
+      run.summary = piece.summary || run.summary;
+      if (piece.outputFile) run.outputFile = piece.outputFile;
+      if (piece.usage) run.usage = { ...run.usage, ...piece.usage };
+      run.lastActivityAt = piece.at;
+      continue;
+    }
+    if (piece.kind === "subagent_tool_progress") {
+      const key = piece.parentToolUseId ?? "";
+      const run = key ? byParentToolUseId.get(key) : undefined;
+      if (!run) continue;
+      run.lastActivityAt = piece.at;
+      run.lastToolName = piece.toolName;
+      continue;
+    }
+  }
+  // Second pass — attach nested child pieces to their run via
+  // parentToolUseId. `parentToolUseId` on a tool_use points at the parent
+  // Task/Agent/Explore tool_use; we seeded a run's parent pointer from
+  // `subagent_start.parentToolUseId`. Same pointer — same group.
+  for (const piece of pieces) {
+    let parent: string | undefined;
+    if (
+      piece.kind === "assistant_text" ||
+      piece.kind === "thinking" ||
+      piece.kind === "tool_use" ||
+      piece.kind === "tool_result"
+    ) {
+      if (typeof piece.parentToolUseId === "string") {
+        parent = piece.parentToolUseId;
+      }
+    }
+    if (!parent) continue;
+    const run = byParentToolUseId.get(parent);
+    if (!run) continue;
+    const seq =
+      "seq" in piece && typeof piece.seq === "number"
+        ? piece.seq
+        : Number.MAX_SAFE_INTEGER;
+    run.stream.push({ seq, piece });
+    if ("createdAt" in piece && typeof piece.createdAt === "string") {
+      run.lastActivityAt = piece.createdAt;
+    }
+  }
+  // Sort each run's stream by seq — the first pass preserves insertion
+  // order but a refetched transcript may have interleaved live + history.
+  for (const run of byTaskId.values()) {
+    run.stream.sort((a, b) => a.seq - b.seq);
+  }
+  const runs = Array.from(byTaskId.values()).sort((a, b) =>
+    a.startedAt < b.startedAt ? -1 : a.startedAt > b.startedAt ? 1 : 0,
+  );
+  runCache.set(pieces, { transcript: pieces, runs });
+  return runs;
+}
+
+/** Hook-friendly selector — memoized per transcript array reference. */
+export function useSubagentRuns(sessionId: string): SubagentRun[] {
+  return useSessions((s) => {
+    const pieces = s.transcripts[sessionId];
+    if (!pieces) return EMPTY_RUNS;
+    return computeSubagentRuns(pieces);
+  });
+}
+
+const EMPTY_RUNS: SubagentRun[] = [];
