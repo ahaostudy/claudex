@@ -164,12 +164,17 @@ const COMPONENTS: Components = {
   ),
   code: ({ className, children, ...rest }) => {
     // react-markdown sends `inline` on code nodes that live inline vs in a
-    // pre. The v10 API dropped the `inline` prop, so we disambiguate by
-    // checking whether the parent is a <pre> — which it is for fenced
-    // blocks. Inline code gets the pill treatment; block code gets wrapped
-    // by the `pre` renderer below.
+    // pre. The v10 API dropped the `inline` prop, so we disambiguate two
+    // ways: (1) a `language-xxx` class set by remark for fenced blocks with
+    // a language tag, and (2) content containing a newline — fenced blocks
+    // always carry at least a trailing `\n`, inline spans never do. Without
+    // check (2), a fence opened with a bare ``` (no language) falls through
+    // to the pill renderer, which then nests a bordered paper pill inside
+    // the <pre> container — exactly the "code block contains inline code
+    // blocks" look the user flagged.
     const isBlock =
-      typeof className === "string" && /language-/.test(className);
+      (typeof className === "string" && /language-/.test(className)) ||
+      hasNewline(children);
     if (isBlock) {
       // Block code: reset any inherited pill styling so the inner <code>
       // inside the <pre> doesn't re-introduce a background / border. The
@@ -227,6 +232,24 @@ const COMPONENTS: Components = {
     );
   },
 };
+
+/**
+ * Recursively check whether a React node's text content contains a newline.
+ * Used by the `code` renderer to detect fenced code blocks that lack a
+ * `language-xxx` class — they still contain at least a trailing `\n`,
+ * whereas inline code spans never span a line.
+ */
+function hasNewline(node: React.ReactNode): boolean {
+  if (typeof node === "string") return node.includes("\n");
+  if (typeof node === "number") return false;
+  if (Array.isArray(node)) return node.some(hasNewline);
+  if (node && typeof node === "object" && "props" in node) {
+    return hasNewline(
+      (node as { props: { children?: React.ReactNode } }).props.children,
+    );
+  }
+  return false;
+}
 
 /**
  * Flatten a React node tree down to its raw text content. Fenced code blocks
