@@ -102,6 +102,7 @@
           <a href="#s-14" class="px-2 h-7 inline-flex items-center gap-1 rounded-[6px] hover:bg-paper text-[12px] text-ink-soft"><span class="mono text-[10px] text-ink-faint">14</span>Files</a>
           <a href="#s-15" class="px-2 h-7 inline-flex items-center gap-1 rounded-[6px] hover:bg-paper text-[12px] text-ink-soft"><span class="mono text-[10px] text-ink-faint">15</span>Session diff</a>
           <a href="#s-16" class="px-2 h-7 inline-flex items-center gap-1 rounded-[6px] hover:bg-paper text-[12px] text-ink-soft"><span class="mono text-[10px] text-ink-faint">16</span>Plan</a>
+          <a href="#s-17" class="px-2 h-7 inline-flex items-center gap-1 rounded-[6px] hover:bg-paper text-[12px] text-ink-soft"><span class="mono text-[10px] text-ink-faint">17</span>Agents</a>
         </nav>
         <div class="ml-auto flex items-center gap-3 text-[12px] text-ink-muted">
           <span class="hidden sm:inline">High-fidelity mockup · 12 screens · mobile + desktop</span>
@@ -3653,6 +3654,627 @@
     </section>
 
     <!-- =========================================================
+      SCREEN 17 · LIVE SUBAGENTS (plan-strip style, with live stream)
+    ========================================================= -->
+    <section id="s-17" class="border-b border-line">
+      <div class="max-w-[1600px] mx-auto px-5 lg:px-10 pt-14">
+        <div class="flex items-baseline gap-4 mb-3">
+          <span class="mono text-[12px] text-ink-faint">screen · 17</span>
+          <h2 class="display text-[1.75rem] leading-tight">Live subagents</h2>
+          <span class="mono text-[11px] text-ink-muted">supersedes s-13</span>
+        </div>
+        <p class="max-w-[78ch] text-[15px] text-ink-muted mb-4">Subagents get the same two-surface treatment as the plan (s-16), plus one new thing: each running row <em>unfolds</em> into a live stream of its tool calls and text chunks, so you can watch a delegated sweep without leaving the parent session. No more opening a third tab to guess whether the explorer is stuck.</p>
+        <ul class="text-[14px] text-ink-soft space-y-1.5 mb-10 max-w-[78ch]">
+          <li class="flex items-start gap-2"><span class="mono text-klein text-[12px] mt-[3px]">01</span><span><span class="font-medium">Subagents strip</span> — thin sticky bar under the session header. One dot per active subagent + the most-recent activeForm. Tap → open card.</span></li>
+          <li class="flex items-start gap-2"><span class="mono text-klein text-[12px] mt-[3px]">02</span><span><span class="font-medium">Subagent card</span> — right rail on desktop, bottom sheet on mobile. Grouped <em>Running / Done / Failed</em>; running rows are expanded by default.</span></li>
+          <li class="flex items-start gap-2"><span class="mono text-klein text-[12px] mt-[3px]">03</span><span><span class="font-medium">Live stream inside each running row</span> — tool chips (Grep / Read / Edit / Bash / nested Task) + the subagent's text chunks, with a blinking caret on the last partial line. A <span class="mono text-[13px]">follow</span> toggle auto-sticks to the tail.</span></li>
+          <li class="flex items-start gap-2"><span class="mono text-klein text-[12px] mt-[3px]">04</span><span><span class="font-medium">Lightweight pointer in thread</span> — when the parent turn spawns a subagent, chat shows a one-line "Agent started → view" marker instead of dumping the full Task JSON inline.</span></li>
+        </ul>
+
+        <div class="flex flex-col xl:flex-row flex-wrap gap-10 items-start justify-center pb-16">
+
+          <!-- ==================== iPhone A · collapsed strip + pointer in thread ==================== -->
+          <div class="flex flex-col items-center gap-3">
+            <div class="caps text-ink-muted">iPhone · strip + pointer in thread</div>
+            <div class="iphone">
+              <div class="iphone-inner">
+                <div class="iphone-island"></div>
+                <div class="iphone-status"><span class="mono">9:41</span><span class="flex items-center gap-1"><span class="h-2 w-4 bg-ink rounded-sm"></span><span class="mono text-[11px]">5G</span><span class="h-2.5 w-5 border border-ink rounded-sm flex items-center justify-end pr-[1px]"><span class="h-1.5 w-3.5 bg-ink rounded-[1px]"></span></span></span></div>
+                <div class="iphone-home"></div>
+                <div class="iphone-content flex flex-col bg-canvas">
+                  <!-- session header -->
+                  <div class="px-4 py-2.5 border-b border-line flex items-center gap-2 shrink-0">
+                    <button class="h-8 w-8 rounded-[8px] bg-paper border border-line flex items-center justify-center"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-4 h-4"><path d="M15 6l-6 6 6 6"/></svg></button>
+                    <div class="min-w-0 flex-1">
+                      <div class="flex items-center gap-1.5"><span class="h-2 w-2 rounded-full bg-success animate-pulse"></span><div class="text-[14px] font-medium truncate">Fix hydration mismatch…</div></div>
+                      <div class="flex items-center gap-1.5 text-[11px] text-ink-muted mt-0.5"><span class="mono">spindle</span><span>·</span><span class="mono">opus-4.7</span></div>
+                    </div>
+                    <svg width="22" height="22"><circle cx="11" cy="11" r="9" fill="none" stroke="#e8e4d8" stroke-width="2.5"/><circle cx="11" cy="11" r="9" fill="none" stroke="#cc785c" stroke-width="2.5" stroke-linecap="round" stroke-dasharray="56.55" stroke-dashoffset="38.45" transform="rotate(-90 11 11)"/></svg>
+                  </div>
+
+                  <!-- SUBAGENTS STRIP (collapsed, persistent) -->
+                  <button class="w-full px-3 py-2 bg-paper/70 border-b border-line flex items-center gap-2 shrink-0 active:bg-paper">
+                    <span class="inline-flex items-center gap-1 px-1.5 h-5 rounded-[4px] border border-klein/30 bg-klein-wash text-klein-ink mono text-[10px] font-medium uppercase tracking-[0.08em] shrink-0">Agents</span>
+                    <!-- per-agent dots: 2 running (pulsing), 1 done, 1 failed -->
+                    <span class="flex items-center gap-[3px] shrink-0">
+                      <span class="h-1.5 w-3 rounded-full bg-klein" style="box-shadow:0 0 0 2px rgba(204,120,92,0.18)"></span>
+                      <span class="h-1.5 w-3 rounded-full bg-klein/70" style="box-shadow:0 0 0 2px rgba(204,120,92,0.14)"></span>
+                      <span class="h-1.5 w-1.5 rounded-full bg-success"></span>
+                      <span class="h-1.5 w-1.5 rounded-full bg-danger/70"></span>
+                    </span>
+                    <span class="mono text-[10.5px] text-ink-muted shrink-0">2 live</span>
+                    <span class="text-[12.5px] text-ink font-medium truncate flex-1 text-left"><span class="mono text-[11px] text-klein-ink mr-1">explorer</span>Grepping "Intl.DateTimeFormat"</span>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-3.5 h-3.5 text-ink-muted shrink-0"><path d="M6 9l6 6 6-6"/></svg>
+                  </button>
+
+                  <!-- messages -->
+                  <div class="flex-1 overflow-y-auto px-4 py-4 space-y-4">
+                    <div class="flex justify-end"><div class="max-w-[88%] bg-ink text-canvas rounded-[14px] rounded-br-[4px] px-3.5 py-2.5 shadow-card text-[14px] leading-[1.5]">Fan this out: one explorer to trace the hydration warning, one reviewer on the retry PR, and one to benchmark Intl perf.</div></div>
+
+                    <div>
+                      <div class="flex items-center gap-2 mb-1.5"><svg viewBox="0 0 32 32" class="w-4 h-4"><path d="M9 22 L16 8 L23 22 Z" fill="#cc785c"/><circle cx="16" cy="18" r="2.2" fill="#faf9f5"/></svg><span class="mono text-[11px] text-ink-muted">claude · opus-4.7</span></div>
+                      <div class="text-[14px] leading-[1.6] text-ink">Dispatching three in parallel. Live runs in the strip above.</div>
+
+                      <!-- LIGHTWEIGHT POINTER · agent started -->
+                      <button class="w-full mt-2 flex items-center gap-2 py-1.5 pl-2.5 pr-2 rounded-[8px] bg-klein-wash/40 border border-dashed border-klein/35 text-left">
+                        <svg class="w-3.5 h-3.5 text-klein animate-spin shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.2-8.6"/></svg>
+                        <span class="mono text-[11px] text-klein-ink uppercase tracking-[0.1em] shrink-0">Agent started</span>
+                        <span class="text-[12px] text-ink-soft truncate">code-explorer · Trace hydration warning</span>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-3 h-3 text-klein ml-auto shrink-0"><path d="M7 17L17 7M9 7h8v8"/></svg>
+                      </button>
+
+                      <!-- second pointer · second agent -->
+                      <button class="w-full mt-1.5 flex items-center gap-2 py-1.5 pl-2.5 pr-2 rounded-[8px] bg-klein-wash/40 border border-dashed border-klein/35 text-left">
+                        <svg class="w-3.5 h-3.5 text-klein animate-spin shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.2-8.6"/></svg>
+                        <span class="mono text-[11px] text-klein-ink uppercase tracking-[0.1em] shrink-0">Agent started</span>
+                        <span class="text-[12px] text-ink-soft truncate">code-reviewer · Review retry lanes A/B</span>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-3 h-3 text-klein ml-auto shrink-0"><path d="M7 17L17 7M9 7h8v8"/></svg>
+                      </button>
+
+                      <div class="text-[14px] leading-[1.6] text-ink mt-2">I'll merge their reports into the plan once both land.</div>
+                    </div>
+
+                    <!-- agent finished pointer -->
+                    <div>
+                      <button class="w-full flex items-center gap-2 py-1.5 pl-2.5 pr-2 rounded-[8px] bg-paper border border-dashed border-line-strong text-left">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="w-3.5 h-3.5 text-success shrink-0"><path d="M5 12l5 5 9-10"/></svg>
+                        <span class="mono text-[11px] text-ink-muted uppercase tracking-[0.1em] shrink-0">Agent done</span>
+                        <span class="text-[12px] text-ink-soft truncate">code-reviewer · 1m 42s · 3 findings</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  <!-- composer -->
+                  <div class="px-3 pt-2 pb-3 border-t border-line flex items-end gap-2 bg-canvas">
+                    <div class="flex-1 rounded-[14px] border border-line bg-paper p-2">
+                      <div class="text-[13px] text-ink-muted px-2 py-1">Reply to claude…<span class="caret"></span></div>
+                    </div>
+                    <button class="h-9 w-9 rounded-full bg-klein text-canvas flex items-center justify-center shadow-card shrink-0"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" class="w-3.5 h-3.5"><path d="M5 12l7-7 7 7M12 5v14"/></svg></button>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="text-[11px] text-ink-muted max-w-[300px] text-center">Strip pins to the top; one compact dot per agent shows who's alive. Chat never inlines the Task JSON — just "started / done" pointers.</div>
+          </div>
+
+          <!-- ==================== iPhone B · expanded bottom sheet with live stream ==================== -->
+          <div class="flex flex-col items-center gap-3">
+            <div class="caps text-ink-muted">iPhone · sheet open · live stream</div>
+            <div class="iphone">
+              <div class="iphone-inner">
+                <div class="iphone-island"></div>
+                <div class="iphone-status"><span class="mono">9:41</span><span class="flex items-center gap-1"><span class="h-2 w-4 bg-ink rounded-sm"></span><span class="mono text-[11px]">5G</span><span class="h-2.5 w-5 border border-ink rounded-sm flex items-center justify-end pr-[1px]"><span class="h-1.5 w-3.5 bg-ink rounded-[1px]"></span></span></span></div>
+                <div class="iphone-home"></div>
+                <div class="iphone-content relative bg-canvas flex flex-col">
+                  <!-- header (visible behind overlay) -->
+                  <div class="px-4 py-2.5 border-b border-line flex items-center gap-2 shrink-0">
+                    <div class="h-8 w-8 rounded-[8px] bg-paper border border-line flex items-center justify-center"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-4 h-4 text-ink-soft"><path d="M15 6l-6 6 6 6"/></svg></div>
+                    <div class="min-w-0 flex-1">
+                      <div class="flex items-center gap-1.5"><span class="h-2 w-2 rounded-full bg-success"></span><div class="text-[14px] font-medium truncate">Fix hydration mismatch…</div></div>
+                      <div class="flex items-center gap-1.5 text-[11px] text-ink-muted mt-0.5"><span class="mono">spindle</span><span>·</span><span class="mono">opus-4.7</span></div>
+                    </div>
+                    <div class="h-8 w-8 rounded-[8px] bg-klein-wash/60 border border-klein/30 flex items-center justify-center"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-4 h-4 text-klein-ink"><circle cx="12" cy="8" r="3"/><path d="M6 20a6 6 0 0 1 12 0"/></svg></div>
+                  </div>
+                  <div class="flex-1 overflow-hidden px-4 py-3 space-y-3 opacity-60">
+                    <div class="flex justify-end"><div class="bg-ink text-canvas rounded-[14px] rounded-br-[4px] px-3.5 py-2 text-[13px]">Fan this out: three in parallel.</div></div>
+                    <div class="text-[13px] text-ink">Dispatching three in parallel…</div>
+                  </div>
+                  <div class="absolute inset-0 bg-ink/30 backdrop-blur-[2px] pointer-events-none"></div>
+
+                  <!-- BOTTOM SHEET · subagents + live stream -->
+                  <div class="absolute left-0 right-0 bottom-0 top-[56px] rounded-t-[20px] bg-canvas border-t border-x border-line shadow-lift flex flex-col">
+                    <div class="flex justify-center pt-3"><span class="h-1 w-12 bg-line-strong rounded-full"></span></div>
+                    <div class="px-4 pt-3 pb-3 border-b border-line flex items-start gap-3">
+                      <div class="flex-1 min-w-0">
+                        <div class="flex items-center gap-2"><span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-[6px] border border-klein/30 bg-klein-wash text-klein-ink text-[10px] font-medium uppercase tracking-[0.1em]"><span class="h-1.5 w-1.5 rounded-full bg-klein animate-pulse"></span>Agents</span><span class="caps text-ink-muted">2 live · 4 total</span></div>
+                        <div class="display text-[18px] leading-tight mt-1">Three delegated sweeps, live.</div>
+                      </div>
+                      <button class="h-8 w-8 rounded-[8px] border border-line flex items-center justify-center"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-3.5 h-3.5 text-ink-soft"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+                    </div>
+
+                    <div class="flex-1 overflow-y-auto">
+                      <!-- Running group -->
+                      <div class="px-4 pt-3 pb-1.5 flex items-baseline gap-2">
+                        <span class="caps text-klein">Running</span>
+                        <span class="mono text-[11px] text-ink-muted">· 2</span>
+                      </div>
+
+                      <!-- running row EXPANDED with live stream -->
+                      <div class="mx-3 mb-2 rounded-[10px] border border-klein/25 bg-klein-wash/30 overflow-hidden relative">
+                        <div class="absolute left-0 top-0 bottom-0 w-[3px] bg-klein"></div>
+                        <!-- row header -->
+                        <div class="pl-3 pr-2 py-2 flex items-center gap-2 border-b border-klein/20">
+                          <span class="inline-flex items-center gap-1 px-1.5 h-5 rounded-[4px] border border-klein/40 bg-canvas/80 mono text-[10px] text-klein-ink shrink-0">Agent</span>
+                          <span class="mono text-[10.5px] text-ink-soft shrink-0">code-explorer</span>
+                          <span class="relative h-2 w-2 rounded-full bg-klein animate-pulse shrink-0" style="box-shadow:0 0 0 3px rgba(204,120,92,0.22)"></span>
+                          <span class="text-[12px] text-ink truncate flex-1 font-medium">Trace hydration warning</span>
+                          <span class="mono text-[10px] text-ink-muted shrink-0">0:34</span>
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-3 h-3 text-ink-muted rotate-90 shrink-0"><path d="M9 6l6 6-6 6"/></svg>
+                        </div>
+                        <!-- live stream -->
+                        <div class="px-2.5 pt-2 pb-2.5 bg-canvas/60">
+                          <div class="flex items-center gap-1.5 mb-2 pl-1">
+                            <span class="h-1.5 w-1.5 rounded-full bg-klein animate-pulse"></span>
+                            <span class="caps text-klein-ink">live</span>
+                            <span class="mono text-[10px] text-ink-muted">· 6 events</span>
+                            <label class="ml-auto inline-flex items-center gap-1 mono text-[10px] text-ink-muted"><span class="h-3 w-6 rounded-full bg-klein relative"><span class="absolute right-[1px] top-[1px] h-2.5 w-2.5 rounded-full bg-canvas"></span></span>follow</label>
+                          </div>
+                          <!-- timeline -->
+                          <div class="relative pl-4 space-y-1.5">
+                            <span class="absolute left-[5px] top-1 bottom-4 w-px bg-line-strong"></span>
+                            <!-- text chunk -->
+                            <div class="relative">
+                              <span class="absolute -left-[11px] top-[7px] h-1.5 w-1.5 rounded-full bg-ink-faint"></span>
+                              <div class="text-[12px] leading-[1.5] text-ink-soft">Looking for <span class="mono text-[11px]">Intl.DateTimeFormat</span> usage — the warning points at the server/client boundary.</div>
+                            </div>
+                            <!-- tool chip -->
+                            <div class="relative">
+                              <span class="absolute -left-[11px] top-[9px] h-1.5 w-1.5 rounded-full bg-success"></span>
+                              <div class="flex items-center gap-1.5 py-1 pl-1.5 pr-2 rounded-[6px] bg-paper border border-line">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-3 h-3 text-ink-soft"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></svg>
+                                <span class="mono text-[10.5px] text-ink-soft">grep</span>
+                                <span class="mono text-[10px] text-ink-muted truncate flex-1">"Intl.DateTimeFormat" in lib/</span>
+                                <span class="mono text-[10px] text-success">7 hits</span>
+                              </div>
+                            </div>
+                            <div class="relative">
+                              <span class="absolute -left-[11px] top-[9px] h-1.5 w-1.5 rounded-full bg-success"></span>
+                              <div class="flex items-center gap-1.5 py-1 pl-1.5 pr-2 rounded-[6px] bg-paper border border-line">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-3 h-3 text-ink-soft"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6ZM14 2v6h6"/></svg>
+                                <span class="mono text-[10.5px] text-ink-soft">read</span>
+                                <span class="mono text-[10px] text-ink-muted truncate flex-1">lib/date.ts · 1-80</span>
+                              </div>
+                            </div>
+                            <div class="relative">
+                              <span class="absolute -left-[11px] top-[7px] h-1.5 w-1.5 rounded-full bg-ink-faint"></span>
+                              <div class="text-[12px] leading-[1.5] text-ink-soft">Found it — <span class="mono text-[11px]">formatDate</span> uses <span class="mono text-[11px]">navigator.language</span> which differs between server and client.</div>
+                            </div>
+                            <!-- running tool -->
+                            <div class="relative">
+                              <span class="absolute -left-[11px] top-[9px] h-1.5 w-1.5 rounded-full bg-klein animate-pulse"></span>
+                              <div class="flex items-center gap-1.5 py-1 pl-1.5 pr-2 rounded-[6px] bg-klein-wash/60 border border-klein/30">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-3 h-3 text-klein-ink"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></svg>
+                                <span class="mono text-[10.5px] text-klein-ink">grep</span>
+                                <span class="mono text-[10px] text-ink-muted truncate flex-1">"formatDate(" across repo</span>
+                                <svg class="w-3 h-3 text-klein animate-spin shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.2-8.6"/></svg>
+                              </div>
+                            </div>
+                            <!-- partial text with caret -->
+                            <div class="relative">
+                              <span class="absolute -left-[11px] top-[7px] h-1.5 w-1.5 rounded-full bg-klein animate-pulse"></span>
+                              <div class="text-[12px] leading-[1.5] text-ink">Three call sites, all inside <span class="mono text-[11px]">app/(marketing)</span><span class="caret"></span></div>
+                            </div>
+                          </div>
+                          <!-- sticky footer of the expansion -->
+                          <div class="mt-2 pt-2 border-t border-line/70 flex items-center gap-2">
+                            <button class="h-6 px-2 rounded-[6px] border border-line bg-canvas text-[11px] flex items-center gap-1"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-2.5 h-2.5"><rect x="6" y="6" width="12" height="12" rx="1.5"/></svg>stop</button>
+                            <button class="h-6 px-2 rounded-[6px] border border-line bg-canvas text-[11px] flex items-center gap-1">input</button>
+                            <span class="ml-auto mono text-[10px] text-ink-muted">id 47a1…c8</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <!-- running row COLLAPSED (just a preview line) -->
+                      <div class="mx-3 mb-2 rounded-[10px] border border-klein/20 bg-klein-wash/20 overflow-hidden relative">
+                        <div class="absolute left-0 top-0 bottom-0 w-[3px] bg-klein/70"></div>
+                        <button class="w-full pl-3 pr-2 py-2 flex items-center gap-2 text-left">
+                          <span class="inline-flex items-center gap-1 px-1.5 h-5 rounded-[4px] border border-klein/30 bg-canvas/70 mono text-[10px] text-klein-ink shrink-0">Agent</span>
+                          <span class="mono text-[10.5px] text-ink-soft shrink-0">code-reviewer</span>
+                          <svg class="w-3 h-3 text-klein animate-spin shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.2-8.6"/></svg>
+                          <span class="text-[12px] text-ink truncate flex-1">Reviewing retry lanes A vs B</span>
+                          <span class="mono text-[10px] text-ink-muted shrink-0">1:08</span>
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-3 h-3 text-ink-muted shrink-0"><path d="M6 9l6 6 6-6"/></svg>
+                        </button>
+                      </div>
+
+                      <!-- Done group -->
+                      <div class="px-4 pt-3 pb-1.5 flex items-baseline gap-2">
+                        <span class="caps text-ink-soft">Done</span>
+                        <span class="mono text-[11px] text-ink-muted">· 1</span>
+                      </div>
+                      <div class="mx-3 mb-1.5 rounded-[10px] border border-line bg-canvas overflow-hidden relative">
+                        <div class="absolute left-0 top-0 bottom-0 w-[3px] bg-success/50"></div>
+                        <button class="w-full pl-3 pr-2 py-2 flex items-center gap-2 text-left">
+                          <span class="inline-flex items-center gap-1 px-1.5 h-5 rounded-[4px] border border-line mono text-[10px] text-ink-soft shrink-0">Agent</span>
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" class="w-3 h-3 text-success shrink-0"><path d="M5 12l5 5 9-10"/></svg>
+                          <span class="text-[12px] text-ink-muted truncate flex-1">vitest + lint + tsc <span class="text-ink">(Task)</span></span>
+                          <span class="mono text-[10px] text-ink-muted shrink-0">38s</span>
+                        </button>
+                      </div>
+
+                      <!-- Failed group -->
+                      <div class="px-4 pt-3 pb-1.5 flex items-baseline gap-2">
+                        <span class="caps text-danger">Failed</span>
+                        <span class="mono text-[11px] text-ink-muted">· 1</span>
+                      </div>
+                      <div class="mx-3 mb-4 rounded-[10px] border border-danger/25 bg-danger-wash/40 overflow-hidden relative">
+                        <div class="absolute left-0 top-0 bottom-0 w-[3px] bg-danger/70"></div>
+                        <button class="w-full pl-3 pr-2 py-2 flex items-center gap-2 text-left">
+                          <span class="inline-flex items-center gap-1 px-1.5 h-5 rounded-[4px] border border-danger/30 bg-canvas/70 mono text-[10px] text-danger shrink-0">Agent</span>
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="w-3 h-3 text-danger shrink-0"><path d="M6 6l12 12M18 6L6 18"/></svg>
+                          <span class="text-[12px] text-ink truncate flex-1">Benchmark Intl perf</span>
+                          <span class="mono text-[10px] text-danger shrink-0">error</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    <div class="px-4 py-2.5 border-t border-line flex items-center text-[11px] text-ink-muted">
+                      <span>Streaming <span class="mono text-ink-soft">2 agents</span></span>
+                      <span class="ml-auto mono">live · autoscroll</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="text-[11px] text-ink-muted max-w-[300px] text-center">Running rows open by default — one tap collapses to just the preview line. Everything inside the expansion streams in real-time; the <em>follow</em> toggle keeps you pinned to the tail.</div>
+          </div>
+
+          <!-- ==================== Desktop · strip + right-rail live subagents card ==================== -->
+          <div class="flex-1 w-full min-w-0 flex flex-col items-center gap-3">
+            <div class="caps text-ink-muted">Desktop · strip + right-rail live card</div>
+            <div class="desktop">
+              <div class="desktop-chrome"><span style="background:#ff5f57"></span><span style="background:#febc2e"></span><span style="background:#28c840"></span><span class="ml-4 mono text-[11px] text-canvas/70">claudex.local — s/fix-hydration-marketing</span></div>
+              <div class="desktop-inner grid grid-cols-[220px_minmax(0,1fr)_360px] min-w-[960px] overflow-x-auto">
+
+                <!-- left global rail -->
+                <aside class="border-r border-line bg-paper/40 flex flex-col">
+                  <div class="p-4 flex items-center gap-2"><svg viewBox="0 0 32 32" class="w-5 h-5"><path d="M9 22 L16 8 L23 22 Z" fill="#cc785c"/><circle cx="16" cy="18" r="2.2" fill="#faf9f5"/></svg><span class="mono text-[13px]">claudex</span><span class="ml-auto text-[11px] mono text-ink-muted">3</span></div>
+                  <div class="px-3 caps text-ink-muted mb-2">Sessions</div>
+                  <div class="px-2 space-y-1">
+                    <div class="px-2.5 py-2 rounded-[6px] bg-canvas border-l-2 border-klein bg-klein-wash/40">
+                      <div class="flex items-center gap-1.5"><span class="h-1.5 w-1.5 rounded-full bg-success animate-pulse"></span><span class="text-[12px] font-medium truncate">Fix hydration …</span></div>
+                      <!-- mini agent indicator on the session card -->
+                      <div class="mt-1 flex items-center gap-1.5">
+                        <span class="flex items-center gap-[2px]">
+                          <span class="h-1 w-2 rounded-full bg-klein"></span>
+                          <span class="h-1 w-2 rounded-full bg-klein/70"></span>
+                          <span class="h-1 w-1 rounded-full bg-success"></span>
+                          <span class="h-1 w-1 rounded-full bg-danger/60"></span>
+                        </span>
+                        <span class="mono text-[10px] text-ink-muted">2 live</span>
+                      </div>
+                    </div>
+                    <button class="w-full text-left px-2.5 py-2 rounded-[6px] hover:bg-canvas/60 border-l-2 border-transparent">
+                      <div class="flex items-center gap-1.5"><span class="h-1.5 w-1.5 rounded-full bg-success"></span><span class="text-[12px] truncate">Add retry + jitter …</span></div>
+                      <div class="mono text-[10px] text-ink-muted mt-0.5 truncate">no agents</div>
+                    </button>
+                    <button class="w-full text-left px-2.5 py-2 rounded-[6px] hover:bg-canvas/60 border-l-2 border-transparent">
+                      <div class="flex items-center gap-1.5"><span class="h-1.5 w-1.5 rounded-full bg-ink-faint"></span><span class="text-[12px] truncate">Port config YAML→TOML</span></div>
+                      <div class="mono text-[10px] text-ink-muted mt-0.5 truncate">no agents</div>
+                    </button>
+                  </div>
+                  <div class="mt-auto p-4 border-t border-line text-[11px] text-ink-muted mono flex items-center gap-1.5"><span class="h-1.5 w-1.5 rounded-full bg-success"></span>connected</div>
+                </aside>
+
+                <!-- center thread -->
+                <section class="min-w-0 flex flex-col bg-canvas">
+                  <!-- session header -->
+                  <div class="px-5 py-3 border-b border-line flex items-center gap-3">
+                    <span class="h-2 w-2 rounded-full bg-success animate-pulse" style="box-shadow:0 0 0 4px rgba(63,145,66,0.18)"></span>
+                    <div class="min-w-0">
+                      <div class="text-[14px] font-medium truncate">Fix hydration mismatch on marketing page</div>
+                      <div class="flex items-center gap-2 text-[11px] text-ink-muted mt-0.5"><span class="mono">spindle</span><span>·</span><span class="mono">claude/fix-hydration-marketing</span></div>
+                    </div>
+                    <div class="ml-auto flex items-center gap-1.5">
+                      <button class="h-8 px-2.5 rounded-[6px] border border-line bg-canvas text-[12px] flex items-center gap-1"><span class="mono">Opus 4.7</span> <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-3 h-3"><path d="M6 9l6 6 6-6"/></svg></button>
+                      <svg width="28" height="28"><circle cx="14" cy="14" r="11" fill="none" stroke="#e8e4d8" stroke-width="3"/><circle cx="14" cy="14" r="11" fill="none" stroke="#cc785c" stroke-width="3" stroke-linecap="round" stroke-dasharray="69.11" stroke-dashoffset="47" transform="rotate(-90 14 14)"/></svg>
+                    </div>
+                  </div>
+
+                  <!-- SUBAGENTS STRIP -->
+                  <div class="px-5 py-2 bg-paper/70 border-b border-line flex items-center gap-3">
+                    <span class="inline-flex items-center gap-1 px-1.5 h-5 rounded-[4px] border border-klein/30 bg-klein-wash text-klein-ink mono text-[10px] font-medium uppercase tracking-[0.08em]">Agents</span>
+                    <span class="flex items-center gap-[3px]">
+                      <span class="h-1.5 w-3 rounded-full bg-klein" style="box-shadow:0 0 0 2px rgba(204,120,92,0.18)"></span>
+                      <span class="h-1.5 w-3 rounded-full bg-klein/70" style="box-shadow:0 0 0 2px rgba(204,120,92,0.14)"></span>
+                      <span class="h-1.5 w-1.5 rounded-full bg-success"></span>
+                      <span class="h-1.5 w-1.5 rounded-full bg-danger/70"></span>
+                    </span>
+                    <span class="mono text-[11px] text-ink-muted">2 live · 4 total</span>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-3 h-3 text-ink-faint"><path d="M9 6l6 6-6 6"/></svg>
+                    <span class="mono text-[11px] text-klein-ink shrink-0">code-explorer</span>
+                    <span class="text-[13px] text-ink font-medium truncate">Grepping <span class="mono text-[12px]">"formatDate("</span> across repo<span class="caret"></span></span>
+                    <span class="ml-auto flex items-center gap-2 text-[11px] text-ink-muted shrink-0">
+                      <span>next-up · reviewer</span>
+                      <span class="mono">·</span>
+                      <span>elapsed <span class="mono text-ink-soft">0:34</span></span>
+                      <button class="ml-1 h-6 px-2 rounded-[6px] border border-line bg-canvas text-[11px] flex items-center gap-1 hover:bg-paper"><span>Collapse</span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-3 h-3"><path d="M18 15l-6-6-6 6"/></svg></button>
+                    </span>
+                  </div>
+
+                  <!-- thread (compressed) -->
+                  <div class="flex-1 overflow-y-auto px-6 py-5 space-y-5">
+                    <div class="flex justify-end"><div class="max-w-[70%] bg-ink text-canvas rounded-[14px] rounded-br-[4px] px-4 py-2.5 shadow-card text-[14.5px]">Fan this out: explorer for the hydration warning, reviewer on the retry PR, benchmark for Intl perf.</div></div>
+
+                    <div>
+                      <div class="flex items-center gap-2 mb-1.5"><svg viewBox="0 0 32 32" class="w-4 h-4"><path d="M9 22 L16 8 L23 22 Z" fill="#cc785c"/><circle cx="16" cy="18" r="2.2" fill="#faf9f5"/></svg><span class="mono text-[11px] text-ink-muted">claude · opus-4.7 · 14:04</span></div>
+                      <div class="text-[14.5px] leading-[1.65] text-ink max-w-[72ch]">Dispatching three in parallel. Live runs are in the Agents strip above, and the full stream for each is in the right rail.</div>
+
+                      <!-- lightweight pointers stacked -->
+                      <div class="mt-3 flex flex-col gap-1.5 items-start">
+                        <button class="inline-flex items-center gap-2 py-1.5 pl-2.5 pr-2.5 rounded-[8px] bg-klein-wash/40 border border-dashed border-klein/35 text-left hover:bg-klein-wash/60">
+                          <svg class="w-3.5 h-3.5 text-klein animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.2-8.6"/></svg>
+                          <span class="mono text-[11px] text-klein-ink uppercase tracking-[0.1em]">Agent started</span>
+                          <span class="text-[12.5px] text-ink-soft"><span class="mono">code-explorer</span> · Trace hydration warning</span>
+                          <span class="mono text-[11px] text-ink-muted">→ right rail</span>
+                        </button>
+                        <button class="inline-flex items-center gap-2 py-1.5 pl-2.5 pr-2.5 rounded-[8px] bg-klein-wash/40 border border-dashed border-klein/35 text-left hover:bg-klein-wash/60">
+                          <svg class="w-3.5 h-3.5 text-klein animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.2-8.6"/></svg>
+                          <span class="mono text-[11px] text-klein-ink uppercase tracking-[0.1em]">Agent started</span>
+                          <span class="text-[12.5px] text-ink-soft"><span class="mono">code-reviewer</span> · Review retry lanes A vs B</span>
+                          <span class="mono text-[11px] text-ink-muted">→ right rail</span>
+                        </button>
+                        <button class="inline-flex items-center gap-2 py-1 pl-2.5 pr-2.5 rounded-[8px] bg-paper border border-dashed border-line-strong text-left hover:bg-paper">
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="w-3.5 h-3.5 text-success"><path d="M5 12l5 5 9-10"/></svg>
+                          <span class="mono text-[11px] text-ink-muted uppercase tracking-[0.1em]">Agent done</span>
+                          <span class="text-[12px] text-ink-soft"><span class="mono">vitest + lint + tsc</span> · 38s · all green</span>
+                        </button>
+                      </div>
+
+                      <div class="text-[14.5px] leading-[1.65] text-ink max-w-[72ch] mt-3">Once the reviewer lands its report I'll merge it into the plan.</div>
+                    </div>
+                  </div>
+
+                  <!-- composer -->
+                  <div class="px-5 pt-3 pb-4 border-t border-line">
+                    <div class="rounded-[10px] border border-line bg-paper/50 p-2.5">
+                      <div class="text-[13.5px] text-ink-muted px-2 py-1">Reply to claude…<span class="caret"></span></div>
+                      <div class="flex items-center px-2 mt-1"><div class="flex items-center gap-2 text-[11px] text-ink-muted"><span class="mono">Opus 4.7</span><span>·</span><span>ask</span></div><button class="ml-auto h-7 px-3 rounded-[8px] bg-klein text-canvas text-[12px] font-medium flex items-center gap-1 shadow-card">Send<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="w-3.5 h-3.5"><path d="M5 12l7-7 7 7M12 5v14"/></svg></button></div>
+                    </div>
+                  </div>
+                </section>
+
+                <!-- ==================== RIGHT RAIL · live subagents card ==================== -->
+                <aside class="border-l border-line bg-paper/40 flex flex-col min-h-0">
+                  <div class="px-4 py-3 border-b border-line flex items-center gap-2">
+                    <span class="inline-flex items-center gap-1 px-1.5 h-5 rounded-[4px] border border-klein/30 bg-klein-wash text-klein-ink mono text-[10px] font-medium uppercase tracking-[0.08em]"><span class="h-1.5 w-1.5 rounded-full bg-klein animate-pulse"></span>Agents</span>
+                    <span class="mono text-[11px] text-ink-muted">2 live · 4 total</span>
+                    <label class="ml-auto inline-flex items-center gap-1 mono text-[10px] text-ink-muted select-none"><span class="h-3 w-6 rounded-full bg-klein relative"><span class="absolute right-[1px] top-[1px] h-2.5 w-2.5 rounded-full bg-canvas"></span></span>follow</label>
+                    <button class="h-6 w-6 rounded-[6px] border border-line bg-canvas flex items-center justify-center hover:bg-paper" title="Pin"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-3 h-3 text-ink-muted"><path d="M12 17v5M7 4h10l-1 7H8Z"/></svg></button>
+                  </div>
+
+                  <div class="flex-1 overflow-y-auto">
+                    <!-- Running group -->
+                    <div class="px-4 pt-2.5 pb-1 flex items-baseline gap-2">
+                      <span class="caps text-klein">Running</span>
+                      <span class="mono text-[10.5px] text-ink-muted">· 2 · live</span>
+                    </div>
+
+                    <!-- RUNNING · EXPANDED row with live stream -->
+                    <div class="mx-2.5 mb-2 rounded-[10px] border border-klein/25 bg-klein-wash/25 overflow-hidden relative">
+                      <div class="absolute left-0 top-0 bottom-0 w-[3px] bg-klein"></div>
+                      <div class="pl-3 pr-2 py-2 flex items-center gap-2 border-b border-klein/20">
+                        <span class="inline-flex items-center gap-1 px-1.5 h-5 rounded-[4px] border border-klein/40 bg-canvas/80 mono text-[10px] text-klein-ink shrink-0">Agent</span>
+                        <span class="mono text-[10.5px] text-ink-soft shrink-0">code-explorer</span>
+                        <span class="relative h-2 w-2 rounded-full bg-klein animate-pulse shrink-0" style="box-shadow:0 0 0 3px rgba(204,120,92,0.22)"></span>
+                        <span class="text-[12px] text-ink truncate flex-1 font-medium">Trace hydration warning</span>
+                        <span class="mono text-[10px] text-ink-muted shrink-0">0:34</span>
+                        <button class="h-5 w-5 rounded-[4px] border border-line bg-canvas flex items-center justify-center" title="Collapse"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-3 h-3 text-ink-muted"><path d="M18 15l-6-6-6 6"/></svg></button>
+                      </div>
+                      <!-- collapsible INPUT preview -->
+                      <div class="px-3 pt-2 pb-1 bg-paper/40 border-b border-klein/15">
+                        <button class="w-full flex items-center gap-2 text-left">
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-3 h-3 text-ink-muted"><path d="M6 9l6 6 6-6"/></svg>
+                          <span class="caps text-ink-muted">Input</span>
+                          <span class="mono text-[10.5px] text-ink-muted truncate flex-1">code-explorer · "Trace the React hydration warning on app/(marketing) …"</span>
+                        </button>
+                      </div>
+                      <!-- LIVE STREAM -->
+                      <div class="px-2.5 pt-2 pb-2.5 bg-canvas/60">
+                        <div class="flex items-center gap-1.5 mb-2 pl-1">
+                          <span class="h-1.5 w-1.5 rounded-full bg-klein animate-pulse"></span>
+                          <span class="caps text-klein-ink">live stream</span>
+                          <span class="mono text-[10px] text-ink-muted">· 6 events</span>
+                          <span class="ml-auto mono text-[10px] text-ink-muted">autoscroll</span>
+                        </div>
+                        <div class="relative pl-4 space-y-2">
+                          <span class="absolute left-[5px] top-1 bottom-4 w-px bg-line-strong"></span>
+
+                          <div class="relative">
+                            <span class="absolute -left-[11px] top-[7px] h-1.5 w-1.5 rounded-full bg-ink-faint"></span>
+                            <div class="text-[12px] leading-[1.55] text-ink-soft">Looking for <span class="mono text-[11px]">Intl.DateTimeFormat</span> usage — the warning points at the server/client boundary.</div>
+                          </div>
+
+                          <div class="relative">
+                            <span class="absolute -left-[11px] top-[9px] h-1.5 w-1.5 rounded-full bg-success"></span>
+                            <div class="flex items-center gap-1.5 py-1 pl-1.5 pr-2 rounded-[6px] bg-paper border border-line">
+                              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-3 h-3 text-ink-soft"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></svg>
+                              <span class="mono text-[10.5px] text-ink-soft">grep</span>
+                              <span class="mono text-[10px] text-ink-muted truncate flex-1">"Intl.DateTimeFormat" in lib/</span>
+                              <span class="mono text-[10px] text-success">7 hits</span>
+                            </div>
+                          </div>
+
+                          <div class="relative">
+                            <span class="absolute -left-[11px] top-[9px] h-1.5 w-1.5 rounded-full bg-success"></span>
+                            <div class="flex items-center gap-1.5 py-1 pl-1.5 pr-2 rounded-[6px] bg-paper border border-line">
+                              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-3 h-3 text-ink-soft"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6ZM14 2v6h6"/></svg>
+                              <span class="mono text-[10.5px] text-ink-soft">read</span>
+                              <span class="mono text-[10px] text-ink-muted truncate flex-1">lib/date.ts · 1-80</span>
+                              <span class="mono text-[10px] text-success">ok</span>
+                            </div>
+                          </div>
+
+                          <div class="relative">
+                            <span class="absolute -left-[11px] top-[7px] h-1.5 w-1.5 rounded-full bg-ink-faint"></span>
+                            <div class="text-[12px] leading-[1.55] text-ink-soft">Found it — <span class="mono text-[11px]">formatDate</span> uses <span class="mono text-[11px]">navigator.language</span>, which differs between server and client render.</div>
+                          </div>
+
+                          <!-- running tool chip -->
+                          <div class="relative">
+                            <span class="absolute -left-[11px] top-[9px] h-1.5 w-1.5 rounded-full bg-klein animate-pulse"></span>
+                            <div class="flex items-center gap-1.5 py-1 pl-1.5 pr-2 rounded-[6px] bg-klein-wash/60 border border-klein/30">
+                              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-3 h-3 text-klein-ink"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></svg>
+                              <span class="mono text-[10.5px] text-klein-ink">grep</span>
+                              <span class="mono text-[10px] text-ink-muted truncate flex-1">"formatDate(" across repo</span>
+                              <svg class="w-3 h-3 text-klein animate-spin shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.2-8.6"/></svg>
+                            </div>
+                          </div>
+
+                          <!-- partial, still-streaming text chunk -->
+                          <div class="relative">
+                            <span class="absolute -left-[11px] top-[7px] h-1.5 w-1.5 rounded-full bg-klein animate-pulse"></span>
+                            <div class="text-[12px] leading-[1.55] text-ink">Three call sites, all inside <span class="mono text-[11px]">app/(marketing)</span>. Next I'll read the layout<span class="caret"></span></div>
+                          </div>
+                        </div>
+                        <!-- row footer -->
+                        <div class="mt-2 pt-2 border-t border-line/70 flex items-center gap-2">
+                          <button class="h-6 px-2 rounded-[6px] border border-line bg-canvas text-[11px] flex items-center gap-1 hover:bg-paper"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-2.5 h-2.5"><rect x="6" y="6" width="12" height="12" rx="1.5"/></svg>stop</button>
+                          <a href="#" class="inline-flex items-center gap-1 text-[11px] mono text-klein-ink hover:underline">open turn · seq 42 <span>→</span></a>
+                          <span class="ml-auto mono text-[10px] text-ink-muted">id 47a1…c8</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <!-- RUNNING · COLLAPSED row (just shows current activeForm) -->
+                    <div class="mx-2.5 mb-2 rounded-[10px] border border-klein/20 bg-klein-wash/20 overflow-hidden relative">
+                      <div class="absolute left-0 top-0 bottom-0 w-[3px] bg-klein/70"></div>
+                      <button class="w-full pl-3 pr-2 py-2 flex items-center gap-2 text-left hover:bg-klein-wash/30">
+                        <span class="inline-flex items-center gap-1 px-1.5 h-5 rounded-[4px] border border-klein/30 bg-canvas/70 mono text-[10px] text-klein-ink shrink-0">Agent</span>
+                        <span class="mono text-[10.5px] text-ink-soft shrink-0">code-reviewer</span>
+                        <svg class="w-3 h-3 text-klein animate-spin shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.2-8.6"/></svg>
+                        <span class="text-[12px] text-ink truncate flex-1">Reading <span class="mono text-[11px]">feat/webhook-retry-b</span> · 23 files</span>
+                        <span class="mono text-[10px] text-ink-muted shrink-0">1:08</span>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-3 h-3 text-ink-muted shrink-0"><path d="M6 9l6 6 6-6"/></svg>
+                      </button>
+                    </div>
+
+                    <!-- Done group -->
+                    <div class="px-4 pt-3 pb-1 flex items-baseline gap-2">
+                      <span class="caps text-ink-soft">Done</span>
+                      <span class="mono text-[10.5px] text-ink-muted">· 1</span>
+                    </div>
+                    <div class="mx-2.5 mb-1.5 rounded-[10px] border border-line bg-canvas overflow-hidden relative">
+                      <div class="absolute left-0 top-0 bottom-0 w-[3px] bg-success/50"></div>
+                      <button class="w-full pl-3 pr-2 py-2 flex items-center gap-2 text-left hover:bg-paper">
+                        <span class="inline-flex items-center gap-1 px-1.5 h-5 rounded-[4px] border border-line mono text-[10px] text-ink-soft shrink-0">Task</span>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" class="w-3 h-3 text-success shrink-0"><path d="M5 12l5 5 9-10"/></svg>
+                        <span class="text-[12px] text-ink truncate flex-1">vitest + lint + tsc · all green</span>
+                        <span class="mono text-[10px] text-ink-muted shrink-0">38s</span>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-3 h-3 text-ink-muted shrink-0"><path d="M6 9l6 6 6-6"/></svg>
+                      </button>
+                    </div>
+
+                    <!-- Failed group -->
+                    <div class="px-4 pt-3 pb-1 flex items-baseline gap-2">
+                      <span class="caps text-danger">Failed</span>
+                      <span class="mono text-[10.5px] text-ink-muted">· 1</span>
+                    </div>
+                    <div class="mx-2.5 mb-1.5 rounded-[10px] border border-danger/25 bg-danger-wash/40 overflow-hidden relative">
+                      <div class="absolute left-0 top-0 bottom-0 w-[3px] bg-danger/70"></div>
+                      <button class="w-full pl-3 pr-2 py-2 flex items-center gap-2 text-left">
+                        <span class="inline-flex items-center gap-1 px-1.5 h-5 rounded-[4px] border border-danger/30 bg-canvas/70 mono text-[10px] text-danger shrink-0">Agent</span>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="w-3 h-3 text-danger shrink-0"><path d="M6 6l12 12M18 6L6 18"/></svg>
+                        <span class="text-[12px] text-ink truncate flex-1">Benchmark Intl perf — timed out at 2m</span>
+                        <span class="mono text-[10px] text-danger shrink-0">error</span>
+                      </button>
+                    </div>
+
+                    <div class="px-4 py-2.5 mt-2 border-t border-line border-b flex items-center gap-2 text-[10.5px] text-ink-muted">
+                      <span>Streaming <span class="mono text-ink-soft">2 agents</span></span>
+                      <span class="ml-auto mono">live</span>
+                    </div>
+                  </div>
+
+                  <div class="mt-auto p-3 border-t border-line text-[10.5px] text-ink-muted flex items-center gap-2">
+                    <span>Running rows open · Done collapsed</span>
+                    <span class="ml-auto mono">rail sticky</span>
+                  </div>
+                </aside>
+
+              </div>
+            </div>
+            <div class="text-[11px] text-ink-muted max-w-[720px] text-center">Each running row carries its own live stream inline — you don't jump into a "subagent detail" route to watch it. Tool chips reuse the main-thread palette (Grep / Read / Edit / Bash / Task) so the eye reads them instantly. The <em>follow</em> toggle up top flips <em>every</em> open row's autoscroll in unison.</div>
+          </div>
+
+        </div>
+
+        <!-- ==================== DESIGN NOTES · legend + live stream anatomy + empty ==================== -->
+        <div class="grid md:grid-cols-3 gap-5 pb-16 max-w-[1280px] mx-auto">
+          <div class="rounded-[12px] border border-line bg-canvas p-5">
+            <div class="caps text-ink-muted mb-2">Legend · subagent states</div>
+            <ul class="space-y-2 text-[13px]">
+              <li class="flex items-center gap-2.5">
+                <span class="relative h-4 w-4 rounded-full bg-klein shrink-0"><span class="absolute inset-0 rounded-full bg-klein animate-pulse opacity-60"></span></span>
+                <span class="font-medium">running</span>
+                <span class="ml-auto mono text-[10.5px] text-ink-faint">expanded · live stream</span>
+              </li>
+              <li class="flex items-center gap-2.5">
+                <span class="h-4 w-4 rounded-full bg-success flex items-center justify-center shrink-0"><svg viewBox="0 0 24 24" fill="none" stroke="#faf9f5" stroke-width="3" class="w-2.5 h-2.5"><path d="M5 12l5 5 9-10"/></svg></span>
+                <span class="text-ink-muted">done</span>
+                <span class="ml-auto mono text-[10.5px] text-ink-faint">collapsed · duration + summary</span>
+              </li>
+              <li class="flex items-center gap-2.5">
+                <span class="h-4 w-4 rounded-full bg-danger/80 flex items-center justify-center shrink-0"><svg viewBox="0 0 24 24" fill="none" stroke="#faf9f5" stroke-width="3" class="w-2.5 h-2.5"><path d="M6 6l12 12M18 6L6 18"/></svg></span>
+                <span>failed</span>
+                <span class="ml-auto mono text-[10.5px] text-ink-faint">error · stays grouped</span>
+              </li>
+            </ul>
+          </div>
+          <div class="rounded-[12px] border border-line bg-canvas p-5">
+            <div class="caps text-ink-muted mb-2">Live stream · anatomy</div>
+            <div class="relative pl-4 space-y-1.5">
+              <span class="absolute left-[5px] top-1 bottom-2 w-px bg-line-strong"></span>
+              <div class="relative">
+                <span class="absolute -left-[11px] top-[7px] h-1.5 w-1.5 rounded-full bg-ink-faint"></span>
+                <div class="text-[12px] text-ink-soft leading-[1.5]">text chunk — subagent thinking, streamed token-by-token</div>
+              </div>
+              <div class="relative">
+                <span class="absolute -left-[11px] top-[9px] h-1.5 w-1.5 rounded-full bg-success"></span>
+                <div class="flex items-center gap-1.5 py-1 pl-1.5 pr-2 rounded-[6px] bg-paper border border-line">
+                  <span class="mono text-[10.5px] text-ink-soft">tool</span>
+                  <span class="mono text-[10px] text-ink-muted truncate flex-1">name · args · inline result</span>
+                  <span class="mono text-[10px] text-success">ok</span>
+                </div>
+              </div>
+              <div class="relative">
+                <span class="absolute -left-[11px] top-[9px] h-1.5 w-1.5 rounded-full bg-klein animate-pulse"></span>
+                <div class="flex items-center gap-1.5 py-1 pl-1.5 pr-2 rounded-[6px] bg-klein-wash/60 border border-klein/30">
+                  <span class="mono text-[10.5px] text-klein-ink">tool</span>
+                  <span class="mono text-[10px] text-ink-muted truncate flex-1">in flight · spinner</span>
+                </div>
+              </div>
+              <div class="relative">
+                <span class="absolute -left-[11px] top-[7px] h-1.5 w-1.5 rounded-full bg-klein animate-pulse"></span>
+                <div class="text-[12px] text-ink leading-[1.5]">partial chunk<span class="caret"></span></div>
+              </div>
+            </div>
+            <p class="mt-3 text-[12px] text-ink-muted leading-[1.5]">Tool chips reuse the main-thread palette. Gutter dots indicate event status (klein = active, success = done, ink-faint = text).</p>
+          </div>
+          <div class="rounded-[12px] border border-line bg-canvas p-5">
+            <div class="caps text-ink-muted mb-2">Empty state</div>
+            <div class="rounded-[10px] border border-dashed border-line-strong bg-paper/40 px-3 py-3 flex items-center gap-2">
+              <span class="inline-flex items-center gap-1 px-1.5 h-5 rounded-[4px] border border-line bg-canvas mono text-[10px] text-ink-muted uppercase tracking-[0.08em]">Agents</span>
+              <span class="text-[12.5px] text-ink-muted">No delegated runs yet — the rail appears the moment Claude calls <span class="mono text-[12px]">Agent</span> or <span class="mono text-[12px]">Task</span>.</span>
+            </div>
+            <p class="mt-3 text-[12px] text-ink-muted leading-[1.5]">Strip stays hidden when there are zero subagents. First spawn fades it in; it doesn't disappear again until the session ends, so "4 total" stays as session-scoped history.</p>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- =========================================================
       FOOTER
     ========================================================= -->
     <footer class="border-t border-line bg-paper/40">
@@ -3680,6 +4302,7 @@
             <a class="text-ink-soft hover:text-ink" href="#s-14">14 · Files</a>
             <a class="text-ink-soft hover:text-ink" href="#s-15">15 · Session diff</a>
             <a class="text-ink-soft hover:text-ink" href="#s-16">16 · Plan</a>
+            <a class="text-ink-soft hover:text-ink" href="#s-17">17 · Live agents</a>
           </div>
           <div class="ml-auto text-[12px] text-ink-muted mono self-end">v0.1 · mockup</div>
         </div>
