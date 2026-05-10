@@ -1424,3 +1424,35 @@ export const MetaResponse = z.object({
   uptimeSec: z.number().nonnegative(),
 });
 export type MetaResponse = z.infer<typeof MetaResponse>;
+
+// ============================================================================
+// Admin / self-restart
+//
+// Body for POST /api/admin/restart. Both fields optional — the legacy call
+// with no body still works (and still restarts). When Claude triggers a
+// restart mid-tool-call, it passes its own session id + the tool_use id so
+// the server can persist a `pending_restart_results` row; the next boot's
+// sweep then synthesizes a green tool_result event for that tool_use, so
+// the chat UI doesn't render the restart as a failed tool call.
+// ============================================================================
+
+export const AdminRestartRequest = z.object({
+  sessionId: z.string().optional(),
+  toolUseId: z.string().optional(),
+});
+export type AdminRestartRequest = z.infer<typeof AdminRestartRequest>;
+
+// Response shape (rarely consumed by clients — they usually treat any 2xx
+// as "restart is underway" — but we export it so test code and the
+// restart-self.mjs script can type-check the JSON they receive).
+export const AdminRestartResponse = z.object({
+  ok: z.literal(true),
+  dryRun: z.boolean().optional(), // true in NODE_ENV=test; real restarts omit it
+  restarterPid: z.number().optional(),
+  port: z.number().optional(),
+  log: z.string().optional(),
+  pendingResult: z
+    .object({ sessionId: z.string(), toolUseId: z.string() })
+    .optional(),
+});
+export type AdminRestartResponse = z.infer<typeof AdminRestartResponse>;

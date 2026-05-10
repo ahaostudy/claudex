@@ -3564,7 +3564,19 @@ function Composer({
                   {MODEL_LABEL[session.model] ?? session.model} ·{" "}
                   {MODE_LABEL[session.mode] ?? session.mode} ·{" "}
                   <span className="mono">
-                    {Math.round(contextWindowTokens(session.model) / 1000)}k ctx
+                    {(() => {
+                      // Context window size formatter. Below 1M tokens we keep
+                      // the familiar "200k" shape; at or above 1M we switch to
+                      // "1m" / "1.2m" so 1,000,000 doesn't render as the
+                      // clunky "1000k". The k→m boundary matches StatsSheet's
+                      // formatCount so the whole UI agrees on vocabulary.
+                      const toks = contextWindowTokens(session.model);
+                      if (toks >= 1_000_000) {
+                        const m = toks / 1_000_000;
+                        return `${m.toFixed(1).replace(/\.0$/, "")}m`;
+                      }
+                      return `${Math.round(toks / 1000)}k`;
+                    })()} ctx
                   </span>
                 </>
               ) : (

@@ -31,6 +31,7 @@ import { AuditStore } from "../audit/store.js";
 import { registerAuditRoutes } from "../audit/routes.js";
 import { registerBackupRoutes } from "../backup/routes.js";
 import { registerAdminRoutes } from "../admin/routes.js";
+import { resolvePendingRestartResults } from "./pending-restart-sweep.js";
 import { ClientErrorStore } from "../client-errors/store.js";
 import { registerClientErrorRoutes } from "../client-errors/routes.js";
 import { registerWsRoute } from "./ws.js";
@@ -246,6 +247,7 @@ export async function buildApp(
     audit,
     port: deps.port ?? 5179,
     stateDir,
+    db: deps.db,
   });
 
   // Routines: periodic cron-driven session spawns. The scheduler owns a single
@@ -301,6 +303,23 @@ export async function buildApp(
   // directly against a freshly-constructed manager without the full app.
   if (process.env.NODE_ENV !== "test") {
     manager.sweepStuckOnBoot();
+    // Resolve any pending_restart_results rows left by a prior
+    // POST /api/admin/restart with {sessionId, toolUseId}. Runs AFTER
+    // sweepStuckOnBoot (which re-arms watchdogs) so the force-idle here
+    // supersedes any watchdog re-arm for sessions that had a restart
+    // mid-tool-call. Runs AFTER registerWsRoute so notifyTranscriptRefresh
+    // has a real broadcaster wired up (even if no clients are connected
+    // at boot, the future reconnect will re-fetch the tail).
+    //
+    // Fire-and-forget: the sweep is cheap, synchronous-ish SQLite work
+    // wrapped in an async signature for future-proofing. Awaiting would
+    // block buildApp; the tradeoff is acceptable given this runs once
+    // per process lifetime.
+    void resolvePendingRestartResults(
+      deps.db,
+      manager,
+      deps.logger === false ? undefined : deps.logger,
+    );
   }
   await registerPtyRoutes(app, {
     db: deps.db,

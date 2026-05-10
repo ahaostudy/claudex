@@ -120,6 +120,32 @@ is the time a Vite-side type elision breaks the server build.
    server killed Claude mid-command before `nohup ... &` finished
    detaching).
 
+   **When Claude is the one triggering the restart** (mid-tool-call, because
+   code just changed and the session needs the new server), the plain
+   endpoint above is fine but leaves the triggering tool call rendering as
+   a dangling "failed" in the chat transcript — the server dies before it
+   can emit the `tool_result`. To avoid that, pass the current session id
+   and tool_use id in the request body:
+   ```sh
+   curl -b cookies.txt -X POST http://127.0.0.1:5179/api/admin/restart \
+     -H 'Content-Type: application/json' \
+     -d '{"sessionId":"<claudex-session-id>","toolUseId":"<this-tool-use-id>"}'
+   ```
+   The server persists a `pending_restart_results` row before SIGTERMing
+   itself. On the next boot, a sweep turns that row into a synthetic
+   success `tool_result` event for the same `toolUseId`, force-idles the
+   session, and deletes the row — so the chat UI shows a green tool result
+   instead of a dangling one.
+
+   For the Bash-path equivalent (same pattern, no cookie plumbing — reads
+   `~/.claudex/cookies.txt` internally, falls back to plain restart.mjs if
+   the HTTP call fails):
+   ```sh
+   node scripts/restart-self.mjs 5179 \
+     --session-id <claudex-session-id> \
+     --tool-use-id <this-tool-use-id>
+   ```
+
    Then verify three things:
    - new pid listening on 5179: `lsof -ti :5179 -sTCP:LISTEN`
    - frpc pid unchanged: `pgrep -f 'frpc -c'` (remember it from before)

@@ -1,10 +1,13 @@
 import type { FastifyInstance } from "fastify";
+import type Database from "better-sqlite3";
 import { spawn } from "node:child_process";
 import { mkdirSync, openSync, existsSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { AuditStore } from "../audit/store.js";
 import { getRequestCtx } from "../lib/req.js";
+import { AdminRestartRequest } from "@claudex/shared";
+import { PendingRestartStore } from "./pending-restarts.js";
 
 // -----------------------------------------------------------------------------
 // Admin routes — server lifecycle operations.
@@ -55,6 +58,10 @@ export interface AdminRoutesDeps {
    *  `<stateDir>/server-stdout.log`, matching the log file the documented
    *  manual-restart recipe (CLAUDE.md) already writes to. */
   stateDir: string;
+  /** DB handle. Needed to persist `pending_restart_results` rows when the
+   *  restart request carries a `{sessionId, toolUseId}` pair so the next
+   *  boot can synthesize a success tool_result for that tool_use. */
+  db: Database.Database;
 }
 
 /** Resolve the repo root from this file's location. Works for both `tsx`
@@ -81,6 +88,8 @@ export async function registerAdminRoutes(
   app: FastifyInstance,
   deps: AdminRoutesDeps,
 ): Promise<void> {
+  const pendingStore = new PendingRestartStore(deps.db);
+
   app.post(
     "/api/admin/restart",
     { preHandler: app.requireAuth as any },
@@ -97,8 +106,35 @@ export async function registerAdminRoutes(
         /* audit is fire-and-forget; never block the restart on it */
       }
 
+      // Parse optional {sessionId, toolUseId} body. Safe-parse so a
+      // malformed body doesn't block the restart — we just skip the
+      // pending-result bookkeeping. The body-less legacy call flow (no
+      // Content-Type, no JSON) yields `{}` from Fastify and the parse
+      // succeeds with both fields undefined, which is exactly what we want.
+      const parsed = AdminRestartRequest.safeParse(req.body ?? {});
+      let pendingResult: { sessionId: string; toolUseId: string } | undefined;
+      if (
+        parsed.success &&
+        parsed.data.sessionId &&
+        parsed.data.toolUseId
+      ) {
+        try {
+          pendingStore.insert(parsed.data.sessionId, parsed.data.toolUseId);
+          pendingResult = {
+            sessionId: parsed.data.sessionId,
+            toolUseId: parsed.data.toolUseId,
+          };
+        } catch {
+          /* best-effort: don't block restart on a failed INSERT */
+        }
+      }
+
       if (process.env.NODE_ENV === "test") {
-        return reply.code(200).send({ ok: true, dryRun: true });
+        return reply.code(200).send({
+          ok: true,
+          dryRun: true,
+          ...(pendingResult ? { pendingResult } : {}),
+        });
       }
 
       const repoRoot = resolveRepoRoot();
@@ -140,6 +176,7 @@ export async function registerAdminRoutes(
         restarterPid: child.pid,
         port: deps.port,
         log: logPath,
+        ...(pendingResult ? { pendingResult } : {}),
       });
 
       setTimeout(() => {

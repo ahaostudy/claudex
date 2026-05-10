@@ -539,6 +539,40 @@ const MIGRATIONS: { id: number; name: string; up: string }[] = [
       CREATE INDEX idx_client_errors_resolved ON client_errors(resolved_at);
     `,
   },
+  {
+    id: 19,
+    name: "pending_restart_results",
+    // Scratch table for "restart triggered by Claude mid-turn" flows.
+    //
+    // The problem: Claude runs as a subprocess inside claudex. When claudex is
+    // asked to restart itself (POST /api/admin/restart or scripts/restart.mjs),
+    // the server dies — and so does Claude, mid-tool-call. The corresponding
+    // `tool_use` event has no `tool_result` counterpart in the transcript, so
+    // the chat UI renders it as a dangling/failed tool call even though the
+    // restart actually succeeded.
+    //
+    // The fix: when the restart request includes `{sessionId, toolUseId}`,
+    // we INSERT a row here BEFORE sending SIGTERM to ourselves. On the next
+    // boot a sweep (resolvePendingRestartResults in transport/pending-
+    // restart-sweep.ts) converts each row into a synthetic tool_result event
+    // with isError=false, broadcasts a refresh, force-idles the session, and
+    // deletes the row. The UI sees a normal green tool_result on reconnect.
+    //
+    // Rows with no corresponding session (session deleted between the
+    // restart write and the next boot) are dropped by the sweep. Rows older
+    // than 24h are pruned at boot — the sweep only runs once per boot, so a
+    // stale row from a botched prior restart doesn't permanently haunt the
+    // transcript.
+    up: `
+      CREATE TABLE pending_restart_results (
+        tool_use_id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
+      CREATE INDEX idx_pending_restart_results_session
+        ON pending_restart_results(session_id);
+    `,
+  },
 ];
 
 export function openDb(config: Config, log: Logger): ClaudexDb {
