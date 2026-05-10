@@ -175,12 +175,23 @@ export function AskUserQuestionCard({
                           disabled={isAnswered}
                           onChange={(e) => {
                             if (isAnswered) return;
+                            // Read `checked` synchronously off the event —
+                            // never from inside the state updater. React
+                            // nulls `e.currentTarget` after the handler
+                            // returns, and in concurrent rendering the
+                            // updater can be invoked later than the handler
+                            // (or twice under StrictMode), which turns
+                            // `e.currentTarget.checked` into
+                            // `null.checked` → TypeError → the whole
+                            // transcript white-screens because this card
+                            // isn't behind an error boundary.
+                            const checked = e.currentTarget.checked;
                             if (q.multiSelect) {
                               setSelections((prev) => {
                                 const prevArr =
                                   (prev[q.question] as string[] | undefined) ??
                                   [];
-                                const next = e.currentTarget.checked
+                                const next = checked
                                   ? [...prevArr, opt.label]
                                   : prevArr.filter((v) => v !== opt.label);
                                 return { ...prev, [q.question]: next };

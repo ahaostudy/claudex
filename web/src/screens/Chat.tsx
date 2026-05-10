@@ -1440,15 +1440,53 @@ function Piece({
         </div>
       );
     case "ask_user_question":
+      // Wrapped in an ErrorBoundary mirroring the PermissionCard guard —
+      // selecting two options in a multi-select variant has been reported
+      // to white-screen the whole transcript. Boundary keeps the rest of
+      // the chat alive and logs the stack to console so the root cause
+      // surfaces next time. Fallback exposes a skip-style button so the
+      // user isn't stuck waiting on claude (which won't continue until it
+      // gets an ask_user_answer frame).
       return (
-        <AskUserQuestionCard
-          askId={p.askId}
-          questions={p.questions}
-          answers={p.answers}
-          onSubmit={(answers, annotations) =>
-            onAnswerAskUserQuestion(p.askId, answers, annotations)
+        <ErrorBoundary
+          label="AskUserQuestionCard"
+          fallback={
+            <div className="rounded-[12px] border border-danger/40 bg-danger-wash/60 p-3 max-w-[72ch] min-w-0">
+              <div className="text-[13px] text-ink font-medium">
+                Something went wrong rendering this question.
+              </div>
+              <div className="text-[12px] text-ink-muted mt-0.5">
+                Error logged to the browser console. Click below to send an
+                empty answer so claude can continue.
+              </div>
+              <div className="mt-3 flex justify-end">
+                <button
+                  type="button"
+                  onClick={() =>
+                    onAnswerAskUserQuestion(
+                      p.askId,
+                      Object.fromEntries(
+                        p.questions.map((q) => [q.question, ""]),
+                      ),
+                    )
+                  }
+                  className="h-8 px-3 rounded-[6px] border border-danger/40 bg-canvas text-[12px] text-danger"
+                >
+                  Skip question
+                </button>
+              </div>
+            </div>
           }
-        />
+        >
+          <AskUserQuestionCard
+            askId={p.askId}
+            questions={p.questions}
+            answers={p.answers}
+            onSubmit={(answers, annotations) =>
+              onAnswerAskUserQuestion(p.askId, answers, annotations)
+            }
+          />
+        </ErrorBoundary>
       );
     case "plan_accept_request":
       return (
