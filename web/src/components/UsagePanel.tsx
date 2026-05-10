@@ -335,7 +335,7 @@ export function ContextRingButton({
       disabled={disabled}
       title={known ? `Context ${pctLabel} · tap for usage` : "Session usage"}
       aria-label="Open usage panel"
-      className="h-8 w-8 rounded-[8px] border border-line bg-canvas flex items-center justify-center hover:bg-paper disabled:opacity-40"
+      className="h-8 w-8 rounded-[8px] border border-line bg-canvas flex items-center justify-center hover:bg-paper disabled:opacity-40 shrink-0"
     >
       <svg width={22} height={22} viewBox="0 0 24 24">
         <circle

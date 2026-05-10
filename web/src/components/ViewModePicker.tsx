@@ -61,17 +61,17 @@ export function ViewModePicker({
   }, [open]);
 
   return (
-    <div ref={rootRef} className="relative">
+    <div ref={rootRef} className="relative shrink-0">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
         title="Transcript view mode"
         aria-haspopup="dialog"
         aria-expanded={open}
-        className="h-8 px-2.5 rounded-[6px] border border-line bg-canvas text-[12px] text-ink-soft flex items-center gap-1.5 hover:bg-paper"
+        className="h-8 px-2.5 rounded-[6px] border border-line bg-canvas text-[12px] text-ink-soft flex items-center gap-1.5 hover:bg-paper whitespace-nowrap"
       >
-        <span>{MODE_LABEL[mode]}</span>
-        <ChevronDown className="w-3.5 h-3.5 text-ink-muted" />
+        <span className="whitespace-nowrap">{MODE_LABEL[mode]}</span>
+        <ChevronDown className="w-3.5 h-3.5 text-ink-muted shrink-0" />
       </button>
 
       {/* Desktop popover — anchored below the pill, constrained to the

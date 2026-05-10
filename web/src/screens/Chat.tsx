@@ -159,7 +159,11 @@ export function ChatScreen() {
   // this on desktop where `offsetBottom` is always 0). A zero-offset path
   // leaves the desktop transform undefined so layout stays pristine.
   const { offsetBottom: kbOffset } = useVisualViewport();
-  // Mobile three-dot menu. Desktop uses header pills instead.
+  // Mobile three-dot menu — opens the full ChatMoreSheet bottom sheet.
+  // Desktop has its own compact dropdown (DesktopMoreMenu) inside the
+  // header that folds secondary actions (session diff / /btw / settings
+  // / terminal) behind a single "⋯" so the header stays breathable on
+  // tablet widths where the sessions + tasks rails are both open.
   const [showMore, setShowMore] = useState(false);
   // Desktop tasks rail visibility. Persisted across navigations so users
   // who prefer the condensed layout stay condensed. Mobile ignores this —
@@ -655,7 +659,7 @@ export function ChatScreen() {
           dropdowns bound to PATCH /api/sessions/:id. */}
       <header className="hidden md:flex shrink-0 px-5 py-3 border-b border-line items-center gap-3 bg-canvas">
         <span className={statusDot} />
-        <div className="min-w-0">
+        <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
             <div className="text-[14px] font-medium truncate">
               {session?.title ?? "Session"}
@@ -678,27 +682,13 @@ export function ChatScreen() {
           {pendingDiffApprovalId && session?.status === "awaiting" && (
             <Link
               to={`/session/${id}/diff?approvalId=${encodeURIComponent(pendingDiffApprovalId)}`}
-              className="h-8 px-2.5 rounded-[6px] bg-klein text-canvas text-[12px] font-medium flex items-center gap-1.5 shadow-card"
+              className="h-8 px-2.5 rounded-[6px] bg-klein text-canvas text-[12px] font-medium flex items-center gap-1.5 shadow-card shrink-0 whitespace-nowrap"
               title="Review full diff"
             >
               <Check className="w-3.5 h-3.5" />
               Review diff
             </Link>
           )}
-          {/* Session diff — whole-session PR view, always available when
-              a session is loaded. Icon-only to conserve header space;
-              `title` provides the label on hover / long-press. */}
-          <Link
-            to={session ? `/session/${id}/session-diff` : "#"}
-            aria-label="Session diff summary"
-            title="Session diff"
-            className={cn(
-              "h-8 w-8 rounded-[6px] border border-line bg-canvas flex items-center justify-center text-ink-soft hover:bg-paper",
-              !session && "opacity-40 pointer-events-none",
-            )}
-          >
-            <GitCompareArrows className="w-4 h-4" />
-          </Link>
           <ViewModePicker mode={viewMode} onChange={setViewMode} />
           <PillPicker
             label={session ? MODEL_LABEL[session.model] ?? session.model : "—"}
@@ -730,41 +720,27 @@ export function ChatScreen() {
                 : undefined
             }
           />
-          {/* /btw button — kept on desktop header because the chip rail
-              also has it, but desktop users are pointer-first so the direct
-              affordance is worth the slot. Mobile moves it to the chip rail
-              only. */}
-          <button
-            onClick={() => setShowSideChat(true)}
+          {/* Desktop overflow menu — collapses session diff, /btw, settings,
+              terminal behind a single "⋯" so the header stays breathable on
+              tablet widths (≈ 768–1100px) where the sessions + tasks rails
+              compete for space. The tasks-rail toggle stays outside so the
+              user can flick the right rail open/closed without a detour. */}
+          <DesktopMoreMenu
             disabled={!session}
-            title="Ask on the side (/btw)"
-            className="h-8 w-8 rounded-[8px] border border-line bg-canvas flex items-center justify-center hover:bg-paper disabled:opacity-40"
-          >
-            <MessageCircle className="w-4 h-4 text-klein" />
-          </button>
-          <button
-            onClick={() => setShowSettings(true)}
-            disabled={!session}
-            title="Session settings"
-            className="h-8 w-8 rounded-[8px] border border-line bg-canvas flex items-center justify-center hover:bg-paper disabled:opacity-40"
-          >
-            <Settings2 className="w-4 h-4 text-ink-soft" />
-          </button>
-          <button
-            onClick={() => setShowTerminal(true)}
-            disabled={!session}
-            title="Open terminal in session cwd"
-            className="h-8 w-8 rounded-[8px] border border-line bg-canvas flex items-center justify-center hover:bg-paper disabled:opacity-40"
-          >
-            <Terminal className="w-4 h-4 text-ink-soft" />
-          </button>
+            onOpenSessionDiff={() =>
+              session ? navigate(`/session/${id}/session-diff`) : undefined
+            }
+            onOpenSideChat={() => setShowSideChat(true)}
+            onOpenSettings={() => setShowSettings(true)}
+            onOpenTerminal={() => setShowTerminal(true)}
+          />
           <button
             onClick={() => setShowTasks((v) => !v)}
             title={showTasks ? "Hide tasks rail" : "Show tasks rail"}
             aria-label="Toggle tasks rail"
             aria-pressed={showTasks}
             className={cn(
-              "h-8 w-8 rounded-[8px] border flex items-center justify-center hover:bg-paper",
+              "h-8 w-8 rounded-[8px] border flex items-center justify-center hover:bg-paper shrink-0",
               showTasks
                 ? "border-klein/30 bg-klein-wash/40 text-klein-ink"
                 : "border-line bg-canvas text-ink-soft",
@@ -1097,15 +1073,15 @@ function PillPicker({
     };
   }, [open]);
   return (
-    <div ref={ref} className="relative">
+    <div ref={ref} className="relative shrink-0">
       <button
         type="button"
         onClick={() => !disabled && setOpen((v) => !v)}
         disabled={disabled}
-        className="h-8 px-2.5 rounded-[6px] border border-line bg-canvas text-[12px] text-ink-soft flex items-center gap-1 hover:bg-paper disabled:opacity-40"
+        className="h-8 px-2.5 rounded-[6px] border border-line bg-canvas text-[12px] text-ink-soft flex items-center gap-1 hover:bg-paper disabled:opacity-40 whitespace-nowrap"
       >
-        <span className="mono">{label}</span>
-        <ChevronDown className="w-3 h-3 text-ink-muted" />
+        <span className="mono whitespace-nowrap">{label}</span>
+        <ChevronDown className="w-3 h-3 text-ink-muted shrink-0" />
       </button>
       {open && (
         <div
@@ -1148,9 +1124,121 @@ function PillPicker({
 }
 
 // ---------------------------------------------------------------------------
+// Desktop header overflow menu — compact popover (not a bottom sheet) that
+// folds the session diff, /btw side chat, session settings, and terminal
+// actions behind a single "⋯" button. Added because the desktop header
+// was overflowing at tablet widths (≈ 768–1100px) with both the sessions
+// and tasks rails open, causing the model pill (e.g. "Opus 4.7") to wrap
+// mid-word. Keeps the full-width ChatMoreSheet (mobile) untouched.
+// ---------------------------------------------------------------------------
+function DesktopMoreMenu({
+  disabled,
+  onOpenSessionDiff,
+  onOpenSideChat,
+  onOpenSettings,
+  onOpenTerminal,
+}: {
+  disabled?: boolean;
+  onOpenSessionDiff: () => void;
+  onOpenSideChat: () => void;
+  onOpenSettings: () => void;
+  onOpenTerminal: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (ev: MouseEvent) => {
+      if (ref.current && !ref.current.contains(ev.target as Node)) {
+        setOpen(false);
+      }
+    };
+    const onKey = (ev: KeyboardEvent) => {
+      if (ev.key === "Escape") setOpen(false);
+    };
+    window.addEventListener("mousedown", onDoc);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", onDoc);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+  const pick = (fn: () => void) => {
+    setOpen(false);
+    fn();
+  };
+  return (
+    <div ref={ref} className="relative shrink-0">
+      <button
+        type="button"
+        onClick={() => !disabled && setOpen((v) => !v)}
+        disabled={disabled}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        title="More actions"
+        aria-label="More actions"
+        className="h-8 w-8 rounded-[8px] border border-line bg-canvas flex items-center justify-center text-ink-soft hover:bg-paper disabled:opacity-40"
+      >
+        <MoreVertical className="w-4 h-4" />
+      </button>
+      {open && (
+        <div
+          role="menu"
+          className="absolute right-0 mt-1.5 z-30 w-[220px] rounded-[10px] border border-line bg-canvas shadow-lift p-1"
+        >
+          <MenuRow
+            icon={<GitCompareArrows className="w-4 h-4 text-ink-soft" />}
+            label="Session diff"
+            onClick={() => pick(onOpenSessionDiff)}
+          />
+          <MenuRow
+            icon={<MessageCircle className="w-4 h-4 text-klein" />}
+            label="Side chat (/btw)"
+            onClick={() => pick(onOpenSideChat)}
+          />
+          <MenuRow
+            icon={<Settings2 className="w-4 h-4 text-ink-soft" />}
+            label="Session settings"
+            onClick={() => pick(onOpenSettings)}
+          />
+          <MenuRow
+            icon={<Terminal className="w-4 h-4 text-ink-soft" />}
+            label="Open terminal"
+            onClick={() => pick(onOpenTerminal)}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MenuRow({
+  icon,
+  label,
+  onClick,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      role="menuitem"
+      type="button"
+      onClick={onClick}
+      className="w-full flex items-center gap-2 px-2.5 h-9 rounded-[6px] text-[13px] text-ink-soft hover:bg-paper text-left"
+    >
+      <span className="shrink-0">{icon}</span>
+      <span className="truncate">{label}</span>
+    </button>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Mobile "more" bottom sheet — houses the buttons evicted from the mobile
 // header (view mode, session settings, terminal, /btw side chat). Desktop
-// never opens this because those affordances are in the header pills.
+// uses the compact DesktopMoreMenu popover above instead, because a full
+// bottom sheet is overkill when the overflow is only four items.
 // ---------------------------------------------------------------------------
 function ChatMoreSheet({
   viewMode,
