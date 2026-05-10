@@ -25,12 +25,18 @@ import type { SubagentRun, SubagentStreamEvent, UIPiece } from "@/state/sessions
 export function SubagentsPanel({
   runs,
   onRevealToolUse,
+  variant = "inline",
 }: {
   runs: SubagentRun[];
   /** Jump the main transcript to a tool_use source piece. Used by the
    * nested tool chips so a user can "show me the full result" the same
    * way the main TasksList row-click does. */
   onRevealToolUse?: (toolUseId: string) => void;
+  /** "inline" (default) renders the panel's own "Agents" chip header,
+   * used when the panel is embedded above TasksList. "embedded" is used
+   * by SubagentsSheet, which supplies its own header chip/count — so we
+   * skip the internal header to avoid a double-up. */
+  variant?: "inline" | "embedded";
 }) {
   // Panel-level ticker — one setInterval keeps mm:ss labels fresh for
   // every open running row. Matches the pattern in TasksList.
@@ -68,26 +74,28 @@ export function SubagentsPanel({
 
   return (
     <div className="flex flex-col border-b border-line bg-paper/30">
-      <div className="px-3 py-2 flex items-center shrink-0 border-b border-line">
-        <span className="inline-flex items-center gap-1 px-1.5 h-5 rounded-[4px] border border-indigo/30 bg-indigo-wash text-indigo mono text-[10px] font-medium uppercase tracking-[0.08em]">
-          <span
-            className={cn(
-              "h-1.5 w-1.5 rounded-full",
-              hasRunning ? "bg-indigo animate-pulse" : "bg-indigo/50",
-            )}
-            aria-hidden
-          />
-          Agents
-        </span>
-        <span className="ml-2 mono text-[11px] text-ink-muted">
-          {runningSorted.length > 0
-            ? `${runningSorted.length} live · ${runs.length} total`
-            : `${runs.length} ${runs.length === 1 ? "run" : "runs"}`}
-        </span>
-        <span className="ml-auto mono text-[10px] text-ink-faint hidden sm:inline">
-          tap row to expand
-        </span>
-      </div>
+      {variant === "inline" && (
+        <div className="px-3 py-2 flex items-center shrink-0 border-b border-line">
+          <span className="inline-flex items-center gap-1 px-1.5 h-5 rounded-[4px] border border-indigo/30 bg-indigo-wash text-indigo mono text-[10px] font-medium uppercase tracking-[0.08em]">
+            <span
+              className={cn(
+                "h-1.5 w-1.5 rounded-full",
+                hasRunning ? "bg-indigo animate-pulse" : "bg-indigo/50",
+              )}
+              aria-hidden
+            />
+            Agents
+          </span>
+          <span className="ml-2 mono text-[11px] text-ink-muted">
+            {runningSorted.length > 0
+              ? `${runningSorted.length} live · ${runs.length} total`
+              : `${runs.length} ${runs.length === 1 ? "run" : "runs"}`}
+          </span>
+          <span className="ml-auto mono text-[10px] text-ink-faint hidden sm:inline">
+            tap row to expand
+          </span>
+        </div>
+      )}
       <div className="flex flex-col py-1">
         {ordered.map((run) => (
           <RunCard

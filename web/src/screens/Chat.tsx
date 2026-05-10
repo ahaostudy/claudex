@@ -22,6 +22,7 @@ import {
   Settings2,
   StopCircle,
   Terminal,
+  Users,
   X,
 } from "lucide-react";
 import { ChatSessionsRail } from "@/components/ChatSessionsRail";
@@ -30,6 +31,7 @@ import { TasksDrawer } from "@/components/TasksDrawer";
 import { PlanStrip } from "@/components/PlanStrip";
 import { SubagentsStrip } from "@/components/SubagentsStrip";
 import { PlanSheet } from "@/components/PlanSheet";
+import { SubagentsSheet } from "@/components/SubagentsSheet";
 import { selectLatestTodos } from "@/lib/todos";
 import { useSessions } from "@/state/sessions";
 import { useSubagentRuns } from "@/state/sessions";
@@ -137,6 +139,10 @@ export function ChatScreen() {
   // for both mobile (bottom sheet) and desktop (right slide-over); see
   // PlanSheet for the responsive DOM.
   const [showPlanSheet, setShowPlanSheet] = useState(false);
+  // Subagents drawer (mockup s-18) — twin of PlanSheet. Opens from the
+  // SubagentsStrip, the indigo "Agent started" pointer inside the
+  // thread, and the Users icon in the chat header.
+  const [showSubagentsSheet, setShowSubagentsSheet] = useState(false);
   // Click-to-expand image overlay. Populated by the thumbnail click handlers
   // in Piece below — we hold the state here so the lightbox renders at the
   // Chat root, above every other drawer / sheet.
@@ -634,6 +640,33 @@ export function ChatScreen() {
           disabled={!session}
           onClick={() => setShowUsage(true)}
         />
+        {subagentRuns.length > 0 && (
+          <button
+            type="button"
+            onClick={() => setShowSubagentsSheet(true)}
+            disabled={!session}
+            aria-label="Open subagents"
+            title={
+              subagentRuns.some((r) => r.status === "running")
+                ? `Agents (${subagentRuns.filter((r) => r.status === "running").length} live)`
+                : "Agents"
+            }
+            className={cn(
+              "relative h-9 w-9 rounded-[8px] border flex items-center justify-center shrink-0 disabled:opacity-40",
+              showSubagentsSheet
+                ? "bg-indigo-wash/60 border-indigo/40 text-indigo"
+                : "bg-paper border-line text-ink-soft hover:bg-paper",
+            )}
+          >
+            <Users className="w-4 h-4" />
+            {subagentRuns.some((r) => r.status === "running") && (
+              <span
+                className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-indigo animate-pulse border border-canvas"
+                aria-hidden
+              />
+            )}
+          </button>
+        )}
         <button
           type="button"
           onClick={() => setShowTasksDrawer(true)}
@@ -734,6 +767,33 @@ export function ChatScreen() {
             onOpenSettings={() => setShowSettings(true)}
             onOpenTerminal={() => setShowTerminal(true)}
           />
+          {subagentRuns.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setShowSubagentsSheet((v) => !v)}
+              aria-label="Open subagents"
+              aria-pressed={showSubagentsSheet}
+              title={
+                subagentRuns.some((r) => r.status === "running")
+                  ? `Agents (${subagentRuns.filter((r) => r.status === "running").length} live)`
+                  : "Agents"
+              }
+              className={cn(
+                "relative h-8 w-8 rounded-[6px] border flex items-center justify-center hover:bg-paper shrink-0",
+                showSubagentsSheet
+                  ? "bg-indigo-wash/60 border-indigo/40 text-indigo"
+                  : "border-line bg-canvas text-ink-soft",
+              )}
+            >
+              <Users className="w-4 h-4" />
+              {subagentRuns.some((r) => r.status === "running") && (
+                <span
+                  className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-indigo animate-pulse border border-canvas"
+                  aria-hidden
+                />
+              )}
+            </button>
+          )}
           <button
             onClick={() => setShowTasks((v) => !v)}
             title={showTasks ? "Hide tasks rail" : "Show tasks rail"}
@@ -768,7 +828,7 @@ export function ChatScreen() {
           — same trigger as the header Tasks icon. */}
       <SubagentsStrip
         runs={subagentRuns}
-        onOpen={() => setShowTasksDrawer(true)}
+        onOpen={() => setShowSubagentsSheet(true)}
       />
 
       {/* Messages — `flex-1 min-h-0` is the magic pair that lets the child
@@ -841,7 +901,7 @@ export function ChatScreen() {
             }}
             onOpenLightbox={(images, index) => setLightbox({ images, index })}
             onOpenPlan={() => setShowPlanSheet(true)}
-            onOpenSubagents={() => setShowTasksDrawer(true)}
+            onOpenSubagents={() => setShowSubagentsSheet(true)}
             revealedSeq={revealedSeq}
             onToggleReveal={(seq) =>
               setRevealedSeq((current) => (current === seq ? null : seq))
@@ -1024,6 +1084,20 @@ export function ChatScreen() {
             }
           }}
           onClose={() => setShowPlanSheet(false)}
+        />
+      )}
+      {showSubagentsSheet && (
+        <SubagentsSheet
+          runs={subagentRuns}
+          onRevealToolUse={(toolUseId) => {
+            const el = scroller.current?.querySelector(
+              `[data-tool-use-id="${CSS.escape(toolUseId)}"]`,
+            );
+            if (el) {
+              el.scrollIntoView({ behavior: "smooth", block: "center" });
+            }
+          }}
+          onClose={() => setShowSubagentsSheet(false)}
         />
       )}
       {lightbox && (

@@ -1,9 +1,7 @@
 import { useEffect } from "react";
 import { X } from "lucide-react";
 import { TasksList } from "@/components/TasksList";
-import { SubagentsPanel } from "@/components/SubagentsPanel";
 import { useFocusReturn } from "@/hooks/useFocusReturn";
-import { useSubagentRuns } from "@/state/sessions";
 import type { UIPiece } from "@/state/sessions";
 
 /**
@@ -35,7 +33,6 @@ export function TasksDrawer({
   onClose: () => void;
 }) {
   useFocusReturn();
-  const subagentRuns = useSubagentRuns(sessionId ?? "");
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -74,13 +71,6 @@ export function TasksDrawer({
           </button>
         </div>
         <div className="flex-1 overflow-y-auto min-h-0">
-          <SubagentsPanel
-            runs={subagentRuns}
-            onRevealToolUse={(id) => {
-              onReveal?.("tool-use-id", id);
-              onClose();
-            }}
-          />
           <TasksList
             pieces={pieces}
             sessionId={sessionId}

@@ -3,9 +3,7 @@ import type { Session, UsageSummaryResponse } from "@claudex/shared";
 import { api } from "@/api/client";
 import { contextWindowTokens } from "@/lib/usage";
 import type { UIPiece } from "@/state/sessions";
-import { useSubagentRuns } from "@/state/sessions";
 import { TasksList, buildTaskRows } from "@/components/TasksList";
-import { SubagentsPanel } from "@/components/SubagentsPanel";
 
 /**
  * Right-rail "Tasks" panel for the desktop Chat screen (mockup s-04 and
@@ -54,11 +52,6 @@ export function ChatTasksRail({
     const rows = buildTaskRows(pieces);
     return rows.filter((r) => r.state === "running").length + pendingApprovalCount;
   }, [pieces, pendingApprovalCount]);
-
-  // Subagent rollup — drives the dedicated SubagentsPanel that sits
-  // above the generic TasksList. Empty sessions get no panel at all
-  // (SubagentsPanel renders nothing for a zero-runs list).
-  const subagentRuns = useSubagentRuns(session?.id ?? "");
 
   // ----- Context window footer -----
   // Pre-aggregated summary: a 10k-event session shouldn't pay for the full
@@ -125,10 +118,6 @@ export function ChatTasksRail({
         </button>
       </div>
       <div className="flex-1 overflow-y-auto min-h-0">
-        <SubagentsPanel
-          runs={subagentRuns}
-          onRevealToolUse={(id) => revealToolUse?.("tool-use-id", id)}
-        />
         <TasksList
           pieces={pieces}
           sessionId={session?.id}

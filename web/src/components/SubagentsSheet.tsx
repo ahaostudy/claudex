@@ -1,0 +1,179 @@
+import { useEffect, useState } from "react";
+import { Users, X } from "lucide-react";
+import { useFocusReturn } from "@/hooks/useFocusReturn";
+import { cn } from "@/lib/cn";
+import { SubagentsPanel } from "@/components/SubagentsPanel";
+import type { SubagentRun } from "@/state/sessions";
+
+/**
+ * Dedicated Subagents drawer (mockup s-18). Twin of PlanSheet: mobile
+ * bottom sheet + desktop right slide-over. Opens from the SubagentsStrip,
+ * the in-thread indigo "Agent started → view" pointer, and a `Users`
+ * icon in the session header. Tasks rail stays tools-only; this is the
+ * only surface that renders subagent runs.
+ *
+ * Closes on: backdrop tap, Esc, or the × button. Zero-runs case still
+ * mounts (the strip hides itself at zero, but we keep the empty-state
+ * card for when someone opens the drawer via the header icon while no
+ * runs have happened yet — reinforces "this is where agents would live").
+ */
+export function SubagentsSheet({
+  runs,
+  onRevealToolUse,
+  onClose,
+}: {
+  runs: SubagentRun[];
+  onRevealToolUse?: (toolUseId: string) => void;
+  onClose: () => void;
+}) {
+  useFocusReturn();
+
+  // `follow` is a UI-only stub for now — the mockup shows the toggle in
+  // the header but auto-scroll-follow of the live stream is out of scope
+  // for this change. Flip it visually; wire it to the timeline scroller
+  // in a follow-up.
+  const [follow, setFollow] = useState(true);
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [onClose]);
+
+  const running = runs.filter((r) => r.status === "running");
+  const liveCount = running.length;
+  const totalCount = runs.length;
+  const hasRunning = liveCount > 0;
+  const runningDesc =
+    running
+      .map((r) => r.description?.trim() || "")
+      .find((d) => d.length > 0) ?? "";
+  const displayTitle =
+    totalCount === 0
+      ? "No delegated runs yet"
+      : hasRunning
+        ? runningDesc ||
+          (liveCount === 1 ? "One sub-agent, live." : `${liveCount} sub-agents, live.`)
+        : `${totalCount} ${totalCount === 1 ? "run" : "runs"} · all finished`;
+
+  return (
+    <div
+      className="fixed inset-0 z-40 bg-ink/30 backdrop-blur-[2px] flex items-end md:items-stretch md:justify-end"
+      onClick={onClose}
+      role="presentation"
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Subagents"
+        className="w-full md:w-[420px] bg-canvas border-t md:border-t-0 md:border-l border-line rounded-t-[20px] md:rounded-none shadow-lift flex flex-col max-h-[85vh] md:max-h-screen md:h-full min-h-[55vh] md:min-h-0"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Drag-handle strip — mobile only. */}
+        <div className="md:hidden flex justify-center pt-3 shrink-0">
+          <span className="h-1 w-12 bg-line-strong rounded-full" aria-hidden />
+        </div>
+        <div className="px-4 md:px-5 pt-3 md:pt-4 pb-3 border-b border-line flex items-start gap-3 shrink-0">
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-[6px] border border-indigo/30 bg-indigo-wash text-indigo text-[10px] font-medium uppercase tracking-[0.1em]">
+                <span
+                  className={cn(
+                    "h-1.5 w-1.5 rounded-full",
+                    hasRunning ? "bg-indigo animate-pulse" : "bg-indigo/50",
+                  )}
+                  aria-hidden
+                />
+                Agents
+              </span>
+              <span className="caps text-ink-muted">
+                {totalCount === 0
+                  ? "empty"
+                  : hasRunning
+                    ? `${liveCount} live · ${totalCount} total`
+                    : `${totalCount} total`}
+              </span>
+              <label
+                className="ml-auto inline-flex items-center gap-1 mono text-[10px] text-ink-muted select-none cursor-pointer"
+                title="Auto-scroll the live stream — stub for now."
+              >
+                <input
+                  type="checkbox"
+                  className="sr-only"
+                  checked={follow}
+                  onChange={(e) => setFollow(e.target.checked)}
+                />
+                <span
+                  className={cn(
+                    "h-3 w-6 rounded-full relative transition-colors",
+                    follow ? "bg-indigo" : "bg-line-strong",
+                  )}
+                  aria-hidden
+                >
+                  <span
+                    className={cn(
+                      "absolute top-[1px] h-2.5 w-2.5 rounded-full bg-canvas transition-all",
+                      follow ? "right-[1px]" : "left-[1px]",
+                    )}
+                  />
+                </span>
+                follow
+              </label>
+            </div>
+            <div className="display text-[18px] md:text-[20px] leading-tight mt-1">
+              {displayTitle}
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close subagents"
+            className="h-8 w-8 rounded-[8px] border border-line flex items-center justify-center"
+          >
+            <X className="w-3.5 h-3.5 text-ink-soft" aria-hidden />
+          </button>
+        </div>
+        <div className="flex-1 min-h-0 overflow-y-auto">
+          {runs.length === 0 ? (
+            <EmptyState />
+          ) : (
+            <SubagentsPanel
+              runs={runs}
+              variant="embedded"
+              onRevealToolUse={
+                onRevealToolUse
+                  ? (id) => {
+                      onRevealToolUse(id);
+                      onClose();
+                    }
+                  : undefined
+              }
+            />
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function EmptyState() {
+  // Matches mockup s-18 "Empty state" card (lines ~4269–4275). Dashed
+  // border so the user reads "not yet" rather than "empty error".
+  return (
+    <div className="p-4">
+      <div className="rounded-[10px] border border-dashed border-line-strong bg-paper/40 px-3 py-3 flex items-center gap-2">
+        <span className="inline-flex items-center gap-1 px-1.5 h-5 rounded-[4px] border border-line bg-canvas mono text-[10px] text-ink-muted uppercase tracking-[0.08em]">
+          <Users className="w-2.5 h-2.5" aria-hidden />
+          Agents
+        </span>
+        <span className="text-[12.5px] text-ink-muted">
+          No delegated runs yet — the drawer fills the moment Claude calls{" "}
+          <span className="mono text-[12px]">Agent</span> or{" "}
+          <span className="mono text-[12px]">Task</span>.
+        </span>
+      </div>
+    </div>
+  );
+}
