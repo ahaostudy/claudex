@@ -1542,7 +1542,7 @@ function Piece({
               type="button"
               onClick={() => onOpenSubagents?.()}
               disabled={!onOpenSubagents}
-              className={`max-w-full inline-flex items-center gap-2 py-1.5 pl-2.5 pr-2.5 rounded-[8px] border text-left shadow-card ${pillClass} disabled:opacity-60`}
+              className={`w-full flex items-center gap-2 py-1.5 pl-2.5 pr-2.5 rounded-[8px] border text-left shadow-card ${pillClass} disabled:opacity-60`}
               title="Open the subagents panel"
             >
               {hasResult && !resultIsError ? (
