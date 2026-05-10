@@ -36,12 +36,12 @@ export function DiffView({
             <div className="mono text-[11px] px-3 py-1 bg-paper/60 text-ink-muted border-t border-b border-line/60">
               {h.header}
             </div>
-            <div className="mono text-[12px]">
+            <div className="mono text-[12px] w-max min-w-full">
               {h.lines.map((ln, i) => (
                 <div
                   key={i}
                   className={cn(
-                    "grid grid-cols-[36px_36px_16px_1fr]",
+                    "grid grid-cols-[36px_36px_16px_max-content]",
                     ln.kind === "add" && "bg-success-wash/60",
                     ln.kind === "del" && "bg-danger-wash/60",
                   )}
@@ -55,7 +55,7 @@ export function DiffView({
                   <div className="text-center text-ink-muted select-none">
                     {ln.kind === "add" ? "+" : ln.kind === "del" ? "−" : " "}
                   </div>
-                  <div className="pr-3 whitespace-pre-wrap break-words [overflow-wrap:anywhere] min-w-0">
+                  <div className="pr-3 whitespace-pre">
                     {ln.text || " "}
                   </div>
                 </div>
@@ -104,12 +104,12 @@ export function DiffView({
               <div className="mono text-[11px] px-3 py-1 bg-paper/60 text-ink-muted border-b border-line/60">
                 {h.header}
               </div>
-              <div className="mono text-[12px]">
+              <div className="mono text-[12px] w-max min-w-full">
                 {h.lines.map((ln, i) => (
                   <div
                     key={i}
                     className={cn(
-                      "grid grid-cols-[36px_36px_16px_1fr]",
+                      "grid grid-cols-[36px_36px_16px_max-content]",
                       ln.kind === "add" && "bg-success-wash/60",
                       ln.kind === "del" && "bg-danger-wash/60",
                     )}
@@ -123,7 +123,7 @@ export function DiffView({
                     <div className="text-center text-ink-muted select-none">
                       {ln.kind === "add" ? "+" : ln.kind === "del" ? "−" : " "}
                     </div>
-                    <div className="pr-3 whitespace-pre-wrap break-words [overflow-wrap:anywhere] min-w-0">
+                    <div className="pr-3 whitespace-pre">
                       {ln.text || " "}
                     </div>
                   </div>

@@ -311,12 +311,39 @@ export function HomeScreen() {
   return (
     <AppShell tab="sessions">
       <header className="shrink-0 relative z-40 bg-canvas/90 backdrop-blur border-b border-line px-5 py-3 flex items-center gap-3">
-        <div>
-          <div className="caps text-ink-muted">Sessions</div>
-          <h1 className="display text-[1.25rem] md:text-[22px] leading-tight mt-0.5">
-            {activeProject ? activeProject.name : "All projects"}
-          </h1>
-        </div>
+        {/* Title = single-line breadcrumb. "Sessions" alone when nothing
+            is filtered; "Sessions · <project>" when a project filter is
+            on, with an inline × to clear. Beats the old caps-above-display
+            stack where "Sessions / All projects" read like two titles
+            fighting for the same slot. */}
+        <h1 className="display text-[18px] md:text-[22px] leading-tight flex items-baseline gap-1.5 min-w-0">
+          <span className="shrink-0">Sessions</span>
+          {activeProject && (
+            <>
+              <span
+                className="text-ink-faint shrink-0 font-sans text-[14px] md:text-[16px]"
+                aria-hidden
+              >
+                ·
+              </span>
+              <span
+                className="font-sans text-[14px] md:text-[15px] font-medium text-ink-soft truncate min-w-0"
+                title={activeProject.name}
+              >
+                {activeProject.name}
+              </span>
+              <button
+                type="button"
+                onClick={clearFilter}
+                aria-label={`Clear project filter ${activeProject.name}`}
+                title="Clear project filter"
+                className="shrink-0 h-5 w-5 rounded-full border border-line bg-paper flex items-center justify-center hover:bg-canvas"
+              >
+                <X className="w-2.5 h-2.5 text-ink-muted" aria-hidden />
+              </button>
+            </>
+          )}
+        </h1>
         <button
           type="button"
           onClick={() => setShowWsDiag((v) => !v)}
@@ -454,16 +481,9 @@ export function HomeScreen() {
                 ? `${visibleSessionCount} in this project · ${sessions.length} total`
                 : `${sessions.length} total`}
           </span>
-          {activeProjectId && (
-            <button
-              type="button"
-              onClick={clearFilter}
-              className="inline-flex items-center gap-1 px-3 h-8 rounded-full border border-line bg-paper text-[11px] text-ink-soft hover:bg-canvas"
-            >
-              <X className="w-3 h-3" />
-              clear filter
-            </button>
-          )}
+          {/* Previously had a "clear filter" button here — redundant now
+              that the header title carries the project chip with its own
+              inline × next to it. */}
         </div>
 
         {loadErr && (
