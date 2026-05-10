@@ -15,6 +15,7 @@ import { SessionManager } from "../sessions/manager.js";
 import { ToolGrantStore } from "../sessions/grants.js";
 import { registerSessionRoutes } from "../sessions/routes.js";
 import { registerBrowseRoutes } from "../sessions/browse.js";
+import { registerFilesRoutes } from "../files/routes.js";
 import { registerSlashCommandRoutes } from "../sessions/slash-commands.js";
 import { registerUserEnvRoutes } from "../sessions/user-env.js";
 import { registerCliRoutes } from "../sessions/cli-routes.js";
@@ -238,6 +239,7 @@ export async function buildApp(
     uploadsRoot,
   });
   await registerBrowseRoutes(app);
+  await registerFilesRoutes(app, { db: deps.db });
   const { registerUploadsRoutes } = await import("../uploads/routes.js");
   await registerUploadsRoutes(app, { db: deps.db, uploadsRoot });
   await registerSlashCommandRoutes(app, {

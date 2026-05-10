@@ -1458,6 +1458,150 @@ export const AdminRestartResponse = z.object({
 export type AdminRestartResponse = z.infer<typeof AdminRestartResponse>;
 
 // ============================================================================
+// Files browser — read-only project file viewer served from the host disk.
+//
+// Three REST endpoints wire into one new screen (mockup s-14):
+//   GET /api/files/tree?project=&path=      — one directory's entries
+//   GET /api/files/read?project=&path=      — file contents (1 MB cap, text only)
+//   GET /api/files/status?project=          — git working-tree summary
+//
+// SECURITY: the server resolves every `path` relative to the project root
+// and rejects anything that escapes (`403 traversal_denied`). The resolver
+// runs BEFORE any disk access keyed to the path — don't trust the string
+// the client sent.
+// ============================================================================
+
+export const FilesTreeEntry = z.object({
+  name: z.string(),
+  // Relative to project root with `/` separators, even on Windows, so the
+  // client can concat safely when drilling in.
+  relPath: z.string(),
+  isDir: z.boolean(),
+  isHidden: z.boolean(), // leading-dot name (.git, .env, etc.)
+  size: z.number().int().nonnegative().optional(), // bytes, files only
+  mtimeMs: z.number().optional(),
+  mode: z.string().optional(), // "-rw-r--r--"
+  // Git status for this entry, if inside a git repo. M=modified, A=added,
+  // D=deleted, R=renamed. null when outside a repo or unchanged.
+  gitStatus: z.enum(["M", "A", "D", "R"]).nullable(),
+  additions: z.number().int().nonnegative().nullable(),
+  deletions: z.number().int().nonnegative().nullable(),
+});
+export type FilesTreeEntry = z.infer<typeof FilesTreeEntry>;
+
+export const FilesTreeResponse = z.object({
+  projectId: z.string(),
+  projectRoot: z.string(), // absolute path, display-only
+  relPath: z.string(), // dir that was listed
+  entries: z.array(FilesTreeEntry),
+});
+export type FilesTreeResponse = z.infer<typeof FilesTreeResponse>;
+
+export const FilesReadResponse = z.object({
+  projectId: z.string(),
+  relPath: z.string(),
+  content: z.string(), // UTF-8, capped at 1 MB
+  lines: z.number().int().nonnegative(),
+  sizeBytes: z.number().int().nonnegative(),
+  mtimeMs: z.number(),
+  mode: z.string(),
+  truncated: z.boolean(), // true when file was larger than the cap
+  gitStatus: z.enum(["M", "A", "D", "R"]).nullable(),
+  additions: z.number().int().nonnegative().nullable(),
+  deletions: z.number().int().nonnegative().nullable(),
+});
+export type FilesReadResponse = z.infer<typeof FilesReadResponse>;
+
+export const FilesStatusEntry = z.object({
+  relPath: z.string(),
+  status: z.enum(["M", "A", "D", "R"]),
+  additions: z.number().int().nonnegative().nullable(),
+  deletions: z.number().int().nonnegative().nullable(),
+});
+export type FilesStatusEntry = z.infer<typeof FilesStatusEntry>;
+
+export const FilesStatusResponse = z.object({
+  projectId: z.string(),
+  branch: z.string().nullable(),
+  totalAdditions: z.number().int().nonnegative(),
+  totalDeletions: z.number().int().nonnegative(),
+  changedCount: z.number().int().nonnegative(),
+  entries: z.array(FilesStatusEntry),
+  isGitRepo: z.boolean(),
+});
+export type FilesStatusResponse = z.infer<typeof FilesStatusResponse>;
+
+// ============================================================================
+// Session diff summary — GET /api/sessions/:id/session-diff
+//
+// Aggregates EVERY file-mutating tool call in the session (Edit / Write /
+// MultiEdit) into a PR-shaped view. Unlike /pending-diffs (pending-only,
+// for the permission card), this is the whole session's history. Mockup
+// s-15. Computed on demand — no cache; sessions are bounded.
+// ============================================================================
+
+export const SessionDiffFileStatus = z.enum(["M", "A", "D", "R"]);
+export type SessionDiffFileStatus = z.infer<typeof SessionDiffFileStatus>;
+
+// How did this file change get reviewed?
+//   accepted  — permission_decision: allow_once / allow_always
+//   rejected  — permission_decision: deny
+//   pending   — permission_request without a matching decision yet
+//   auto      — no permission_request at all (acceptEdits / bypassPermissions)
+export const SessionDiffApproval = z.enum([
+  "accepted",
+  "rejected",
+  "pending",
+  "auto",
+]);
+export type SessionDiffApproval = z.infer<typeof SessionDiffApproval>;
+
+// One chronological step in the session timeline (right rail on desktop,
+// collapsed card on mobile).
+export const SessionDiffTimelineEntry = z.object({
+  toolUseId: z.string(),
+  action: z.enum(["write", "edit", "multiedit"]),
+  filePath: z.string(),
+  addCount: z.number().int().nonnegative(),
+  delCount: z.number().int().nonnegative(),
+  createdAt: z.string(),
+  approval: SessionDiffApproval,
+});
+export type SessionDiffTimelineEntry = z.infer<typeof SessionDiffTimelineEntry>;
+
+// Aggregated diff for one file across all tool calls in the session.
+export const SessionDiffFile = z.object({
+  path: z.string(),
+  status: SessionDiffFileStatus,
+  addCount: z.number().int().nonnegative(),
+  delCount: z.number().int().nonnegative(),
+  hunks: z.array(DiffHunk),
+  hunkCount: z.number().int().nonnegative(),
+  // "Worst" approval across all edits to this file — pending wins over
+  // auto, auto over accepted, accepted over rejected. Gives the file rail
+  // a single status chip that tells the user whether this file still
+  // needs their attention.
+  approval: SessionDiffApproval,
+});
+export type SessionDiffFile = z.infer<typeof SessionDiffFile>;
+
+export const SessionDiffResponse = z.object({
+  files: z.array(SessionDiffFile),
+  timeline: z.array(SessionDiffTimelineEntry),
+  totals: z.object({
+    additions: z.number().int().nonnegative(),
+    deletions: z.number().int().nonnegative(),
+    filesChanged: z.number().int().nonnegative(),
+  }),
+  sessionTitle: z.string(),
+  branch: z.string().nullable(),
+  model: ModelId,
+  status: SessionStatus,
+  messageCount: z.number().int().nonnegative(),
+});
+export type SessionDiffResponse = z.infer<typeof SessionDiffResponse>;
+
+// ============================================================================
 // Alerts
 //
 // Persistent queue of "things that happened while the user may or may not

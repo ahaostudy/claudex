@@ -17,6 +17,7 @@ import { ProjectStore } from "./projects.js";
 import { SessionStore } from "./store.js";
 import { ToolGrantStore } from "./grants.js";
 import { aggregatePendingDiffs } from "./diffs.js";
+import { aggregateSessionDiff } from "./session-diff.js";
 import type { SessionManager } from "./manager.js";
 import { computeUsageSummary } from "./usage-summary.js";
 import { triggerCliResync } from "./cli-resync.js";
@@ -307,6 +308,24 @@ export async function registerSessionRoutes(
       const events = sessions.listEvents(id);
       const diffs = aggregatePendingDiffs(events);
       return reply.send({ diffs });
+    },
+  );
+
+  // GET /api/sessions/:id/session-diff
+  //
+  // Whole-session PR-shaped diff (mockup s-15). Walks every Edit / Write /
+  // MultiEdit tool_use in the session and stitches them per file. Includes
+  // a chronological timeline of every change so the right rail can show
+  // what happened when. Powers /session/:id/session-diff in the web.
+  app.get(
+    "/api/sessions/:id/session-diff",
+    { preHandler: app.requireAuth as any },
+    async (req, reply) => {
+      const { id } = req.params as { id: string };
+      const session = sessions.findById(id);
+      if (!session) return reply.code(404).send({ error: "not_found" });
+      const events = sessions.listEvents(id);
+      return reply.send(aggregateSessionDiff(events, session));
     },
   );
 

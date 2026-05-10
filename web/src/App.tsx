@@ -5,11 +5,13 @@ import { LoginScreen } from "@/screens/Login";
 import { HomeScreen } from "@/screens/Home";
 import { ChatScreen } from "@/screens/Chat";
 import { DiffReviewScreen } from "@/screens/DiffReview";
+import { SessionDiffScreen } from "@/screens/SessionDiff";
 import { SettingsScreen } from "@/screens/Settings";
 import { AboutScreen } from "@/screens/About";
 import { RoutinesScreen } from "@/screens/Routines";
 import { QueueScreen } from "@/screens/Queue";
 import { AlertsScreen } from "@/screens/Alerts";
+import { FilesScreen } from "@/screens/Files";
 import { UsagePage } from "@/screens/UsagePage";
 import { ClientErrorsScreen } from "@/screens/ClientErrors";
 import { KeyboardHelp } from "@/components/KeyboardHelp";
@@ -81,6 +83,14 @@ export default function App() {
         }
       />
       <Route
+        path="/files"
+        element={
+          <Guard>
+            <FilesScreen />
+          </Guard>
+        }
+      />
+      <Route
         path="/usage"
         element={
           <Guard>
@@ -109,6 +119,14 @@ export default function App() {
         element={
           <Guard>
             <DiffReviewScreen />
+          </Guard>
+        }
+      />
+      <Route
+        path="/session/:id/session-diff"
+        element={
+          <Guard>
+            <SessionDiffScreen />
           </Guard>
         }
       />

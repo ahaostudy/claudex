@@ -5,6 +5,7 @@ import {
   BarChart3,
   Calendar,
   Check,
+  FolderTree,
   ListOrdered,
   MessageSquare,
   Settings as SettingsIcon,
@@ -33,6 +34,7 @@ import { toast, ToastHost } from "@/lib/toast";
 export type ShellTab =
   | "sessions"
   | "routines"
+  | "files"
   | "queue"
   | "alerts"
   | "usage"
@@ -56,17 +58,20 @@ interface NavItem {
 const NAV: NavItem[] = [
   { id: "sessions", label: "Sessions", icon: MessageSquare, href: "/sessions" },
   { id: "routines", label: "Routines", icon: Calendar, href: "/routines" },
+  { id: "files", label: "Files", icon: FolderTree, href: "/files" },
   { id: "queue", label: "Queue", icon: ListOrdered, href: "/queue" },
   { id: "alerts", label: "Alerts", icon: Bell, href: "/alerts" },
   { id: "usage", label: "Usage", icon: BarChart3, href: "/usage" },
   { id: "settings", label: "Settings", icon: SettingsIcon, href: "/settings" },
 ];
 
-// Mobile tab bar keeps a compact set — Usage and Subagents are desktop-focused
-// (analytics / observability surfaces where horizontal space helps a lot), so
-// they drop off the thumb-reachable bottom rail. Queue stays because the whole
-// point of Queue is "start a batch from your couch".
-const MOBILE_NAV = NAV.filter((n) => n.id !== "usage");
+// Mobile tab bar keeps a compact set — Usage drops off to the desktop sidebar
+// (it's an analytics surface where horizontal space matters) and Queue drops
+// off on mobile too so the 5-tab thumb rail reads cleanly: Sessions / Routines
+// / Files / Alerts / Settings. Queue stays reachable via the desktop sidebar
+// and direct /queue links; batch-from-couch still works, just from a link
+// rather than a bottom tab.
+const MOBILE_NAV = NAV.filter((n) => n.id !== "usage" && n.id !== "queue");
 
 export function AppShell({
   tab,

@@ -9,6 +9,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Copy,
+  GitCompareArrows,
   GitFork,
   Loader2,
   MessageCircle,
@@ -660,6 +661,20 @@ export function ChatScreen() {
               Review diff
             </Link>
           )}
+          {/* Session diff — whole-session PR view, always available when
+              a session is loaded. Icon-only to conserve header space;
+              `title` provides the label on hover / long-press. */}
+          <Link
+            to={session ? `/session/${id}/session-diff` : "#"}
+            aria-label="Session diff summary"
+            title="Session diff"
+            className={cn(
+              "h-8 w-8 rounded-[6px] border border-line bg-canvas flex items-center justify-center text-ink-soft hover:bg-paper",
+              !session && "opacity-40 pointer-events-none",
+            )}
+          >
+            <GitCompareArrows className="w-4 h-4" />
+          </Link>
           <ViewModePicker mode={viewMode} onChange={setViewMode} />
           <PillPicker
             label={session ? MODEL_LABEL[session.model] ?? session.model : "—"}
@@ -909,6 +924,10 @@ export function ChatScreen() {
             setShowMore(false);
             setShowTerminal(true);
           }}
+          onOpenSessionDiff={() => {
+            setShowMore(false);
+            navigate(`/session/${id}/session-diff`);
+          }}
           onClose={() => setShowMore(false)}
         />
       )}
@@ -1079,6 +1098,7 @@ function ChatMoreSheet({
   onOpenSettings,
   onOpenSideChat,
   onOpenTerminal,
+  onOpenSessionDiff,
   onClose,
 }: {
   viewMode: ViewMode;
@@ -1086,6 +1106,7 @@ function ChatMoreSheet({
   onOpenSettings: () => void;
   onOpenSideChat: () => void;
   onOpenTerminal: () => void;
+  onOpenSessionDiff: () => void;
   onClose: () => void;
 }) {
   const viewModes: ViewMode[] = ["normal", "verbose", "summary"];
@@ -1137,6 +1158,11 @@ function ChatMoreSheet({
             icon={<MessageCircle className="w-4 h-4 text-klein" />}
             label="Side chat (/btw)"
             onClick={onOpenSideChat}
+          />
+          <SheetAction
+            icon={<GitCompareArrows className="w-4 h-4 text-ink-soft" />}
+            label="Session diff"
+            onClick={onOpenSessionDiff}
           />
           <SheetAction
             icon={<Settings2 className="w-4 h-4 text-ink-soft" />}

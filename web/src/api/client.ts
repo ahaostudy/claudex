@@ -34,6 +34,10 @@ import type {
   MetaResponse,
   ListSubagentsResponse,
   AlertsListResponse,
+  FilesTreeResponse,
+  FilesReadResponse,
+  FilesStatusResponse,
+  SessionDiffResponse,
 } from "@claudex/shared";
 
 export class ApiError extends Error {
@@ -176,6 +180,13 @@ export const api = {
   listPendingDiffs(sessionId: string) {
     return request<PendingDiffsResponse>(
       `/api/sessions/${sessionId}/pending-diffs`,
+    );
+  },
+  /** PR-shaped aggregation of every file change in the session. Powers the
+   *  /session/:id/session-diff screen (mockup s-15). */
+  getSessionDiff(sessionId: string) {
+    return request<SessionDiffResponse>(
+      `/api/sessions/${sessionId}/session-diff`,
     );
   },
   createSession(body: CreateSessionRequest) {
@@ -434,6 +445,29 @@ export const api = {
     return request<{ ok: true }>(
       `/api/alerts/${encodeURIComponent(id)}/dismiss`,
       { method: "POST" },
+    );
+  },
+  // ---------------------------------------------------------------------------
+  // Files browser — read-only project file viewer (mockup s-14). All three
+  // endpoints are JWT-gated and resolve paths relative to a project root on
+  // the host; path-traversal attempts are rejected server-side with 403
+  // `traversal_denied`. See server/src/files/routes.ts for the contract.
+  // ---------------------------------------------------------------------------
+  filesTree(projectId: string, relPath?: string) {
+    const qs = new URLSearchParams();
+    qs.set("project", projectId);
+    if (relPath) qs.set("path", relPath);
+    return request<FilesTreeResponse>(`/api/files/tree?${qs.toString()}`);
+  },
+  filesRead(projectId: string, relPath: string) {
+    const qs = new URLSearchParams();
+    qs.set("project", projectId);
+    qs.set("path", relPath);
+    return request<FilesReadResponse>(`/api/files/read?${qs.toString()}`);
+  },
+  filesStatus(projectId: string) {
+    return request<FilesStatusResponse>(
+      `/api/files/status?project=${encodeURIComponent(projectId)}`,
     );
   },
   /**
