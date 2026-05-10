@@ -70,6 +70,9 @@ export function SubagentsPanel({
             ? `${running.length} live · ${runs.length} total`
             : `${runs.length} ${runs.length === 1 ? "run" : "runs"}`}
         </span>
+        <span className="ml-auto mono text-[10px] text-ink-faint hidden sm:inline">
+          tap row to expand
+        </span>
       </div>
       <div className="flex flex-col py-1">
         {running.length > 0 && (

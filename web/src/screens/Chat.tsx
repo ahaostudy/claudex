@@ -1523,15 +1523,18 @@ function Piece({
             : typeof inputObj.subagent_type === "string"
               ? (inputObj.subagent_type as string)
               : p.name;
-        const pillClass = hasResult
-          ? resultIsError
-            ? "bg-danger-wash/40 border-danger/25 hover:bg-danger-wash/60"
-            : "bg-paper border-line-strong/70 hover:bg-paper"
-          : "bg-klein-wash/40 border-klein/35 hover:bg-klein-wash/60";
-        const captionClass = hasResult
-          ? resultIsError
-            ? "text-danger"
-            : "text-ink-muted"
+        // All three states share the klein (brand) wash so the row reads
+        // "this is a subagent pointer" at a glance; only the status icon
+        // color differentiates running / done / failed. Solid border (not
+        // dashed) + slightly heavier bg than the mockup so the pointer
+        // stands out from surrounding prose instead of blending in. Klein
+        // text on the status caption + ink-dark on the description keep
+        // it readable when the label runs long.
+        const pillClass = resultIsError
+          ? "bg-danger-wash/50 border-danger/40 hover:bg-danger-wash/70"
+          : "bg-klein-wash/60 border-klein/40 hover:bg-klein-wash/80";
+        const captionClass = resultIsError
+          ? "text-danger"
           : "text-klein-ink";
         return (
           <div data-tool-use-id={p.id} data-event-seq={p.seq}>
@@ -1539,7 +1542,7 @@ function Piece({
               type="button"
               onClick={() => onOpenSubagents?.()}
               disabled={!onOpenSubagents}
-              className={`inline-flex items-center gap-2 py-1 pl-2.5 pr-2.5 rounded-[8px] border border-dashed text-left ${pillClass} disabled:opacity-60`}
+              className={`max-w-full inline-flex items-center gap-2 py-1.5 pl-2.5 pr-2.5 rounded-[8px] border text-left shadow-card ${pillClass} disabled:opacity-60`}
               title="Open the subagents panel"
             >
               {hasResult && !resultIsError ? (
@@ -1547,7 +1550,7 @@ function Piece({
                   viewBox="0 0 24 24"
                   fill="none"
                   stroke="currentColor"
-                  strokeWidth="2"
+                  strokeWidth="2.2"
                   className="w-3.5 h-3.5 text-success shrink-0"
                   aria-hidden
                 >
@@ -1558,7 +1561,7 @@ function Piece({
                   viewBox="0 0 24 24"
                   fill="none"
                   stroke="currentColor"
-                  strokeWidth="2"
+                  strokeWidth="2.2"
                   className="w-3.5 h-3.5 text-danger shrink-0"
                   aria-hidden
                 >
@@ -1570,23 +1573,25 @@ function Piece({
                   viewBox="0 0 24 24"
                   fill="none"
                   stroke="currentColor"
-                  strokeWidth="2"
+                  strokeWidth="2.2"
                   aria-hidden
                 >
                   <path d="M21 12a9 9 0 1 1-6.2-8.6" />
                 </svg>
               )}
-              <span className={`mono text-[11px] ${captionClass} uppercase tracking-[0.1em] shrink-0`}>
+              <span className={`mono text-[11px] font-semibold ${captionClass} uppercase tracking-[0.1em] shrink-0`}>
                 {hasResult
                   ? resultIsError
                     ? `${p.name} failed`
                     : `${p.name} done`
                   : `${p.name} started`}
               </span>
-              <span className="text-[12.5px] text-ink-soft max-w-[50ch] truncate">
+              <span className="text-[12.5px] text-ink font-medium flex-1 min-w-0 truncate">
                 {label}
               </span>
-              <span className="mono text-[11px] text-ink-muted">→ view</span>
+              <span className="mono text-[11px] text-klein-ink/80 shrink-0">
+                → view
+              </span>
             </button>
             {p.createdAt && (
               <div

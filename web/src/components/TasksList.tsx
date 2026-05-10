@@ -63,17 +63,29 @@ export interface TaskRow {
  * (if any) by toolUseId. Orphan tool_results (no preceding tool_use) are
  * ignored — they'd have no row to attach to anyway.
  *
+ * Subagent-family (`Task` / `Agent` / `Explore`) tool_use events whose
+ * toolUseId is claimed by a `subagent_start` piece are skipped here —
+ * SubagentsPanel owns them and renders the expandable live stream. Legacy
+ * runs that pre-date the s-17 SDK opt-in never get a `subagent_start`
+ * event, so they still surface under the "Subagents" group in this list
+ * (where their row behavior is the old "click to jump to message").
+ *
  * Rows are returned in no particular order; the group renderer sorts them
  * (newest first within a group) so callers can trust display order.
  */
 export function buildTaskRows(pieces: UIPiece[]): TaskRow[] {
   const resultsById = new Map<string, UIPiece & { kind: "tool_result" }>();
+  const claimedByPanel = new Set<string>();
   for (const p of pieces) {
     if (p.kind === "tool_result") resultsById.set(p.toolUseId, p);
+    if (p.kind === "subagent_start" && p.parentToolUseId) {
+      claimedByPanel.add(p.parentToolUseId);
+    }
   }
   const rows: TaskRow[] = [];
   for (const p of pieces) {
     if (p.kind !== "tool_use") continue;
+    if (SUBAGENT_TOOLS.has(p.name) && claimedByPanel.has(p.id)) continue;
     const matched = resultsById.get(p.id);
     let state: TaskState = "running";
     if (matched) state = matched.isError ? "failed" : "done";
