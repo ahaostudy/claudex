@@ -81,13 +81,31 @@ is the time a Vite-side type elision breaks the server build.
    but call it out in the commit message.
 3. **`pnpm --filter @claudex/web build`** — Vite build must succeed. This
    catches things typecheck misses (CSS, imports, bundle-only errors).
-4. **Restart the server. Kill only the node process — leave frpc alone.**
-   Use the restart script. It spawns a fully detached worker (Node
-   `spawn({ detached: true, stdio: 'ignore' })`, cross-platform — works
-   on macOS/Linux/Windows without `setsid`/`nohup` tricks) that waits for
-   port 5179 to free up, then starts the new server. The worker is NOT a
-   child of your shell / Claude / the old server, so killing the old
-   server cannot cascade-kill the restart.
+4. **Update `docs/FEATURES.md` if behavior changed** (see "Feature ledger"
+   above). This is part of the commit, not a follow-up.
+5. **Commit.** Message describes what changed, not how many agents ran.
+   You do this yourself — do not ask first.
+6. **Push through the user's proxy:**
+   ```sh
+   https_proxy=http://localhost:7890 http_proxy=http://localhost:7890 \
+     git push origin main
+   ```
+   Outbound git/npm/curl always need the proxy; localhost does not. You
+   do this yourself right after the commit — do not ask first.
+7. **Wait for the user's go-ahead, then restart the server.** Restart is
+   gated: after pushing, report the batch is ready and stop. Only when
+   the user explicitly says to restart (e.g. "restart", "重启", "go") do
+   you run the restart sequence below. This is because the user is
+   driving live on mobile and picks the moment — an unsolicited restart
+   can cut them off mid-task.
+
+   When the user gives the word: **kill only the node process — leave
+   frpc alone.** Use the restart script. It spawns a fully detached
+   worker (Node `spawn({ detached: true, stdio: 'ignore' })`,
+   cross-platform — works on macOS/Linux/Windows without `setsid`/`nohup`
+   tricks) that waits for port 5179 to free up, then starts the new
+   server. The worker is NOT a child of your shell / Claude / the old
+   server, so killing the old server cannot cascade-kill the restart.
    ```sh
    SRV=$(lsof -ti :5179 -sTCP:LISTEN | head -1)
    node scripts/restart.mjs 5179   # detaches the relaunch worker, then returns
@@ -106,20 +124,12 @@ is the time a Vite-side type elision breaks the server build.
    - new pid listening on 5179: `lsof -ti :5179 -sTCP:LISTEN`
    - frpc pid unchanged: `pgrep -f 'frpc -c'` (remember it from before)
    - health 200: `curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:5179/api/health`
-5. **Update `docs/FEATURES.md` if behavior changed** (see "Feature ledger"
-   above). This is part of the commit, not a follow-up.
-6. **Commit.** Message describes what changed, not how many agents ran.
-7. **Push through the user's proxy:**
-   ```sh
-   https_proxy=http://localhost:7890 http_proxy=http://localhost:7890 \
-     git push origin main
-   ```
-   Outbound git/npm/curl always need the proxy; localhost does not.
 
-Do not do any of: skip typecheck because "the change was small", commit
-without restart, restart without build, push without commit, or leave the
-web bundle stale ("it'll pick it up next time"). The user is driving this
-live — stale dist/ → prod mismatch.
+Do not do any of: skip typecheck because "the change was small", push
+without commit, restart without build, restart without the user's
+explicit say-so, or leave the web bundle stale ("it'll pick it up next
+time"). The user is driving this live — stale dist/ on a live server →
+prod mismatch the moment they restart.
 
 ## Working with agents
 
@@ -137,7 +147,9 @@ rather than direct edits. Pattern:
   that touches nonces, clipboard, crypto, or notifications should get the
   "HTTP not HTTPS" warning in their prompt.
 - **Close the prompt with:** "typecheck / test / build must pass. Do NOT
-  commit, push, or restart the server — that's my responsibility."
+  commit, push, or restart the server — I'll handle commit + push after
+  reviewing, and the user gates restart." Sub-agents never touch git or
+  the running server, even though the main Claude session does.
 - **Side-branch QA agents don't block.** Spawn them in parallel with
   dev agents; their feedback rolls into the next batch, not this one.
 

@@ -358,6 +358,15 @@ async function registerWebStatic(
     return reply
       .code(200)
       .type("text/html; charset=utf-8")
+      // Mirror the fastify-static `no-cache` policy for index.html. Without
+      // this, any SPA route (/session/:id, /routines, /alerts, …) falls
+      // through to this handler and Fastify sends index.html with no
+      // Cache-Control at all — which means the browser is free to cache
+      // it indefinitely, and the user can't pick up a new JS bundle hash
+      // until they manually clear Safari's site data. Pair this with the
+      // Advanced → "Force reload" button for the case where the old
+      // header already poisoned the cache.
+      .header("Cache-Control", "no-cache")
       .send(fs.readFileSync(indexPath));
   });
 }

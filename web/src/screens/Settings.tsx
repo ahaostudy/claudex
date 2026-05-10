@@ -1961,9 +1961,85 @@ function EnvironmentPanel() {
 function AdvancedPanel() {
   return (
     <div className="space-y-5">
+      <AppVersionCard />
       <AdvancedWorktreesCard />
       <BackupCard />
     </div>
+  );
+}
+
+// Bundle version readout + hard-refresh button. The hard-refresh path is
+// necessary because claudex runs over plain HTTP through the frpc tunnel,
+// and iOS Safari will happily serve a months-old index.html from its HTTP
+// cache even after the server ships a new bundle. Server-side we set
+// `Cache-Control: no-cache` on index.html (both the fastify-static mount
+// and the SPA fallback in server/src/transport/app.ts), so fresh loads
+// revalidate — but caches already populated under the old (no-header)
+// regime are sticky. This button exists to break that deadlock from the
+// UI without making the user dig through Safari → Settings → Website Data.
+function AppVersionCard() {
+  const [bundleName, setBundleName] = useState<string>("unknown");
+  const [isReloading, setIsReloading] = useState(false);
+
+  useEffect(() => {
+    // Read the hashed JS filename directly off the live <script> tag so
+    // the user can eyeball which bundle is actually running. Not the
+    // build-time version — this reflects what the browser loaded, which
+    // is the whole point.
+    const script = document.querySelector<HTMLScriptElement>(
+      'script[type="module"][src*="/assets/"]',
+    );
+    if (script?.src) {
+      const match = script.src.match(/\/assets\/(index-[A-Za-z0-9_-]+\.js)/);
+      if (match) setBundleName(match[1]);
+    }
+  }, []);
+
+  async function forceReload() {
+    setIsReloading(true);
+    // Opportunistic: purge any Cache API stores the browser may have
+    // against this origin. `caches` may be undefined on plain HTTP in
+    // some browsers (secure-context-only variants), so guard it.
+    try {
+      if (typeof caches !== "undefined") {
+        const names = await caches.keys();
+        await Promise.all(names.map((n) => caches.delete(n)));
+      }
+    } catch {
+      /* ignore — best effort */
+    }
+    // Append a cache-busting query param and `replace()` into it so the
+    // browser treats this as a fresh URL and bypasses its HTTP cache for
+    // index.html. The server's SPA fallback ignores query strings, so the
+    // path still resolves to the current index.html — which references
+    // the latest hashed /assets bundle. Preserves the pathname and hash
+    // so deep links like `/session/abc#seq-5` don't lose state.
+    const url = new URL(window.location.href);
+    url.searchParams.set("_r", Date.now().toString(36));
+    window.location.replace(url.toString());
+  }
+
+  return (
+    <Card header="App version">
+      <Row
+        label="Bundle"
+        value={<span className="mono text-[12px]">{bundleName}</span>}
+      />
+      <div className="px-4 sm:px-5 py-3 space-y-2">
+        <button
+          type="button"
+          onClick={forceReload}
+          disabled={isReloading}
+          className="h-9 px-3.5 rounded-md border border-line bg-canvas hover:bg-paper text-[13.5px] font-medium text-ink disabled:opacity-60 disabled:cursor-not-allowed"
+        >
+          {isReloading ? "Reloading…" : "Force reload (clear cache)"}
+        </button>
+        <div className="text-[12px] text-ink-muted">
+          Bypass the browser's HTTP cache and fetch the freshest bundle. Use
+          after a server update if the app feels stuck on an old version.
+        </div>
+      </div>
+    </Card>
   );
 }
 
