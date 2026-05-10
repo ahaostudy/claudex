@@ -83,6 +83,12 @@ export function buildTaskRows(pieces: UIPiece[]): TaskRow[] {
     // Every Task/Agent/Explore row is handled by SubagentsPanel now
     // (including legacy rows via `computeSubagentRuns`'s synthesis pass).
     if (SUBAGENT_PARENT_TOOLS.has(p.name)) continue;
+    // Tool calls owned by a subagent (sync or async) carry
+    // parentToolUseId. They belong to that subagent's run inside
+    // SubagentsPanel, NOT to the main agent's task list. Without this
+    // guard, a sync subagent's Bash/Read/Grep calls leak into the
+    // main tasks rail, doubling them up and misattributing authorship.
+    if (p.parentToolUseId) continue;
     const matched = resultsById.get(p.id);
     let state: TaskState = "running";
     if (matched) state = matched.isError ? "failed" : "done";

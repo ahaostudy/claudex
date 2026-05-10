@@ -1611,19 +1611,18 @@ function Piece({
             : typeof inputObj.subagent_type === "string"
               ? (inputObj.subagent_type as string)
               : p.name;
-        // All three states share the klein (brand) wash so the row reads
-        // "this is a subagent pointer" at a glance; only the status icon
-        // color differentiates running / done / failed. Solid border (not
-        // dashed) + slightly heavier bg than the mockup so the pointer
-        // stands out from surrounding prose instead of blending in. Klein
-        // text on the status caption + ink-dark on the description keep
-        // it readable when the label runs long.
+        // All three non-error states share the indigo wash so the row
+        // reads "this is a subagent pointer" at a glance and is visually
+        // distinct from main-agent tool chips (which use klein/neutral).
+        // Only the status icon color differentiates running / done. Solid
+        // border + slightly heavier bg than the mockup so the pointer
+        // stands out from surrounding prose instead of blending in.
         const pillClass = resultIsError
           ? "bg-danger-wash/50 border-danger/40 hover:bg-danger-wash/70"
-          : "bg-klein-wash/60 border-klein/40 hover:bg-klein-wash/80";
+          : "bg-indigo-wash/60 border-indigo/40 hover:bg-indigo-wash/80";
         const captionClass = resultIsError
           ? "text-danger"
-          : "text-klein-ink";
+          : "text-indigo";
         return (
           <div data-tool-use-id={p.id} data-event-seq={p.seq}>
             <button
@@ -1657,7 +1656,7 @@ function Piece({
                 </svg>
               ) : (
                 <svg
-                  className="w-3.5 h-3.5 text-klein animate-spin shrink-0"
+                  className="w-3.5 h-3.5 text-indigo animate-spin shrink-0"
                   viewBox="0 0 24 24"
                   fill="none"
                   stroke="currentColor"
@@ -1677,7 +1676,7 @@ function Piece({
               <span className="text-[12.5px] text-ink font-medium flex-1 min-w-0 truncate">
                 {label}
               </span>
-              <span className="mono text-[11px] text-klein-ink/80 shrink-0">
+              <span className="mono text-[11px] text-indigo/80 shrink-0">
                 → view
               </span>
             </button>
