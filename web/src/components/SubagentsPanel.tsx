@@ -69,11 +69,11 @@ export function SubagentsPanel({
   return (
     <div className="flex flex-col border-b border-line bg-paper/30">
       <div className="px-3 py-2 flex items-center shrink-0 border-b border-line">
-        <span className="inline-flex items-center gap-1 px-1.5 h-5 rounded-[4px] border border-klein/30 bg-klein-wash text-klein-ink mono text-[10px] font-medium uppercase tracking-[0.08em]">
+        <span className="inline-flex items-center gap-1 px-1.5 h-5 rounded-[4px] border border-indigo/30 bg-indigo-wash text-indigo mono text-[10px] font-medium uppercase tracking-[0.08em]">
           <span
             className={cn(
               "h-1.5 w-1.5 rounded-full",
-              hasRunning ? "bg-klein animate-pulse" : "bg-klein/50",
+              hasRunning ? "bg-indigo animate-pulse" : "bg-indigo/50",
             )}
             aria-hidden
           />
@@ -276,11 +276,11 @@ function LiveStream({
         <span
           className={cn(
             "h-1.5 w-1.5 rounded-full",
-            isLive ? "bg-klein animate-pulse" : "bg-ink-faint",
+            isLive ? "bg-indigo animate-pulse" : "bg-ink-faint",
           )}
           aria-hidden
         />
-        <span className="uppercase tracking-[0.12em] text-[10px] font-medium text-klein-ink">
+        <span className="uppercase tracking-[0.12em] text-[10px] font-medium text-indigo">
           {isLive ? "Live stream" : "Transcript"}
         </span>
         <span className="mono text-[10px] text-ink-muted">
@@ -547,8 +547,8 @@ function StatusDot({ run }: { run: SubagentRun }) {
   if (run.status === "running") {
     return (
       <span
-        className="relative h-2 w-2 rounded-full bg-klein animate-pulse shrink-0"
-        style={{ boxShadow: "0 0 0 3px rgba(204,120,92,0.22)" }}
+        className="relative h-2 w-2 rounded-full bg-indigo animate-pulse shrink-0"
+        style={{ boxShadow: "0 0 0 3px rgba(59,75,138,0.22)" }}
         aria-hidden
       />
     );
@@ -593,11 +593,11 @@ function tintFor(status: SubagentRun["status"]): {
 } {
   if (status === "running") {
     return {
-      strip: "bg-klein",
-      bg: "bg-klein-wash/25",
-      border: "border-klein/25",
-      chip: "border-klein/40 text-klein-ink bg-canvas/80",
-      headerBorder: "border-klein/20",
+      strip: "bg-indigo",
+      bg: "bg-indigo-wash/25",
+      border: "border-indigo/25",
+      chip: "border-indigo/40 text-indigo bg-canvas/80",
+      headerBorder: "border-indigo/20",
     };
   }
   if (status === "failed") {
@@ -646,12 +646,12 @@ function formatElapsedClock(startedAtIso: string): string {
 }
 
 function Caret() {
-  // Inline blinking caret for trailing partial text. Styled to match the
-  // mockup's `caret` CSS — an orange block cursor that ghosts in and out.
+  // Inline blinking caret for trailing partial text. Indigo to match the
+  // subagent surface palette — signals "a subagent is still streaming."
   return (
     <span
       aria-hidden
-      className="inline-block w-[2px] h-[0.95em] align-[-0.1em] ml-[3px] bg-klein animate-pulse"
+      className="inline-block w-[2px] h-[0.95em] align-[-0.1em] ml-[3px] bg-indigo animate-pulse"
     />
   );
 }

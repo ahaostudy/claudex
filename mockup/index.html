@@ -103,6 +103,7 @@
           <a href="#s-15" class="px-2 h-7 inline-flex items-center gap-1 rounded-[6px] hover:bg-paper text-[12px] text-ink-soft"><span class="mono text-[10px] text-ink-faint">15</span>Session diff</a>
           <a href="#s-16" class="px-2 h-7 inline-flex items-center gap-1 rounded-[6px] hover:bg-paper text-[12px] text-ink-soft"><span class="mono text-[10px] text-ink-faint">16</span>Plan</a>
           <a href="#s-17" class="px-2 h-7 inline-flex items-center gap-1 rounded-[6px] hover:bg-paper text-[12px] text-ink-soft"><span class="mono text-[10px] text-ink-faint">17</span>Agents</a>
+          <a href="#s-18" class="px-2 h-7 inline-flex items-center gap-1 rounded-[6px] hover:bg-paper text-[12px] text-ink-soft"><span class="mono text-[10px] text-ink-faint">18</span>Agents drawer</a>
         </nav>
         <div class="ml-auto flex items-center gap-3 text-[12px] text-ink-muted">
           <span class="hidden sm:inline">High-fidelity mockup · 12 screens · mobile + desktop</span>
@@ -3655,13 +3656,17 @@
 
     <!-- =========================================================
       SCREEN 17 · LIVE SUBAGENTS (plan-strip style, with live stream)
+      NOTE · SUPERSEDED BY s-18 · agents now live in a dedicated drawer,
+      not embedded in the right tasks rail. The strip + pointer / live
+      stream anatomy remain authoritative; the rail-embedded panel
+      placement does not.
     ========================================================= -->
-    <section id="s-17" class="border-b border-line">
+    <section id="s-17" class="border-b border-line opacity-70">
       <div class="max-w-[1600px] mx-auto px-5 lg:px-10 pt-14">
         <div class="flex items-baseline gap-4 mb-3">
           <span class="mono text-[12px] text-ink-faint">screen · 17</span>
           <h2 class="display text-[1.75rem] leading-tight">Live subagents</h2>
-          <span class="mono text-[11px] text-ink-muted">supersedes s-13</span>
+          <span class="mono text-[11px] text-danger">superseded by s-18</span>
         </div>
         <p class="max-w-[78ch] text-[15px] text-ink-muted mb-4">Subagents get the same two-surface treatment as the plan (s-16), plus one new thing: each running row <em>unfolds</em> into a live stream of its tool calls and text chunks, so you can watch a delegated sweep without leaving the parent session. No more opening a third tab to guess whether the explorer is stuck.</p>
         <ul class="text-[14px] text-ink-soft space-y-1.5 mb-10 max-w-[78ch]">
@@ -4275,6 +4280,556 @@
     </section>
 
     <!-- =========================================================
+      SCREEN 18 · AGENTS DRAWER (extracted from tasks rail)
+    ========================================================= -->
+    <section id="s-18" class="border-b border-line bg-paper/30">
+      <div class="max-w-[1600px] mx-auto px-5 lg:px-10 pt-14">
+        <div class="flex items-baseline gap-4 mb-3">
+          <span class="mono text-[12px] text-ink-faint">screen · 18</span>
+          <h2 class="display text-[1.75rem] leading-tight">Agents drawer</h2>
+          <span class="mono text-[11px] text-ink-muted">supersedes s-17 panel placement</span>
+        </div>
+        <p class="max-w-[78ch] text-[15px] text-ink-muted mb-4">Agents used to live inline with the Tasks rail. That conflated two very different things — "what <em>Claude</em> did" and "what Claude is <em>delegating to a sub-agent</em>" — and doubled up rows whenever a sync sub-agent ran tools. <span class="font-medium">s-18 extracts agents into a dedicated drawer, twin to the Plan sheet (s-16):</span> bottom sheet on mobile, right slide-over on desktop. Tasks rail becomes tools-only; agents are their own surface, in their own color (<span class="text-indigo font-medium">indigo</span>).</p>
+        <ul class="text-[14px] text-ink-soft space-y-1.5 mb-10 max-w-[78ch]">
+          <li class="flex items-start gap-2"><span class="mono text-indigo text-[12px] mt-[3px]">01</span><span><span class="font-medium">Agents strip (kept, recolored)</span> — sticky under the session header, one dot per run + the most-recent <em>activeForm</em>. <span class="text-indigo">Indigo</span> throughout so it reads as "delegation" at a glance, visually distinct from main-agent (klein) work.</span></li>
+          <li class="flex items-start gap-2"><span class="mono text-indigo text-[12px] mt-[3px]">02</span><span><span class="font-medium">Agents drawer</span> — mobile bottom sheet / desktop right slide-over (≈420 px, dim backdrop). Opens from the strip, from an indigo agent-pointer in the chat thread, or from a dedicated <span class="mono text-[13px]">Users</span> icon in the chat header. Tap backdrop or swipe / press <span class="mono text-[13px]">Esc</span> to dismiss.</span></li>
+          <li class="flex items-start gap-2"><span class="mono text-indigo text-[12px] mt-[3px]">03</span><span><span class="font-medium">Tasks rail on desktop is tools-only.</span> Sub-agent tool calls no longer show there — they're rolled up inside each agent run in the drawer, so no more double-count and no more attribution mismatch.</span></li>
+          <li class="flex items-start gap-2"><span class="mono text-indigo text-[12px] mt-[3px]">04</span><span><span class="font-medium">Drawer content mirrors s-17's panel</span> — grouped <em>Running / Done / Failed</em>; running rows auto-expand with live stream; Input preview; tool chips inside the stream keep the main-thread palette (klein "running" wash on in-flight tools) so tool rows read the same as anywhere else.</span></li>
+        </ul>
+
+        <div class="flex flex-col xl:flex-row flex-wrap gap-10 items-start justify-center pb-16">
+
+          <!-- ==================== iPhone A · strip only + indigo pointer in thread ==================== -->
+          <div class="flex flex-col items-center gap-3">
+            <div class="caps text-ink-muted">iPhone · drawer closed · strip + indigo pointer</div>
+            <div class="iphone">
+              <div class="iphone-inner">
+                <div class="iphone-island"></div>
+                <div class="iphone-status"><span class="mono">9:41</span><span class="flex items-center gap-1"><span class="h-2 w-4 bg-ink rounded-sm"></span><span class="mono text-[11px]">5G</span><span class="h-2.5 w-5 border border-ink rounded-sm flex items-center justify-end pr-[1px]"><span class="h-1.5 w-3.5 bg-ink rounded-[1px]"></span></span></span></div>
+                <div class="iphone-home"></div>
+                <div class="iphone-content flex flex-col bg-canvas">
+                  <!-- session header with Users icon to open drawer -->
+                  <div class="px-4 py-2.5 border-b border-line flex items-center gap-2 shrink-0">
+                    <button class="h-8 w-8 rounded-[8px] bg-paper border border-line flex items-center justify-center"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-4 h-4"><path d="M15 6l-6 6 6 6"/></svg></button>
+                    <div class="min-w-0 flex-1">
+                      <div class="flex items-center gap-1.5"><span class="h-2 w-2 rounded-full bg-success animate-pulse"></span><div class="text-[14px] font-medium truncate">Fix hydration mismatch…</div></div>
+                      <div class="flex items-center gap-1.5 text-[11px] text-ink-muted mt-0.5"><span class="mono">spindle</span><span>·</span><span class="mono">opus-4.7</span></div>
+                    </div>
+                    <!-- Users icon with live dot = open agents drawer -->
+                    <button class="relative h-8 w-8 rounded-[8px] bg-indigo-wash/60 border border-indigo/30 flex items-center justify-center" title="Agents (2 live)">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-4 h-4 text-indigo"><circle cx="9" cy="8" r="3"/><circle cx="17" cy="9" r="2.2"/><path d="M3 20a6 6 0 0 1 12 0"/><path d="M15 20a5 5 0 0 1 6.5-4.8"/></svg>
+                      <span class="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-indigo animate-pulse border border-canvas"></span>
+                    </button>
+                  </div>
+
+                  <!-- AGENTS STRIP (indigo, persistent — tap to open drawer) -->
+                  <button class="w-full px-3 py-2 bg-paper/70 border-b border-line flex items-center gap-2 shrink-0 active:bg-paper">
+                    <span class="inline-flex items-center gap-1 px-1.5 h-5 rounded-[4px] border border-indigo/30 bg-indigo-wash text-indigo mono text-[10px] font-medium uppercase tracking-[0.08em] shrink-0">Agents</span>
+                    <!-- per-agent dots (indigo pills for running/stopped, success/danger for done/failed) -->
+                    <span class="flex items-center gap-[3px] shrink-0">
+                      <span class="h-1.5 w-3 rounded-full bg-indigo" style="box-shadow:0 0 0 2px rgba(59,75,138,0.20)"></span>
+                      <span class="h-1.5 w-3 rounded-full bg-indigo/70" style="box-shadow:0 0 0 2px rgba(59,75,138,0.14)"></span>
+                      <span class="h-1.5 w-1.5 rounded-full bg-success"></span>
+                      <span class="h-1.5 w-1.5 rounded-full bg-danger/70"></span>
+                    </span>
+                    <span class="mono text-[10.5px] text-ink-muted shrink-0">2 live</span>
+                    <span class="text-[12.5px] text-ink font-medium truncate flex-1 text-left"><span class="mono text-[11px] text-indigo mr-1">explorer</span>Grepping "Intl.DateTimeFormat"</span>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-3.5 h-3.5 text-ink-muted shrink-0"><path d="M6 9l6 6 6-6"/></svg>
+                  </button>
+
+                  <!-- messages -->
+                  <div class="flex-1 overflow-y-auto px-4 py-4 space-y-4">
+                    <div class="flex justify-end"><div class="max-w-[88%] bg-ink text-canvas rounded-[14px] rounded-br-[4px] px-3.5 py-2.5 shadow-card text-[14px] leading-[1.5]">Fan this out: explorer on the hydration warning, reviewer on the retry PR.</div></div>
+
+                    <div>
+                      <div class="flex items-center gap-2 mb-1.5"><svg viewBox="0 0 32 32" class="w-4 h-4"><path d="M9 22 L16 8 L23 22 Z" fill="#cc785c"/><circle cx="16" cy="18" r="2.2" fill="#faf9f5"/></svg><span class="mono text-[11px] text-ink-muted">claude · opus-4.7</span></div>
+                      <div class="text-[14px] leading-[1.6] text-ink">Dispatching two in parallel. Tap the strip above to watch them live.</div>
+
+                      <!-- INDIGO POINTER · agent started (matches Chat.tsx) -->
+                      <button class="w-full mt-2 flex items-center gap-2 py-1.5 pl-2.5 pr-2.5 rounded-[8px] bg-indigo-wash/60 border border-indigo/40 text-left shadow-card">
+                        <svg class="w-3.5 h-3.5 text-indigo animate-spin shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M21 12a9 9 0 1 1-6.2-8.6"/></svg>
+                        <span class="mono text-[11px] font-semibold text-indigo uppercase tracking-[0.1em] shrink-0">Task started</span>
+                        <span class="text-[12.5px] text-ink font-medium truncate flex-1">Trace hydration warning</span>
+                        <span class="mono text-[11px] text-indigo/80 shrink-0">→ view</span>
+                      </button>
+
+                      <button class="w-full mt-1.5 flex items-center gap-2 py-1.5 pl-2.5 pr-2.5 rounded-[8px] bg-indigo-wash/60 border border-indigo/40 text-left shadow-card">
+                        <svg class="w-3.5 h-3.5 text-indigo animate-spin shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M21 12a9 9 0 1 1-6.2-8.6"/></svg>
+                        <span class="mono text-[11px] font-semibold text-indigo uppercase tracking-[0.1em] shrink-0">Task started</span>
+                        <span class="text-[12.5px] text-ink font-medium truncate flex-1">Review retry lanes A vs B</span>
+                        <span class="mono text-[11px] text-indigo/80 shrink-0">→ view</span>
+                      </button>
+
+                      <div class="text-[14px] leading-[1.6] text-ink mt-2">I'll merge their reports into the plan.</div>
+                    </div>
+                  </div>
+
+                  <!-- composer -->
+                  <div class="px-3 pt-2 pb-3 border-t border-line flex items-end gap-2 bg-canvas">
+                    <div class="flex-1 rounded-[14px] border border-line bg-paper p-2">
+                      <div class="text-[13px] text-ink-muted px-2 py-1">Reply to claude…<span class="caret"></span></div>
+                    </div>
+                    <button class="h-9 w-9 rounded-full bg-klein text-canvas flex items-center justify-center shadow-card shrink-0"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" class="w-3.5 h-3.5"><path d="M5 12l7-7 7 7M12 5v14"/></svg></button>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="text-[11px] text-ink-muted max-w-[300px] text-center">Three independent triggers all open the same drawer: the strip, the indigo pointer in the thread, and the <span class="mono">Users</span> icon in the header (dot = something live).</div>
+          </div>
+
+          <!-- ==================== iPhone B · drawer OPEN · bottom sheet ==================== -->
+          <div class="flex flex-col items-center gap-3">
+            <div class="caps text-ink-muted">iPhone · drawer open · bottom sheet</div>
+            <div class="iphone">
+              <div class="iphone-inner">
+                <div class="iphone-island"></div>
+                <div class="iphone-status"><span class="mono">9:41</span><span class="flex items-center gap-1"><span class="h-2 w-4 bg-ink rounded-sm"></span><span class="mono text-[11px]">5G</span><span class="h-2.5 w-5 border border-ink rounded-sm flex items-center justify-end pr-[1px]"><span class="h-1.5 w-3.5 bg-ink rounded-[1px]"></span></span></span></div>
+                <div class="iphone-home"></div>
+                <div class="iphone-content relative bg-canvas flex flex-col">
+                  <!-- dimmed thread behind the sheet -->
+                  <div class="px-4 py-2.5 border-b border-line flex items-center gap-2 shrink-0 opacity-60">
+                    <div class="h-8 w-8 rounded-[8px] bg-paper border border-line flex items-center justify-center"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-4 h-4 text-ink-soft"><path d="M15 6l-6 6 6 6"/></svg></div>
+                    <div class="min-w-0 flex-1">
+                      <div class="flex items-center gap-1.5"><span class="h-2 w-2 rounded-full bg-success"></span><div class="text-[14px] font-medium truncate">Fix hydration mismatch…</div></div>
+                      <div class="flex items-center gap-1.5 text-[11px] text-ink-muted mt-0.5"><span class="mono">spindle</span><span>·</span><span class="mono">opus-4.7</span></div>
+                    </div>
+                    <div class="h-8 w-8 rounded-[8px] bg-indigo-wash/60 border border-indigo/30 flex items-center justify-center"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-4 h-4 text-indigo"><circle cx="9" cy="8" r="3"/><circle cx="17" cy="9" r="2.2"/><path d="M3 20a6 6 0 0 1 12 0"/></svg></div>
+                  </div>
+                  <div class="flex-1 overflow-hidden px-4 py-3 space-y-3 opacity-40">
+                    <div class="flex justify-end"><div class="bg-ink text-canvas rounded-[14px] rounded-br-[4px] px-3.5 py-2 text-[13px]">Fan this out: two in parallel.</div></div>
+                    <div class="text-[13px] text-ink">Dispatching two in parallel…</div>
+                  </div>
+                  <div class="absolute inset-0 bg-ink/30 backdrop-blur-[2px] pointer-events-none"></div>
+
+                  <!-- BOTTOM SHEET · agents drawer -->
+                  <div class="absolute left-0 right-0 bottom-0 top-[56px] rounded-t-[20px] bg-canvas border-t border-x border-line shadow-lift flex flex-col">
+                    <div class="flex justify-center pt-3"><span class="h-1 w-12 bg-line-strong rounded-full"></span></div>
+                    <div class="px-4 pt-3 pb-3 border-b border-line flex items-start gap-3">
+                      <div class="flex-1 min-w-0">
+                        <div class="flex items-center gap-2"><span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-[6px] border border-indigo/30 bg-indigo-wash text-indigo text-[10px] font-medium uppercase tracking-[0.1em]"><span class="h-1.5 w-1.5 rounded-full bg-indigo animate-pulse"></span>Agents</span><span class="caps text-ink-muted">2 live · 4 total</span></div>
+                        <div class="display text-[18px] leading-tight mt-1">Two sub-agents, live.</div>
+                      </div>
+                      <button class="h-8 w-8 rounded-[8px] border border-line flex items-center justify-center"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-3.5 h-3.5 text-ink-soft"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+                    </div>
+
+                    <div class="flex-1 overflow-y-auto">
+                      <!-- Running group -->
+                      <div class="px-4 pt-3 pb-1.5 flex items-baseline gap-2">
+                        <span class="caps text-indigo">Running</span>
+                        <span class="mono text-[11px] text-ink-muted">· 2</span>
+                      </div>
+
+                      <!-- running row · EXPANDED with live stream -->
+                      <div class="mx-3 mb-2 rounded-[10px] border border-indigo/25 bg-indigo-wash/30 overflow-hidden relative">
+                        <div class="absolute left-0 top-0 bottom-0 w-[3px] bg-indigo"></div>
+                        <div class="pl-3 pr-2 py-2 flex items-center gap-2 border-b border-indigo/20">
+                          <span class="inline-flex items-center gap-1 px-1.5 h-5 rounded-[4px] border border-indigo/40 bg-canvas/80 mono text-[10px] text-indigo shrink-0">Agent</span>
+                          <span class="mono text-[10.5px] text-ink-soft shrink-0">code-explorer</span>
+                          <span class="relative h-2 w-2 rounded-full bg-indigo animate-pulse shrink-0" style="box-shadow:0 0 0 3px rgba(59,75,138,0.22)"></span>
+                          <span class="text-[12px] text-ink truncate flex-1 font-medium">Trace hydration warning</span>
+                          <span class="mono text-[10px] text-ink-muted shrink-0">0:34</span>
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-3 h-3 text-ink-muted rotate-90 shrink-0"><path d="M9 6l6 6-6 6"/></svg>
+                        </div>
+                        <!-- Input accordion -->
+                        <div class="px-3 pt-2 pb-1 bg-paper/40 border-b border-indigo/15">
+                          <button class="w-full flex items-center gap-2 text-left">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-3 h-3 text-ink-muted"><path d="M6 9l6 6 6-6"/></svg>
+                            <span class="caps text-ink-muted">Input</span>
+                            <span class="mono text-[10.5px] text-ink-muted truncate flex-1">"Trace the React hydration warning on app/(marketing) …"</span>
+                          </button>
+                        </div>
+                        <!-- LIVE STREAM -->
+                        <div class="px-2.5 pt-2 pb-2.5 bg-canvas/60">
+                          <div class="flex items-center gap-1.5 mb-2 pl-1">
+                            <span class="h-1.5 w-1.5 rounded-full bg-indigo animate-pulse"></span>
+                            <span class="uppercase tracking-[0.12em] text-[10px] font-medium text-indigo">Live stream</span>
+                            <span class="mono text-[10px] text-ink-muted">· 5 events</span>
+                            <label class="ml-auto inline-flex items-center gap-1 mono text-[10px] text-ink-muted"><span class="h-3 w-6 rounded-full bg-indigo relative"><span class="absolute right-[1px] top-[1px] h-2.5 w-2.5 rounded-full bg-canvas"></span></span>follow</label>
+                          </div>
+                          <!-- timeline · line centered on dots (left-[7px] to match dot center at x=8) -->
+                          <div class="relative pl-4 space-y-2">
+                            <span class="absolute left-[7px] top-1 bottom-4 w-px bg-line-strong"></span>
+                            <div class="relative">
+                              <span class="absolute -left-[11px] top-[7px] h-1.5 w-1.5 rounded-full bg-ink-faint"></span>
+                              <div class="text-[12px] leading-[1.55] text-ink-soft">Looking for <span class="mono text-[11px]">Intl.DateTimeFormat</span> usage — the warning points at the server/client boundary.</div>
+                            </div>
+                            <!-- tool chip · done (KEEPS klein/neutral palette — tool palette is app-wide) -->
+                            <div class="relative">
+                              <span class="absolute -left-[11px] top-[9px] h-1.5 w-1.5 rounded-full bg-success"></span>
+                              <div class="flex items-center gap-1.5 py-1 pl-1.5 pr-2 rounded-[6px] bg-paper border border-line">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-3 h-3 text-ink-soft"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></svg>
+                                <span class="mono text-[10.5px] text-ink-soft">grep</span>
+                                <span class="mono text-[10px] text-ink-muted truncate flex-1">"Intl.DateTimeFormat" in lib/</span>
+                                <span class="mono text-[10px] text-success">7 hits</span>
+                              </div>
+                            </div>
+                            <div class="relative">
+                              <span class="absolute -left-[11px] top-[9px] h-1.5 w-1.5 rounded-full bg-success"></span>
+                              <div class="flex items-center gap-1.5 py-1 pl-1.5 pr-2 rounded-[6px] bg-paper border border-line">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-3 h-3 text-ink-soft"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6ZM14 2v6h6"/></svg>
+                                <span class="mono text-[10.5px] text-ink-soft">read</span>
+                                <span class="mono text-[10px] text-ink-muted truncate flex-1">lib/date.ts · 1-80</span>
+                              </div>
+                            </div>
+                            <!-- tool chip · in-flight (klein — app-wide "running tool" color) -->
+                            <div class="relative">
+                              <span class="absolute -left-[11px] top-[9px] h-1.5 w-1.5 rounded-full bg-klein animate-pulse"></span>
+                              <div class="flex items-center gap-1.5 py-1 pl-1.5 pr-2 rounded-[6px] bg-klein-wash/60 border border-klein/30">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-3 h-3 text-klein-ink"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></svg>
+                                <span class="mono text-[10.5px] text-klein-ink">grep</span>
+                                <span class="mono text-[10px] text-ink-muted truncate flex-1">"formatDate(" across repo</span>
+                                <svg class="w-3 h-3 text-klein animate-spin shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.2-8.6"/></svg>
+                              </div>
+                            </div>
+                            <!-- partial text chunk with indigo caret -->
+                            <div class="relative">
+                              <span class="absolute -left-[11px] top-[7px] h-1.5 w-1.5 rounded-full bg-indigo animate-pulse"></span>
+                              <div class="text-[12px] leading-[1.55] text-ink">Three call sites, all inside <span class="mono text-[11px]">app/(marketing)</span><span class="inline-block w-[2px] h-[0.95em] align-[-0.1em] ml-[3px] bg-indigo animate-pulse"></span></div>
+                            </div>
+                          </div>
+                          <!-- row footer -->
+                          <div class="mt-2 pt-2 border-t border-line/70 flex items-center gap-2">
+                            <button class="h-6 px-2 rounded-[6px] border border-line bg-canvas text-[11px] flex items-center gap-1"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-2.5 h-2.5"><rect x="6" y="6" width="12" height="12" rx="1.5"/></svg>stop</button>
+                            <span class="ml-auto mono text-[10px] text-ink-muted">id 47a1…c8</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <!-- running row · COLLAPSED -->
+                      <div class="mx-3 mb-2 rounded-[10px] border border-indigo/20 bg-indigo-wash/20 overflow-hidden relative">
+                        <div class="absolute left-0 top-0 bottom-0 w-[3px] bg-indigo/70"></div>
+                        <button class="w-full pl-3 pr-2 py-2 flex items-center gap-2 text-left">
+                          <span class="inline-flex items-center gap-1 px-1.5 h-5 rounded-[4px] border border-indigo/30 bg-canvas/70 mono text-[10px] text-indigo shrink-0">Agent</span>
+                          <span class="mono text-[10.5px] text-ink-soft shrink-0">code-reviewer</span>
+                          <svg class="w-3 h-3 text-indigo animate-spin shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.2-8.6"/></svg>
+                          <span class="text-[12px] text-ink truncate flex-1">Reviewing retry lanes A vs B</span>
+                          <span class="mono text-[10px] text-ink-muted shrink-0">1:08</span>
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-3 h-3 text-ink-muted shrink-0"><path d="M6 9l6 6 6-6"/></svg>
+                        </button>
+                      </div>
+
+                      <!-- Done group -->
+                      <div class="px-4 pt-3 pb-1.5 flex items-baseline gap-2">
+                        <span class="caps text-ink-soft">Done</span>
+                        <span class="mono text-[11px] text-ink-muted">· 1</span>
+                      </div>
+                      <div class="mx-3 mb-1.5 rounded-[10px] border border-line bg-canvas overflow-hidden relative">
+                        <div class="absolute left-0 top-0 bottom-0 w-[3px] bg-success/50"></div>
+                        <button class="w-full pl-3 pr-2 py-2 flex items-center gap-2 text-left">
+                          <span class="inline-flex items-center gap-1 px-1.5 h-5 rounded-[4px] border border-line mono text-[10px] text-ink-soft shrink-0">Agent</span>
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" class="w-3 h-3 text-success shrink-0"><path d="M5 12l5 5 9-10"/></svg>
+                          <span class="text-[12px] text-ink-muted truncate flex-1">vitest + lint + tsc · all green</span>
+                          <span class="mono text-[10px] text-ink-muted shrink-0">38s</span>
+                        </button>
+                      </div>
+
+                      <!-- Failed group -->
+                      <div class="px-4 pt-3 pb-1.5 flex items-baseline gap-2">
+                        <span class="caps text-danger">Failed</span>
+                        <span class="mono text-[11px] text-ink-muted">· 1</span>
+                      </div>
+                      <div class="mx-3 mb-4 rounded-[10px] border border-danger/25 bg-danger-wash/40 overflow-hidden relative">
+                        <div class="absolute left-0 top-0 bottom-0 w-[3px] bg-danger/70"></div>
+                        <button class="w-full pl-3 pr-2 py-2 flex items-center gap-2 text-left">
+                          <span class="inline-flex items-center gap-1 px-1.5 h-5 rounded-[4px] border border-danger/30 bg-canvas/70 mono text-[10px] text-danger shrink-0">Agent</span>
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="w-3 h-3 text-danger shrink-0"><path d="M6 6l12 12M18 6L6 18"/></svg>
+                          <span class="text-[12px] text-ink truncate flex-1">Benchmark Intl perf — timed out at 2m</span>
+                          <span class="mono text-[10px] text-danger shrink-0">error</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    <div class="px-4 py-2.5 border-t border-line flex items-center text-[11px] text-ink-muted">
+                      <span>Streaming <span class="mono text-ink-soft">2 agents</span></span>
+                      <span class="ml-auto mono">live · autoscroll</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="text-[11px] text-ink-muted max-w-[300px] text-center">Sheet covers all but the session header so the user stays oriented. Swipe the drag handle down, tap the × or the dimmed chat, or press <span class="mono">Esc</span> to dismiss.</div>
+          </div>
+
+          <!-- ==================== Desktop · slide-over drawer (tasks rail = tools only) ==================== -->
+          <div class="flex-1 w-full min-w-0 flex flex-col items-center gap-3">
+            <div class="caps text-ink-muted">Desktop · slide-over drawer · tasks rail = tools only</div>
+            <div class="desktop">
+              <div class="desktop-chrome"><span style="background:#ff5f57"></span><span style="background:#febc2e"></span><span style="background:#28c840"></span><span class="ml-4 mono text-[11px] text-canvas/70">claudex.local — s/fix-hydration-marketing</span></div>
+              <div class="desktop-inner grid grid-cols-[220px_minmax(0,1fr)_300px] min-w-[960px] overflow-x-auto relative">
+
+                <!-- left global rail (dimmed behind backdrop) -->
+                <aside class="border-r border-line bg-paper/40 flex flex-col opacity-70">
+                  <div class="p-4 flex items-center gap-2"><svg viewBox="0 0 32 32" class="w-5 h-5"><path d="M9 22 L16 8 L23 22 Z" fill="#cc785c"/><circle cx="16" cy="18" r="2.2" fill="#faf9f5"/></svg><span class="mono text-[13px]">claudex</span><span class="ml-auto text-[11px] mono text-ink-muted">3</span></div>
+                  <div class="px-3 caps text-ink-muted mb-2">Sessions</div>
+                  <div class="px-2 space-y-1">
+                    <div class="px-2.5 py-2 rounded-[6px] bg-canvas border-l-2 border-klein bg-klein-wash/40">
+                      <div class="flex items-center gap-1.5"><span class="h-1.5 w-1.5 rounded-full bg-success animate-pulse"></span><span class="text-[12px] font-medium truncate">Fix hydration …</span></div>
+                      <!-- mini agent indicator on session card (indigo) -->
+                      <div class="mt-1 flex items-center gap-1.5">
+                        <span class="flex items-center gap-[2px]">
+                          <span class="h-1 w-2 rounded-full bg-indigo"></span>
+                          <span class="h-1 w-2 rounded-full bg-indigo/70"></span>
+                          <span class="h-1 w-1 rounded-full bg-success"></span>
+                          <span class="h-1 w-1 rounded-full bg-danger/60"></span>
+                        </span>
+                        <span class="mono text-[10px] text-ink-muted">2 live</span>
+                      </div>
+                    </div>
+                    <button class="w-full text-left px-2.5 py-2 rounded-[6px] hover:bg-canvas/60 border-l-2 border-transparent">
+                      <div class="flex items-center gap-1.5"><span class="h-1.5 w-1.5 rounded-full bg-success"></span><span class="text-[12px] truncate">Add retry + jitter …</span></div>
+                      <div class="mono text-[10px] text-ink-muted mt-0.5 truncate">no agents</div>
+                    </button>
+                  </div>
+                  <div class="mt-auto p-4 border-t border-line text-[11px] text-ink-muted mono flex items-center gap-1.5"><span class="h-1.5 w-1.5 rounded-full bg-success"></span>connected</div>
+                </aside>
+
+                <!-- center thread (dimmed behind backdrop) -->
+                <section class="min-w-0 flex flex-col bg-canvas opacity-60">
+                  <div class="px-5 py-3 border-b border-line flex items-center gap-3">
+                    <span class="h-2 w-2 rounded-full bg-success animate-pulse"></span>
+                    <div class="min-w-0">
+                      <div class="text-[14px] font-medium truncate">Fix hydration mismatch on marketing page</div>
+                      <div class="flex items-center gap-2 text-[11px] text-ink-muted mt-0.5"><span class="mono">spindle</span><span>·</span><span class="mono">claude/fix-hydration-marketing</span></div>
+                    </div>
+                    <div class="ml-auto flex items-center gap-1.5">
+                      <!-- Users icon = open drawer · active state (pressed) -->
+                      <button class="h-8 w-8 rounded-[6px] border border-indigo/40 bg-indigo-wash/60 flex items-center justify-center" title="Agents drawer"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-4 h-4 text-indigo"><circle cx="9" cy="8" r="3"/><circle cx="17" cy="9" r="2.2"/><path d="M3 20a6 6 0 0 1 12 0"/></svg></button>
+                      <button class="h-8 px-2.5 rounded-[6px] border border-line bg-canvas text-[12px] flex items-center gap-1"><span class="mono">Opus 4.7</span></button>
+                    </div>
+                  </div>
+                  <!-- indigo strip under header -->
+                  <div class="px-5 py-2 bg-paper/70 border-b border-line flex items-center gap-3">
+                    <span class="inline-flex items-center gap-1 px-1.5 h-5 rounded-[4px] border border-indigo/30 bg-indigo-wash text-indigo mono text-[10px] font-medium uppercase tracking-[0.08em]">Agents</span>
+                    <span class="flex items-center gap-[3px]">
+                      <span class="h-1.5 w-3 rounded-full bg-indigo" style="box-shadow:0 0 0 2px rgba(59,75,138,0.20)"></span>
+                      <span class="h-1.5 w-3 rounded-full bg-indigo/70" style="box-shadow:0 0 0 2px rgba(59,75,138,0.14)"></span>
+                      <span class="h-1.5 w-1.5 rounded-full bg-success"></span>
+                      <span class="h-1.5 w-1.5 rounded-full bg-danger/70"></span>
+                    </span>
+                    <span class="mono text-[11px] text-ink-muted">2 live · 4 total</span>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-3 h-3 text-ink-faint"><path d="M9 6l6 6-6 6"/></svg>
+                    <span class="mono text-[11px] text-indigo shrink-0">code-explorer</span>
+                    <span class="text-[13px] text-ink font-medium truncate">Grepping <span class="mono text-[12px]">"formatDate("</span> across repo</span>
+                  </div>
+                  <div class="flex-1 overflow-hidden px-6 py-5 space-y-4">
+                    <div class="flex justify-end"><div class="max-w-[70%] bg-ink text-canvas rounded-[14px] rounded-br-[4px] px-4 py-2.5 text-[14px]">Fan this out: explorer on the warning, reviewer on the retry PR.</div></div>
+                    <div class="text-[14px] text-ink max-w-[72ch]">Dispatching two in parallel…</div>
+                  </div>
+                </section>
+
+                <!-- right rail · TASKS ONLY (no subagents — they're in the drawer now) -->
+                <aside class="border-l border-line bg-paper/40 flex flex-col min-h-0 opacity-70">
+                  <div class="px-4 py-3 border-b border-line flex items-center">
+                    <span class="caps text-ink-muted">Tasks</span>
+                    <span class="mono text-[11px] text-ink-muted ml-auto">2 active</span>
+                  </div>
+                  <div class="p-3 space-y-2 overflow-y-auto">
+                    <div class="rounded-[8px] border border-line bg-canvas p-2.5">
+                      <div class="flex items-center gap-2"><span class="h-1.5 w-1.5 rounded-full bg-success animate-pulse"></span><span class="mono text-[11.5px] text-ink-soft truncate">edit</span><span class="mono text-[10.5px] text-ink-muted ml-auto">0:14</span></div>
+                      <div class="text-[11.5px] mono text-ink-muted mt-1 truncate">lib/date.ts · +5 −3</div>
+                    </div>
+                    <div class="rounded-[8px] border border-line bg-canvas p-2.5 opacity-80">
+                      <div class="flex items-center gap-2"><span class="h-1.5 w-1.5 rounded-full bg-ink-faint"></span><span class="mono text-[11.5px] text-ink-soft">grep</span><span class="mono text-[10.5px] text-ink-muted ml-auto">done</span></div>
+                      <div class="text-[11.5px] text-ink-muted mt-1 truncate">"Intl.DateTimeFormat" in lib/</div>
+                    </div>
+                  </div>
+                  <div class="mt-auto p-3 border-t border-line text-[10.5px] text-ink-muted flex items-center gap-2">
+                    <span>main-agent tools only</span>
+                    <span class="ml-auto mono">live</span>
+                  </div>
+                </aside>
+
+                <!-- backdrop · dim + tiny blur behind drawer -->
+                <div class="absolute inset-0 bg-ink/30 pointer-events-none"></div>
+
+                <!-- SLIDE-OVER DRAWER · right edge, ~420px wide -->
+                <div class="absolute top-0 right-0 bottom-0 w-[420px] bg-canvas border-l border-line shadow-lift flex flex-col">
+                  <div class="px-4 py-3 border-b border-line flex items-center gap-2">
+                    <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-[6px] border border-indigo/30 bg-indigo-wash text-indigo text-[10px] font-medium uppercase tracking-[0.1em]"><span class="h-1.5 w-1.5 rounded-full bg-indigo animate-pulse"></span>Agents</span>
+                    <span class="mono text-[11px] text-ink-muted">2 live · 4 total</span>
+                    <label class="ml-auto inline-flex items-center gap-1 mono text-[10px] text-ink-muted select-none"><span class="h-3 w-6 rounded-full bg-indigo relative"><span class="absolute right-[1px] top-[1px] h-2.5 w-2.5 rounded-full bg-canvas"></span></span>follow</label>
+                    <button class="h-6 w-6 rounded-[6px] border border-line bg-canvas flex items-center justify-center hover:bg-paper" title="Close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-3 h-3 text-ink-muted"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+                  </div>
+
+                  <div class="flex-1 overflow-y-auto">
+                    <div class="px-4 pt-2.5 pb-1 flex items-baseline gap-2">
+                      <span class="caps text-indigo">Running</span>
+                      <span class="mono text-[10.5px] text-ink-muted">· 2 · live</span>
+                    </div>
+
+                    <!-- expanded running row -->
+                    <div class="mx-2.5 mb-2 rounded-[10px] border border-indigo/25 bg-indigo-wash/25 overflow-hidden relative">
+                      <div class="absolute left-0 top-0 bottom-0 w-[3px] bg-indigo"></div>
+                      <div class="pl-3 pr-2 py-2 flex items-center gap-2 border-b border-indigo/20">
+                        <span class="inline-flex items-center gap-1 px-1.5 h-5 rounded-[4px] border border-indigo/40 bg-canvas/80 mono text-[10px] text-indigo shrink-0">Agent</span>
+                        <span class="mono text-[10.5px] text-ink-soft shrink-0">code-explorer</span>
+                        <span class="relative h-2 w-2 rounded-full bg-indigo animate-pulse shrink-0" style="box-shadow:0 0 0 3px rgba(59,75,138,0.22)"></span>
+                        <span class="text-[12px] text-ink truncate flex-1 font-medium">Trace hydration warning</span>
+                        <span class="mono text-[10px] text-ink-muted shrink-0">0:34</span>
+                      </div>
+                      <div class="px-3 pt-2 pb-1 bg-paper/40 border-b border-indigo/15">
+                        <button class="w-full flex items-center gap-2 text-left">
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-3 h-3 text-ink-muted"><path d="M6 9l6 6 6-6"/></svg>
+                          <span class="caps text-ink-muted">Input</span>
+                          <span class="mono text-[10.5px] text-ink-muted truncate flex-1">"Trace the React hydration warning on app/(marketing) …"</span>
+                        </button>
+                      </div>
+                      <div class="px-2.5 pt-2 pb-2.5 bg-canvas/60">
+                        <div class="flex items-center gap-1.5 mb-2 pl-1">
+                          <span class="h-1.5 w-1.5 rounded-full bg-indigo animate-pulse"></span>
+                          <span class="uppercase tracking-[0.12em] text-[10px] font-medium text-indigo">Live stream</span>
+                          <span class="mono text-[10px] text-ink-muted">· 5 events</span>
+                        </div>
+                        <div class="relative pl-4 space-y-2">
+                          <span class="absolute left-[7px] top-1 bottom-4 w-px bg-line-strong"></span>
+                          <div class="relative">
+                            <span class="absolute -left-[11px] top-[7px] h-1.5 w-1.5 rounded-full bg-ink-faint"></span>
+                            <div class="text-[12px] leading-[1.55] text-ink-soft">Looking for <span class="mono text-[11px]">Intl.DateTimeFormat</span> — warning points at SSR/CSR boundary.</div>
+                          </div>
+                          <div class="relative">
+                            <span class="absolute -left-[11px] top-[9px] h-1.5 w-1.5 rounded-full bg-success"></span>
+                            <div class="flex items-center gap-1.5 py-1 pl-1.5 pr-2 rounded-[6px] bg-paper border border-line">
+                              <span class="mono text-[10.5px] text-ink-soft">grep</span>
+                              <span class="mono text-[10px] text-ink-muted truncate flex-1">"Intl.DateTimeFormat" in lib/</span>
+                              <span class="mono text-[10px] text-success">7 hits</span>
+                            </div>
+                          </div>
+                          <div class="relative">
+                            <span class="absolute -left-[11px] top-[9px] h-1.5 w-1.5 rounded-full bg-klein animate-pulse"></span>
+                            <div class="flex items-center gap-1.5 py-1 pl-1.5 pr-2 rounded-[6px] bg-klein-wash/60 border border-klein/30">
+                              <span class="mono text-[10.5px] text-klein-ink">grep</span>
+                              <span class="mono text-[10px] text-ink-muted truncate flex-1">"formatDate(" across repo</span>
+                              <svg class="w-3 h-3 text-klein animate-spin shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.2-8.6"/></svg>
+                            </div>
+                          </div>
+                          <div class="relative">
+                            <span class="absolute -left-[11px] top-[7px] h-1.5 w-1.5 rounded-full bg-indigo animate-pulse"></span>
+                            <div class="text-[12px] leading-[1.55] text-ink">Three call sites, all under <span class="mono text-[11px]">app/(marketing)</span><span class="inline-block w-[2px] h-[0.95em] align-[-0.1em] ml-[3px] bg-indigo animate-pulse"></span></div>
+                          </div>
+                        </div>
+                        <div class="mt-2 pt-2 border-t border-line/70 flex items-center gap-2">
+                          <button class="h-6 px-2 rounded-[6px] border border-line bg-canvas text-[11px] flex items-center gap-1"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-2.5 h-2.5"><rect x="6" y="6" width="12" height="12" rx="1.5"/></svg>stop</button>
+                          <a href="#" class="inline-flex items-center gap-1 text-[11px] mono text-indigo hover:underline">open turn · seq 42 <span>→</span></a>
+                          <span class="ml-auto mono text-[10px] text-ink-muted">id 47a1…c8</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <!-- collapsed running row -->
+                    <div class="mx-2.5 mb-2 rounded-[10px] border border-indigo/20 bg-indigo-wash/20 overflow-hidden relative">
+                      <div class="absolute left-0 top-0 bottom-0 w-[3px] bg-indigo/70"></div>
+                      <button class="w-full pl-3 pr-2 py-2 flex items-center gap-2 text-left hover:bg-indigo-wash/30">
+                        <span class="inline-flex items-center gap-1 px-1.5 h-5 rounded-[4px] border border-indigo/30 bg-canvas/70 mono text-[10px] text-indigo shrink-0">Agent</span>
+                        <span class="mono text-[10.5px] text-ink-soft shrink-0">code-reviewer</span>
+                        <svg class="w-3 h-3 text-indigo animate-spin shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.2-8.6"/></svg>
+                        <span class="text-[12px] text-ink truncate flex-1">Reading <span class="mono text-[11px]">feat/webhook-retry-b</span> · 23 files</span>
+                        <span class="mono text-[10px] text-ink-muted shrink-0">1:08</span>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-3 h-3 text-ink-muted shrink-0"><path d="M6 9l6 6 6-6"/></svg>
+                      </button>
+                    </div>
+
+                    <!-- Done group -->
+                    <div class="px-4 pt-3 pb-1 flex items-baseline gap-2">
+                      <span class="caps text-ink-soft">Done</span>
+                      <span class="mono text-[10.5px] text-ink-muted">· 1</span>
+                    </div>
+                    <div class="mx-2.5 mb-1.5 rounded-[10px] border border-line bg-canvas overflow-hidden relative">
+                      <div class="absolute left-0 top-0 bottom-0 w-[3px] bg-success/50"></div>
+                      <button class="w-full pl-3 pr-2 py-2 flex items-center gap-2 text-left hover:bg-paper">
+                        <span class="inline-flex items-center gap-1 px-1.5 h-5 rounded-[4px] border border-line mono text-[10px] text-ink-soft shrink-0">Task</span>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" class="w-3 h-3 text-success shrink-0"><path d="M5 12l5 5 9-10"/></svg>
+                        <span class="text-[12px] text-ink truncate flex-1">vitest + lint + tsc · all green</span>
+                        <span class="mono text-[10px] text-ink-muted shrink-0">38s</span>
+                      </button>
+                    </div>
+
+                    <!-- Failed group -->
+                    <div class="px-4 pt-3 pb-1 flex items-baseline gap-2">
+                      <span class="caps text-danger">Failed</span>
+                      <span class="mono text-[10.5px] text-ink-muted">· 1</span>
+                    </div>
+                    <div class="mx-2.5 mb-1.5 rounded-[10px] border border-danger/25 bg-danger-wash/40 overflow-hidden relative">
+                      <div class="absolute left-0 top-0 bottom-0 w-[3px] bg-danger/70"></div>
+                      <button class="w-full pl-3 pr-2 py-2 flex items-center gap-2 text-left">
+                        <span class="inline-flex items-center gap-1 px-1.5 h-5 rounded-[4px] border border-danger/30 bg-canvas/70 mono text-[10px] text-danger shrink-0">Agent</span>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="w-3 h-3 text-danger shrink-0"><path d="M6 6l12 12M18 6L6 18"/></svg>
+                        <span class="text-[12px] text-ink truncate flex-1">Benchmark Intl perf — timed out at 2m</span>
+                        <span class="mono text-[10px] text-danger shrink-0">error</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  <div class="px-4 py-2.5 border-t border-line flex items-center text-[10.5px] text-ink-muted">
+                    <span>Streaming <span class="mono text-ink-soft">2 agents</span></span>
+                    <span class="ml-auto mono">rail untouched · drawer owns agents</span>
+                  </div>
+                </div>
+
+              </div>
+            </div>
+            <div class="text-[11px] text-ink-muted max-w-[720px] text-center">Desktop drawer is a slide-over (~420 px from the right) with a dim backdrop over everything else. Tasks rail stays visible in the dim but is tools-only — agents no longer appear there. Click backdrop / × / <span class="mono">Esc</span> to dismiss; drawer remembers scroll position across open/close.</div>
+          </div>
+
+        </div>
+
+        <!-- ==================== DESIGN NOTES · states + triggers + empty ==================== -->
+        <div class="grid md:grid-cols-3 gap-5 pb-16 max-w-[1280px] mx-auto">
+          <div class="rounded-[12px] border border-line bg-canvas p-5">
+            <div class="caps text-ink-muted mb-2">Legend · agent states</div>
+            <ul class="space-y-2 text-[13px]">
+              <li class="flex items-center gap-2.5">
+                <span class="relative h-4 w-4 rounded-full bg-indigo shrink-0"><span class="absolute inset-0 rounded-full bg-indigo animate-pulse opacity-60"></span></span>
+                <span class="font-medium">running</span>
+                <span class="ml-auto mono text-[10.5px] text-ink-faint">indigo · expanded · live stream</span>
+              </li>
+              <li class="flex items-center gap-2.5">
+                <span class="h-4 w-4 rounded-full bg-success flex items-center justify-center shrink-0"><svg viewBox="0 0 24 24" fill="none" stroke="#faf9f5" stroke-width="3" class="w-2.5 h-2.5"><path d="M5 12l5 5 9-10"/></svg></span>
+                <span class="text-ink-muted">done</span>
+                <span class="ml-auto mono text-[10.5px] text-ink-faint">collapsed · duration + summary</span>
+              </li>
+              <li class="flex items-center gap-2.5">
+                <span class="h-4 w-4 rounded-full bg-danger/80 flex items-center justify-center shrink-0"><svg viewBox="0 0 24 24" fill="none" stroke="#faf9f5" stroke-width="3" class="w-2.5 h-2.5"><path d="M6 6l12 12M18 6L6 18"/></svg></span>
+                <span>failed</span>
+                <span class="ml-auto mono text-[10.5px] text-ink-faint">danger · stays grouped</span>
+              </li>
+              <li class="flex items-center gap-2.5">
+                <span class="h-4 w-4 rounded-full bg-ink-faint/60 shrink-0"></span>
+                <span class="text-ink-muted">stopped</span>
+                <span class="ml-auto mono text-[10.5px] text-ink-faint">neutral · manual halt</span>
+              </li>
+            </ul>
+          </div>
+          <div class="rounded-[12px] border border-line bg-canvas p-5">
+            <div class="caps text-ink-muted mb-2">Open triggers · all open the same drawer</div>
+            <ul class="space-y-2.5 text-[12.5px]">
+              <li class="flex items-start gap-2">
+                <span class="mt-[2px] inline-flex items-center gap-1 px-1.5 h-5 rounded-[4px] border border-indigo/30 bg-indigo-wash text-indigo mono text-[10px] uppercase shrink-0">Agents</span>
+                <span>Strip under the session header — the most common path.</span>
+              </li>
+              <li class="flex items-start gap-2">
+                <span class="mt-[2px] inline-flex items-center gap-1 py-0.5 pl-1.5 pr-1.5 rounded-[6px] bg-indigo-wash/60 border border-indigo/40 shrink-0"><svg class="w-3 h-3 text-indigo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.2-8.6"/></svg><span class="mono text-[10px] text-indigo uppercase">Task</span></span>
+                <span>Indigo pointer in the chat thread — deep-links to the drawer with the run pre-expanded.</span>
+              </li>
+              <li class="flex items-start gap-2">
+                <span class="mt-[2px] h-6 w-6 rounded-[6px] border border-indigo/40 bg-indigo-wash/60 flex items-center justify-center shrink-0"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-3 h-3 text-indigo"><circle cx="9" cy="8" r="3"/><circle cx="17" cy="9" r="2.2"/><path d="M3 20a6 6 0 0 1 12 0"/></svg></span>
+                <span>Header <span class="mono">Users</span> icon — lives next to Model pill on desktop / top-right on mobile. Live dot when anything's running.</span>
+              </li>
+            </ul>
+          </div>
+          <div class="rounded-[12px] border border-line bg-canvas p-5">
+            <div class="caps text-ink-muted mb-2">Empty state</div>
+            <div class="rounded-[10px] border border-dashed border-line-strong bg-paper/40 px-3 py-3 flex items-center gap-2">
+              <span class="inline-flex items-center gap-1 px-1.5 h-5 rounded-[4px] border border-line bg-canvas mono text-[10px] text-ink-muted uppercase tracking-[0.08em]">Agents</span>
+              <span class="text-[12.5px] text-ink-muted">No delegated runs yet — the strip appears the moment Claude calls <span class="mono text-[12px]">Agent</span> or <span class="mono text-[12px]">Task</span>.</span>
+            </div>
+            <p class="mt-3 text-[12px] text-ink-muted leading-[1.5]">Zero agents ⇒ no strip, no header icon dot, no drawer affordance. Tasks rail looks exactly like it did before s-17 ever shipped.</p>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- =========================================================
       FOOTER
     ========================================================= -->
     <footer class="border-t border-line bg-paper/40">
@@ -4303,6 +4858,7 @@
             <a class="text-ink-soft hover:text-ink" href="#s-15">15 · Session diff</a>
             <a class="text-ink-soft hover:text-ink" href="#s-16">16 · Plan</a>
             <a class="text-ink-soft hover:text-ink" href="#s-17">17 · Live agents</a>
+            <a class="text-ink-soft hover:text-ink" href="#s-18">18 · Agents drawer</a>
           </div>
           <div class="ml-auto text-[12px] text-ink-muted mono self-end">v0.1 · mockup</div>
         </div>
