@@ -136,6 +136,31 @@ export const EventKind = z.enum([
   "plan_accept_decision",
   "turn_end",
   "error",
+  // ------------------------------------------------------------------
+  // Live subagents (s-17). Parent session emits these for every Task /
+  // Agent / Explore tool invocation the main Claude turn dispatches. The
+  // claude-agent-sdk forwards the child run's lifecycle — start, periodic
+  // progress, status patches, completion — into the parent's SDKMessage
+  // stream (with `forwardSubagentText: true`, also the child's text +
+  // thinking + nested tool_use / tool_result blocks, correlated via
+  // `parent_tool_use_id`). These kinds persist each of those events so
+  // the in-session rail can replay the live stream on reload without
+  // needing a separate subagent transcript channel.
+  //
+  //   subagent_start         — task_started (taskId, agentType, prompt, …)
+  //   subagent_progress      — task_progress (AI-generated description + usage)
+  //   subagent_update        — task_updated (status / is_backgrounded patch)
+  //   subagent_end           — task_notification (completed / failed / stopped)
+  //   subagent_tool_progress — tool_progress heartbeat (elapsed seconds)
+  //
+  // The nested child text / thinking / tool_use / tool_result themselves
+  // still persist as their existing kinds — what distinguishes them from
+  // main-thread events is a `parentToolUseId` field in the payload.
+  "subagent_start",
+  "subagent_progress",
+  "subagent_update",
+  "subagent_end",
+  "subagent_tool_progress",
 ]);
 export type EventKind = z.infer<typeof EventKind>;
 
@@ -1376,6 +1401,123 @@ export const ListSubagentsResponse = z.object({
   stats: SubagentStats,
 });
 export type ListSubagentsResponse = z.infer<typeof ListSubagentsResponse>;
+
+// ============================================================================
+// Subagent live stream (s-17)
+//
+// Payloads persisted under the five new `subagent_*` EventKinds — sourced
+// from the Claude Agent SDK's `system/task_started|task_progress|
+// task_updated|task_notification` messages plus the top-level
+// `tool_progress` message. `taskId` is the SDK's stable per-subagent id
+// (distinct from the parent's `tool_use.toolUseId` — see
+// `parentToolUseId` for that linkage).
+//
+// Also used verbatim as the shape of the matching ServerFrame variants in
+// `shared/src/protocol.ts`, so clients, server ingest, and WS layer all
+// share one contract. The web store consumes these to assemble a
+// `SubagentRun[]` view; see `web/src/state/sessions.ts`.
+// ============================================================================
+
+export const SubagentUsage = z.object({
+  totalTokens: z.number().int().nonnegative().optional(),
+  toolUses: z.number().int().nonnegative().optional(),
+  durationMs: z.number().int().nonnegative().optional(),
+});
+export type SubagentUsage = z.infer<typeof SubagentUsage>;
+
+export const SubagentLifecycleStatus = z.enum([
+  "running",
+  "completed",
+  "failed",
+  "stopped",
+]);
+export type SubagentLifecycleStatus = z.infer<typeof SubagentLifecycleStatus>;
+
+/** `system/task_started` — sent once when the parent dispatches a subagent.
+ *
+ * `taskType` mirrors the SDK's open string (today: `local_agent` | `bash` |
+ * `remote_agent` | `local_workflow` | …). `parentToolUseId` links back to
+ * the parent's `Task` / `Agent` / `Explore` tool_use row so nested events
+ * (correlated via `parent_tool_use_id`) can be grouped under this run.
+ */
+export const SubagentStartPayload = z.object({
+  taskId: z.string(),
+  parentToolUseId: z.string().nullable(),
+  description: z.string(),
+  agentType: z.string().optional(),
+  taskType: z.string().optional(),
+  workflowName: z.string().optional(),
+  prompt: z.string().optional(),
+  isBackgrounded: z.boolean().optional(),
+  at: z.string(),
+});
+export type SubagentStartPayload = z.infer<typeof SubagentStartPayload>;
+
+/** `system/task_progress` — periodic (~30s) heartbeat with an AI-generated
+ * present-tense `description` ("Analyzing authentication module") plus the
+ * name of the last tool the subagent called and cumulative usage.
+ */
+export const SubagentProgressPayload = z.object({
+  taskId: z.string(),
+  description: z.string(),
+  lastToolName: z.string().optional(),
+  summary: z.string().optional(),
+  usage: SubagentUsage,
+  at: z.string(),
+});
+export type SubagentProgressPayload = z.infer<typeof SubagentProgressPayload>;
+
+/** `system/task_updated` — patch-shaped; each field is independently
+ * optional (SDK only sends changed fields). The UI merges into its local
+ * `SubagentRun` map keyed by `taskId`.
+ */
+export const SubagentUpdatePayload = z.object({
+  taskId: z.string(),
+  patch: z.object({
+    status: SubagentLifecycleStatus.optional(),
+    description: z.string().optional(),
+    endTime: z.number().optional(),
+    error: z.string().optional(),
+    isBackgrounded: z.boolean().optional(),
+  }),
+  at: z.string(),
+});
+export type SubagentUpdatePayload = z.infer<typeof SubagentUpdatePayload>;
+
+/** `system/task_notification` — terminal event. `outputFile` is the
+ * SDK-produced artefact path (bash stdout, local_agent JSONL transcript,
+ * remote_agent streamed output). For foreground local_agent runs the
+ * `summary` is the subagent's final text; for background runs this is
+ * where you read the result from.
+ */
+export const SubagentEndPayload = z.object({
+  taskId: z.string(),
+  status: SubagentLifecycleStatus,
+  summary: z.string(),
+  outputFile: z.string().optional(),
+  usage: SubagentUsage.optional(),
+  toolUseId: z.string().optional(),
+  at: z.string(),
+});
+export type SubagentEndPayload = z.infer<typeof SubagentEndPayload>;
+
+/** Top-level `tool_progress` — a long-running tool inside a subagent (or
+ * the parent) has been executing for `elapsedSeconds`. Used to keep the
+ * rail's "still alive" indicator ticking even between `task_progress`
+ * heartbeats. `parentToolUseId` is non-null when the tool fired from
+ * inside a subagent.
+ */
+export const SubagentToolProgressPayload = z.object({
+  toolUseId: z.string(),
+  toolName: z.string(),
+  parentToolUseId: z.string().nullable(),
+  elapsedSeconds: z.number(),
+  taskId: z.string().optional(),
+  at: z.string(),
+});
+export type SubagentToolProgressPayload = z.infer<
+  typeof SubagentToolProgressPayload
+>;
 
 // ============================================================================
 // Small request bodies lifted out of server routes so the web client can

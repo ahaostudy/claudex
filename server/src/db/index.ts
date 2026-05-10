@@ -619,6 +619,22 @@ const MIGRATIONS: { id: number; name: string; up: string }[] = [
         ON alerts(seen_at) WHERE seen_at IS NULL;
     `,
   },
+  {
+    id: 21,
+    name: "subagent_event_kinds",
+    // No schema change — `session_events.kind` is already an open TEXT
+    // column. This migration is a marker: it records when the live
+    // subagents feature (s-17) started persisting five new event kinds
+    // (`subagent_start`, `subagent_progress`, `subagent_update`,
+    // `subagent_end`, `subagent_tool_progress`). The zod `EventKind` enum
+    // in `shared/src/models.ts` is the read-side gate; this row just
+    // pins the introduction point in the migrations log so future
+    // debugging can correlate "when did subagent_* rows first appear"
+    // with a specific claudex version.
+    up: `
+      SELECT 1;
+    `,
+  },
 ];
 
 export function openDb(config: Config, log: Logger): ClaudexDb {

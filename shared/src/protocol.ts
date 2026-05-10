@@ -4,6 +4,13 @@ import {
   AskUserQuestionItem,
   PermissionMode,
   SessionStatus,
+  SubagentEndPayload,
+  SubagentLifecycleStatus,
+  SubagentProgressPayload,
+  SubagentStartPayload,
+  SubagentToolProgressPayload,
+  SubagentUpdatePayload,
+  SubagentUsage,
 } from "./models.js";
 
 // ============================================================================
@@ -125,6 +132,12 @@ export const ServerAssistantTextDelta = z.object({
   messageId: z.string(),
   seq: z.number().int().nonnegative(),
   text: z.string(),
+  // Set when this text chunk came from a subagent (child turn spawned by
+  // a Task/Agent/Explore tool on the parent). Links back to the parent's
+  // `tool_use.toolUseId`; undefined on main-thread text. See s-17 rail —
+  // the web store groups these under the matching SubagentRun for the
+  // live-stream timeline.
+  parentToolUseId: z.string().optional(),
 });
 
 export const ServerAssistantTextEnd = z.object({
@@ -139,6 +152,8 @@ export const ServerThinking = z.object({
   sessionId: z.string(),
   seq: z.number().int().nonnegative(),
   text: z.string(),
+  /** Same semantics as `ServerAssistantTextDelta.parentToolUseId`. */
+  parentToolUseId: z.string().optional(),
 });
 
 export const ServerToolUse = z.object({
@@ -148,6 +163,9 @@ export const ServerToolUse = z.object({
   toolUseId: z.string(),
   name: z.string(),
   input: z.record(z.string(), z.unknown()),
+  /** Same semantics as `ServerAssistantTextDelta.parentToolUseId` — set
+   * when this tool_use fired from inside a subagent's turn. */
+  parentToolUseId: z.string().optional(),
 });
 
 export const ServerToolResult = z.object({
@@ -162,6 +180,8 @@ export const ServerToolResult = z.object({
   // payload is still persisted in `session_events` — clients can refetch
   // via `GET /api/sessions/:id/events` to see the untruncated content.
   truncated: z.boolean().optional(),
+  /** Same semantics as `ServerAssistantTextDelta.parentToolUseId`. */
+  parentToolUseId: z.string().optional(),
 });
 
 export const ServerPermissionRequest = z.object({
@@ -266,6 +286,49 @@ export const ServerError = z.object({
   message: z.string(),
 });
 
+// ---- Subagent live stream (s-17) ----------------------------------------
+//
+// Mirror the SubagentStartPayload / … shapes from `models.ts` so the server
+// emits exactly what the web store groups into a `SubagentRun[]`. `seq`
+// piggybacks on the underlying `session_events` row (same scheme as the
+// other session-scoped frames); these frames route through the ordinary
+// subscriber bucket for their parent session, not the global channel —
+// subagent events belong to a specific session's live stream.
+//
+// We re-export the models' payload schemas as the frames' field shapes
+// instead of re-declaring them to keep the server → wire → web contract
+// byte-identical.
+
+export const ServerSubagentStart = SubagentStartPayload.extend({
+  type: z.literal("subagent_start"),
+  sessionId: z.string(),
+  seq: z.number().int().nonnegative(),
+});
+
+export const ServerSubagentProgress = SubagentProgressPayload.extend({
+  type: z.literal("subagent_progress"),
+  sessionId: z.string(),
+  seq: z.number().int().nonnegative(),
+});
+
+export const ServerSubagentUpdate = SubagentUpdatePayload.extend({
+  type: z.literal("subagent_update"),
+  sessionId: z.string(),
+  seq: z.number().int().nonnegative(),
+});
+
+export const ServerSubagentEnd = SubagentEndPayload.extend({
+  type: z.literal("subagent_end"),
+  sessionId: z.string(),
+  seq: z.number().int().nonnegative(),
+});
+
+export const ServerSubagentToolProgress = SubagentToolProgressPayload.extend({
+  type: z.literal("subagent_tool_progress"),
+  sessionId: z.string(),
+  seq: z.number().int().nonnegative(),
+});
+
 export const ServerFrame = z.discriminatedUnion("type", [
   ServerHelloAck,
   ServerSessionUpdate,
@@ -283,5 +346,10 @@ export const ServerFrame = z.discriminatedUnion("type", [
   ServerQueueUpdate,
   ServerAlertsUpdate,
   ServerError,
+  ServerSubagentStart,
+  ServerSubagentProgress,
+  ServerSubagentUpdate,
+  ServerSubagentEnd,
+  ServerSubagentToolProgress,
 ]);
 export type ServerFrame = z.infer<typeof ServerFrame>;

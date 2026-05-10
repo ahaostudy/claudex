@@ -353,6 +353,9 @@ function runnerEventToFrame(
         messageId: event.messageId,
         seq: 0, // not used on wire; replay handled via REST /events
         text: event.text,
+        ...(event.parentToolUseId !== undefined
+          ? { parentToolUseId: event.parentToolUseId }
+          : {}),
       };
     case "thinking":
       return {
@@ -360,6 +363,9 @@ function runnerEventToFrame(
         sessionId,
         seq: 0,
         text: event.text,
+        ...(event.parentToolUseId !== undefined
+          ? { parentToolUseId: event.parentToolUseId }
+          : {}),
       };
     case "tool_use":
       return {
@@ -369,6 +375,9 @@ function runnerEventToFrame(
         toolUseId: event.toolUseId,
         name: event.name,
         input: event.input,
+        ...(event.parentToolUseId !== undefined
+          ? { parentToolUseId: event.parentToolUseId }
+          : {}),
       };
     case "tool_result": {
       // Clip tool_result `content` to a per-frame size budget so a single
@@ -378,6 +387,10 @@ function runnerEventToFrame(
       // `truncated: true` can call `GET /api/sessions/:id/events` to fetch
       // the full content. `content` is a string; we count chars, not bytes.
       const full = event.content;
+      const parentFields =
+        event.parentToolUseId !== undefined
+          ? { parentToolUseId: event.parentToolUseId }
+          : {};
       if (full.length > TOOL_RESULT_WS_LIMIT) {
         const dropped = full.length - TOOL_RESULT_WS_LIMIT;
         const clipped =
@@ -391,6 +404,7 @@ function runnerEventToFrame(
           content: clipped,
           isError: event.isError,
           truncated: true,
+          ...parentFields,
         };
       }
       return {
@@ -400,6 +414,7 @@ function runnerEventToFrame(
         toolUseId: event.toolUseId,
         content: full,
         isError: event.isError,
+        ...parentFields,
       };
     }
     case "permission_request":
@@ -457,6 +472,73 @@ function runnerEventToFrame(
     case "alerts_update":
       return {
         type: "alerts_update",
+        at: event.at,
+      };
+    case "subagent_start":
+      return {
+        type: "subagent_start",
+        sessionId,
+        seq: 0,
+        taskId: event.taskId,
+        parentToolUseId: event.parentToolUseId,
+        description: event.description,
+        ...(event.agentType !== undefined ? { agentType: event.agentType } : {}),
+        ...(event.taskType !== undefined ? { taskType: event.taskType } : {}),
+        ...(event.workflowName !== undefined
+          ? { workflowName: event.workflowName }
+          : {}),
+        ...(event.prompt !== undefined ? { prompt: event.prompt } : {}),
+        ...(event.isBackgrounded !== undefined
+          ? { isBackgrounded: event.isBackgrounded }
+          : {}),
+        at: event.at,
+      };
+    case "subagent_progress":
+      return {
+        type: "subagent_progress",
+        sessionId,
+        seq: 0,
+        taskId: event.taskId,
+        description: event.description,
+        ...(event.lastToolName !== undefined
+          ? { lastToolName: event.lastToolName }
+          : {}),
+        ...(event.summary !== undefined ? { summary: event.summary } : {}),
+        usage: event.usage,
+        at: event.at,
+      };
+    case "subagent_update":
+      return {
+        type: "subagent_update",
+        sessionId,
+        seq: 0,
+        taskId: event.taskId,
+        patch: event.patch,
+        at: event.at,
+      };
+    case "subagent_end":
+      return {
+        type: "subagent_end",
+        sessionId,
+        seq: 0,
+        taskId: event.taskId,
+        status: event.status,
+        summary: event.summary,
+        ...(event.outputFile !== undefined ? { outputFile: event.outputFile } : {}),
+        ...(event.toolUseId !== undefined ? { toolUseId: event.toolUseId } : {}),
+        ...(event.usage !== undefined ? { usage: event.usage } : {}),
+        at: event.at,
+      };
+    case "subagent_tool_progress":
+      return {
+        type: "subagent_tool_progress",
+        sessionId,
+        seq: 0,
+        toolUseId: event.toolUseId,
+        toolName: event.toolName,
+        parentToolUseId: event.parentToolUseId,
+        elapsedSeconds: event.elapsedSeconds,
+        ...(event.taskId !== undefined ? { taskId: event.taskId } : {}),
         at: event.at,
       };
     case "error":

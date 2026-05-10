@@ -4,6 +4,12 @@ import type {
   AskUserQuestionItem,
   ModelId,
   PermissionMode,
+  SubagentEndPayload,
+  SubagentLifecycleStatus,
+  SubagentProgressPayload,
+  SubagentStartPayload,
+  SubagentToolProgressPayload,
+  SubagentUpdatePayload,
 } from "@claudex/shared";
 
 // -----------------------------------------------------------------------------
@@ -62,19 +68,31 @@ export type RunnerEvent =
         | "cli_running";
     }
   | { type: "sdk_session_id"; sdkSessionId: string }
-  | { type: "assistant_text"; messageId: string; text: string; done: boolean }
-  | { type: "thinking"; text: string }
+  | {
+      type: "assistant_text";
+      messageId: string;
+      text: string;
+      done: boolean;
+      /** Non-null when this text chunk came from a subagent's turn (SDK
+       * `SDKAssistantMessage.parent_tool_use_id`). The WS bridge + store
+       * thread it through so the s-17 rail can group by `parentToolUseId`
+       * into a live stream per subagent. */
+      parentToolUseId?: string;
+    }
+  | { type: "thinking"; text: string; parentToolUseId?: string }
   | {
       type: "tool_use";
       toolUseId: string;
       name: string;
       input: Record<string, unknown>;
+      parentToolUseId?: string;
     }
   | {
       type: "tool_result";
       toolUseId: string;
       content: string;
       isError: boolean;
+      parentToolUseId?: string;
     }
   | {
       type: "permission_request";
@@ -140,6 +158,18 @@ export type RunnerEvent =
   // by a session status transition). Cross-session by design — routed
   // through the global WS channel just like queue_update.
   | { type: "alerts_update"; at: string }
+  // --------------------------------------------------------------------
+  // Live subagents (s-17). Each `task_*` SDK message maps to one of
+  // these. Shapes mirror the shared `Subagent*Payload` schemas verbatim
+  // so the runner → WS bridge is a pass-through; persist rides the
+  // ordinary append-to-`session_events` pipeline in manager.ts using the
+  // five new EventKinds.
+  // --------------------------------------------------------------------
+  | ({ type: "subagent_start" } & SubagentStartPayload)
+  | ({ type: "subagent_progress" } & SubagentProgressPayload)
+  | ({ type: "subagent_update" } & SubagentUpdatePayload)
+  | ({ type: "subagent_end" } & SubagentEndPayload)
+  | ({ type: "subagent_tool_progress" } & SubagentToolProgressPayload)
   | { type: "error"; code: string; message: string };
 
 export type RunnerListener = (event: RunnerEvent) => void;

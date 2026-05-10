@@ -542,6 +542,12 @@ export class SessionManager {
               messageId: event.messageId,
               text: event.text,
               done: event.done,
+              // s-17 live subagents: thread through when the text block
+              // came from a child subagent's turn so the rail can group
+              // by `parentToolUseId`. Absent on main-thread text.
+              ...(event.parentToolUseId !== undefined
+                ? { parentToolUseId: event.parentToolUseId }
+                : {}),
             },
           });
           break;
@@ -549,7 +555,12 @@ export class SessionManager {
           this.deps.sessions.appendEvent({
             sessionId,
             kind: "assistant_thinking",
-            payload: { text: event.text },
+            payload: {
+              text: event.text,
+              ...(event.parentToolUseId !== undefined
+                ? { parentToolUseId: event.parentToolUseId }
+                : {}),
+            },
           });
           break;
         case "tool_use":
@@ -560,6 +571,9 @@ export class SessionManager {
               toolUseId: event.toolUseId,
               name: event.name,
               input: event.input,
+              ...(event.parentToolUseId !== undefined
+                ? { parentToolUseId: event.parentToolUseId }
+                : {}),
             },
           });
           break;
@@ -571,8 +585,97 @@ export class SessionManager {
               toolUseId: event.toolUseId,
               content: event.content,
               isError: event.isError,
+              ...(event.parentToolUseId !== undefined
+                ? { parentToolUseId: event.parentToolUseId }
+                : {}),
             },
           });
+          break;
+        // ------------------------------------------------------------
+        // Live subagents (s-17). Persist each SDK `task_*` / `tool_progress`
+        // flavour as its own `session_events` row so the rail can replay
+        // the live stream after reload / resume. The `break` after each
+        // lets the default "broadcast the event verbatim" path below the
+        // switch fire — subscribed tabs receive the frame in real time.
+        // ------------------------------------------------------------
+        case "subagent_start":
+          this.deps.sessions.appendEvent({
+            sessionId,
+            kind: "subagent_start",
+            payload: {
+              taskId: event.taskId,
+              parentToolUseId: event.parentToolUseId,
+              description: event.description,
+              ...(event.agentType !== undefined
+                ? { agentType: event.agentType }
+                : {}),
+              ...(event.taskType !== undefined
+                ? { taskType: event.taskType }
+                : {}),
+              ...(event.workflowName !== undefined
+                ? { workflowName: event.workflowName }
+                : {}),
+              ...(event.prompt !== undefined ? { prompt: event.prompt } : {}),
+              ...(event.isBackgrounded !== undefined
+                ? { isBackgrounded: event.isBackgrounded }
+                : {}),
+              at: event.at,
+            },
+          });
+          break;
+        case "subagent_progress":
+          this.deps.sessions.appendEvent({
+            sessionId,
+            kind: "subagent_progress",
+            payload: {
+              taskId: event.taskId,
+              description: event.description,
+              ...(event.lastToolName !== undefined
+                ? { lastToolName: event.lastToolName }
+                : {}),
+              ...(event.summary !== undefined ? { summary: event.summary } : {}),
+              usage: event.usage,
+              at: event.at,
+            },
+          });
+          break;
+        case "subagent_update":
+          this.deps.sessions.appendEvent({
+            sessionId,
+            kind: "subagent_update",
+            payload: {
+              taskId: event.taskId,
+              patch: event.patch,
+              at: event.at,
+            },
+          });
+          break;
+        case "subagent_end":
+          this.deps.sessions.appendEvent({
+            sessionId,
+            kind: "subagent_end",
+            payload: {
+              taskId: event.taskId,
+              status: event.status,
+              summary: event.summary,
+              ...(event.outputFile !== undefined
+                ? { outputFile: event.outputFile }
+                : {}),
+              ...(event.toolUseId !== undefined
+                ? { toolUseId: event.toolUseId }
+                : {}),
+              ...(event.usage !== undefined ? { usage: event.usage } : {}),
+              at: event.at,
+            },
+          });
+          break;
+        case "subagent_tool_progress":
+          // Don't persist — `tool_progress` is a heartbeat with an
+          // ever-growing `elapsed_time_seconds` that gets superseded by
+          // the next heartbeat. Keeping every tick would bloat the event
+          // log without adding replayable value (the final elapsed lives
+          // on `subagent_end.usage.durationMs`). Still broadcast so
+          // subscribed tabs can animate the "still alive" indicator.
           break;
         case "permission_request": {
           // Auto-approve if an existing grant matches. "allow_once" here because

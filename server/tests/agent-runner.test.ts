@@ -219,10 +219,185 @@ describe("AgentRunner.translate (SDK message → RunnerEvent)", () => {
     expect((turnEnd as any).stopReason).toBe("error_during_execution");
   });
 
-  it("ignores unknown message types silently", () => {
+  it("emits subagent_start / progress / update / end for system/task_* subtypes", () => {
     const { events, translate } = collect();
-    translate({ type: "system", subtype: "task_progress" });
-    translate({ type: "system", subtype: "task_notification" });
+    translate({
+      type: "system",
+      subtype: "task_started",
+      task_id: "t1",
+      tool_use_id: "tu-parent-1",
+      description: "Trace hydration warning",
+      task_type: "local_agent",
+      prompt: "Inspect lib/date.ts for hydration source",
+      uuid: "u1",
+      session_id: "sdk-a",
+    });
+    translate({
+      type: "system",
+      subtype: "task_progress",
+      task_id: "t1",
+      description: "Analyzing formatDate",
+      last_tool_name: "Grep",
+      summary: "Close to identifying the offender",
+      usage: { total_tokens: 1234, tool_uses: 3, duration_ms: 8200 },
+      uuid: "u2",
+      session_id: "sdk-a",
+    });
+    translate({
+      type: "system",
+      subtype: "task_updated",
+      task_id: "t1",
+      patch: { status: "running", is_backgrounded: true },
+      uuid: "u3",
+      session_id: "sdk-a",
+    });
+    translate({
+      type: "system",
+      subtype: "task_notification",
+      task_id: "t1",
+      tool_use_id: "tu-parent-1",
+      status: "completed",
+      output_file: "/tmp/explorer.jsonl",
+      summary: "Found 3 call sites in app/(marketing)",
+      usage: { total_tokens: 9000, tool_uses: 12, duration_ms: 42000 },
+      uuid: "u4",
+      session_id: "sdk-a",
+    });
+
+    const start = events.find((e) => e.type === "subagent_start")!;
+    expect(start).toMatchObject({
+      type: "subagent_start",
+      taskId: "t1",
+      parentToolUseId: "tu-parent-1",
+      description: "Trace hydration warning",
+      taskType: "local_agent",
+      prompt: "Inspect lib/date.ts for hydration source",
+    });
+
+    const progress = events.find((e) => e.type === "subagent_progress")!;
+    expect(progress).toMatchObject({
+      type: "subagent_progress",
+      taskId: "t1",
+      description: "Analyzing formatDate",
+      lastToolName: "Grep",
+      summary: "Close to identifying the offender",
+      usage: { totalTokens: 1234, toolUses: 3, durationMs: 8200 },
+    });
+
+    const update = events.find((e) => e.type === "subagent_update")!;
+    expect(update).toMatchObject({
+      type: "subagent_update",
+      taskId: "t1",
+      patch: { status: "running", isBackgrounded: true },
+    });
+
+    const end = events.find((e) => e.type === "subagent_end")!;
+    expect(end).toMatchObject({
+      type: "subagent_end",
+      taskId: "t1",
+      status: "completed",
+      outputFile: "/tmp/explorer.jsonl",
+      summary: "Found 3 call sites in app/(marketing)",
+      toolUseId: "tu-parent-1",
+      usage: { totalTokens: 9000, toolUses: 12, durationMs: 42000 },
+    });
+  });
+
+  it("remaps task_updated.patch.status='killed' to 'stopped'", () => {
+    const { events, translate } = collect();
+    translate({
+      type: "system",
+      subtype: "task_updated",
+      task_id: "t2",
+      patch: { status: "killed" },
+      uuid: "u",
+      session_id: "sdk-a",
+    });
+    const update = events.find((e) => e.type === "subagent_update")!;
+    expect((update as any).patch.status).toBe("stopped");
+  });
+
+  it("emits subagent_tool_progress for tool_progress with parent_tool_use_id", () => {
+    const { events, translate } = collect();
+    translate({
+      type: "tool_progress",
+      tool_use_id: "tu-inner",
+      tool_name: "Grep",
+      parent_tool_use_id: "tu-parent-1",
+      elapsed_time_seconds: 4.2,
+      task_id: "t1",
+      uuid: "u",
+      session_id: "sdk-a",
+    });
+    const tp = events.find((e) => e.type === "subagent_tool_progress")!;
+    expect(tp).toMatchObject({
+      type: "subagent_tool_progress",
+      toolUseId: "tu-inner",
+      toolName: "Grep",
+      parentToolUseId: "tu-parent-1",
+      elapsedSeconds: 4.2,
+      taskId: "t1",
+    });
+  });
+
+  it("threads parent_tool_use_id through assistant/user/tool blocks", () => {
+    const { events, translate } = collect();
+    translate({
+      type: "assistant",
+      uuid: "msg-child",
+      parent_tool_use_id: "tu-parent-1",
+      message: {
+        content: [
+          { type: "text", text: "Looking for Intl.DateTimeFormat usage" },
+          { type: "thinking", thinking: "This is a render boundary bug" },
+          {
+            type: "tool_use",
+            id: "tu-inner-grep",
+            name: "Grep",
+            input: { pattern: "Intl.DateTimeFormat" },
+          },
+        ],
+      },
+    });
+    translate({
+      type: "user",
+      parent_tool_use_id: "tu-parent-1",
+      message: {
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: "tu-inner-grep",
+            content: "7 hits",
+            is_error: false,
+          },
+        ],
+      },
+    });
+    const text = events.find((e) => e.type === "assistant_text")!;
+    const think = events.find((e) => e.type === "thinking")!;
+    const use = events.find((e) => e.type === "tool_use")!;
+    const result = events.find((e) => e.type === "tool_result")!;
+    expect((text as any).parentToolUseId).toBe("tu-parent-1");
+    expect((think as any).parentToolUseId).toBe("tu-parent-1");
+    expect((use as any).parentToolUseId).toBe("tu-parent-1");
+    expect((result as any).parentToolUseId).toBe("tu-parent-1");
+  });
+
+  it("leaves parentToolUseId undefined on main-thread messages", () => {
+    const { events, translate } = collect();
+    translate({
+      type: "assistant",
+      uuid: "msg-main",
+      parent_tool_use_id: null,
+      message: { content: [{ type: "text", text: "main thread reply" }] },
+    });
+    const text = events.find((e) => e.type === "assistant_text")!;
+    expect((text as any).parentToolUseId).toBeUndefined();
+  });
+
+  it("ignores unrelated system subtypes and truly unknown message types silently", () => {
+    const { events, translate } = collect();
+    translate({ type: "system", subtype: "totally_unknown_subtype" });
     translate({ type: "made_up_type" });
     expect(events).toEqual([]);
   });

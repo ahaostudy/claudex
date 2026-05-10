@@ -108,6 +108,19 @@ export class AgentRunner implements Runner {
       // summarized thinking so the UI's Verbose view-mode has something to
       // render. Keeps the model in adaptive mode (no fixed budget).
       thinking: { type: "adaptive", display: "summarized" },
+      // Live subagents (s-17). Turn on the two SDK knobs that make a
+      // Task/Agent/Explore child turn observable from the parent stream:
+      //   forwardSubagentText — emit the child's text + thinking blocks as
+      //     assistant/user messages with `parent_tool_use_id` set. Without
+      //     this we only see the final outer tool_result.
+      //   agentProgressSummaries — wake a ~30s heartbeat that forks the
+      //     subagent to generate a present-tense activeForm description
+      //     (e.g. "Analyzing authentication module"). Free on prompt cache.
+      // `includePartialMessages` stays off — we don't need sub-token
+      // streaming for this feature; the ~30s cadence + full text blocks
+      // are enough to keep the rail lively.
+      forwardSubagentText: true,
+      agentProgressSummaries: true,
       canUseTool: (toolName, input, { toolUseID, title }) =>
         new Promise<
           | { behavior: "allow"; updatedInput?: Record<string, unknown> }
@@ -229,10 +242,162 @@ export class AgentRunner implements Runner {
               sdkSessionId: msg.session_id,
             });
           }
+          return;
+        }
+        // Live subagents (s-17). The SDK ferries the child subagent's
+        // lifecycle through the parent session's SDKMessage stream as
+        // `system/task_*` subtypes. `task_id` is the SDK's stable per-run
+        // id; `tool_use_id` is the outer parent tool_use that launched it
+        // (same id clients see on the parent's `tool_use` event). For the
+        // SDK shape see agentSdkTypes.d.ts:
+        //   SDKTaskStartedMessage, SDKTaskProgressMessage,
+        //   SDKTaskUpdatedMessage, SDKTaskNotificationMessage.
+        if (msg.subtype === "task_started") {
+          const m = msg as any;
+          this.emit({
+            type: "subagent_start",
+            taskId: String(m.task_id ?? ""),
+            parentToolUseId: typeof m.tool_use_id === "string" ? m.tool_use_id : null,
+            description: String(m.description ?? ""),
+            agentType: typeof m.task_type === "string" ? m.task_type : undefined,
+            taskType: typeof m.task_type === "string" ? m.task_type : undefined,
+            workflowName:
+              typeof m.workflow_name === "string" ? m.workflow_name : undefined,
+            prompt: typeof m.prompt === "string" ? m.prompt : undefined,
+            isBackgrounded:
+              typeof m.is_backgrounded === "boolean"
+                ? m.is_backgrounded
+                : undefined,
+            at: new Date().toISOString(),
+          });
+          return;
+        }
+        if (msg.subtype === "task_progress") {
+          const m = msg as any;
+          const usageSrc = (m.usage ?? {}) as Record<string, unknown>;
+          this.emit({
+            type: "subagent_progress",
+            taskId: String(m.task_id ?? ""),
+            description: String(m.description ?? ""),
+            lastToolName:
+              typeof m.last_tool_name === "string"
+                ? m.last_tool_name
+                : undefined,
+            summary: typeof m.summary === "string" ? m.summary : undefined,
+            usage: {
+              totalTokens:
+                typeof usageSrc.total_tokens === "number"
+                  ? (usageSrc.total_tokens as number)
+                  : undefined,
+              toolUses:
+                typeof usageSrc.tool_uses === "number"
+                  ? (usageSrc.tool_uses as number)
+                  : undefined,
+              durationMs:
+                typeof usageSrc.duration_ms === "number"
+                  ? (usageSrc.duration_ms as number)
+                  : undefined,
+            },
+            at: new Date().toISOString(),
+          });
+          return;
+        }
+        if (msg.subtype === "task_updated") {
+          const m = msg as any;
+          const p = (m.patch ?? {}) as Record<string, unknown>;
+          const status =
+            p.status === "running" ||
+            p.status === "completed" ||
+            p.status === "failed" ||
+            p.status === "stopped"
+              ? p.status
+              : p.status === "killed"
+                ? "stopped"
+                : p.status === "pending"
+                  ? "running"
+                  : undefined;
+          this.emit({
+            type: "subagent_update",
+            taskId: String(m.task_id ?? ""),
+            patch: {
+              ...(status !== undefined ? { status } : {}),
+              ...(typeof p.description === "string"
+                ? { description: p.description }
+                : {}),
+              ...(typeof p.end_time === "number" ? { endTime: p.end_time } : {}),
+              ...(typeof p.error === "string" ? { error: p.error } : {}),
+              ...(typeof p.is_backgrounded === "boolean"
+                ? { isBackgrounded: p.is_backgrounded }
+                : {}),
+            },
+            at: new Date().toISOString(),
+          });
+          return;
+        }
+        if (msg.subtype === "task_notification") {
+          const m = msg as any;
+          const usageSrc = m.usage ? (m.usage as Record<string, unknown>) : null;
+          const status =
+            m.status === "completed" || m.status === "failed" || m.status === "stopped"
+              ? m.status
+              : "completed";
+          this.emit({
+            type: "subagent_end",
+            taskId: String(m.task_id ?? ""),
+            status,
+            summary: String(m.summary ?? ""),
+            outputFile:
+              typeof m.output_file === "string" ? m.output_file : undefined,
+            toolUseId:
+              typeof m.tool_use_id === "string" ? m.tool_use_id : undefined,
+            usage: usageSrc
+              ? {
+                  totalTokens:
+                    typeof usageSrc.total_tokens === "number"
+                      ? (usageSrc.total_tokens as number)
+                      : undefined,
+                  toolUses:
+                    typeof usageSrc.tool_uses === "number"
+                      ? (usageSrc.tool_uses as number)
+                      : undefined,
+                  durationMs:
+                    typeof usageSrc.duration_ms === "number"
+                      ? (usageSrc.duration_ms as number)
+                      : undefined,
+                }
+              : undefined,
+            at: new Date().toISOString(),
+          });
+          return;
         }
         return;
+      case "tool_progress": {
+        // SDK heartbeat for a long-running tool. Also carries
+        // `parent_tool_use_id` so the s-17 rail can tick its "still alive"
+        // indicator even while the subagent has no fresh text or tool_use
+        // block. For non-subagent tools (parent_tool_use_id is null) we
+        // still emit — the main-thread view can use it as a progress hint.
+        const m = msg as any;
+        this.emit({
+          type: "subagent_tool_progress",
+          toolUseId: String(m.tool_use_id ?? ""),
+          toolName: String(m.tool_name ?? ""),
+          parentToolUseId:
+            typeof m.parent_tool_use_id === "string"
+              ? m.parent_tool_use_id
+              : null,
+          elapsedSeconds: Number(m.elapsed_time_seconds ?? 0),
+          taskId: typeof m.task_id === "string" ? m.task_id : undefined,
+          at: new Date().toISOString(),
+        });
+        return;
+      }
       case "assistant": {
         const id = (msg as any).uuid ?? nanoid(12);
+        const parentToolUseId =
+          typeof (msg as any).parent_tool_use_id === "string"
+            ? ((msg as any).parent_tool_use_id as string)
+            : undefined;
         const content = msg.message?.content ?? [];
         for (const block of content as Array<any>) {
           if (block.type === "text" && typeof block.text === "string") {
@@ -241,24 +406,34 @@ export class AgentRunner implements Runner {
               messageId: id,
               text: block.text,
               done: true,
+              ...(parentToolUseId ? { parentToolUseId } : {}),
             });
           } else if (
             block.type === "thinking" &&
             typeof block.thinking === "string"
           ) {
-            this.emit({ type: "thinking", text: block.thinking });
+            this.emit({
+              type: "thinking",
+              text: block.thinking,
+              ...(parentToolUseId ? { parentToolUseId } : {}),
+            });
           } else if (block.type === "tool_use") {
             this.emit({
               type: "tool_use",
               toolUseId: String(block.id ?? nanoid(12)),
               name: String(block.name ?? "unknown"),
               input: (block.input as Record<string, unknown>) ?? {},
+              ...(parentToolUseId ? { parentToolUseId } : {}),
             });
           }
         }
         return;
       }
       case "user": {
+        const parentToolUseId =
+          typeof (msg as any).parent_tool_use_id === "string"
+            ? ((msg as any).parent_tool_use_id as string)
+            : undefined;
         const content = msg.message?.content;
         if (Array.isArray(content)) {
           for (const block of content as Array<any>) {
@@ -278,6 +453,7 @@ export class AgentRunner implements Runner {
                 toolUseId: String(block.tool_use_id ?? ""),
                 content: text,
                 isError: Boolean(block.is_error),
+                ...(parentToolUseId ? { parentToolUseId } : {}),
               });
             }
           }
