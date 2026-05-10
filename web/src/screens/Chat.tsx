@@ -11,6 +11,7 @@ import {
   Copy,
   GitCompareArrows,
   GitFork,
+  ListChecks,
   Loader2,
   MessageCircle,
   MoreVertical,
@@ -26,6 +27,9 @@ import {
 import { ChatSessionsRail } from "@/components/ChatSessionsRail";
 import { ChatTasksRail } from "@/components/ChatTasksRail";
 import { TasksDrawer } from "@/components/TasksDrawer";
+import { PlanStrip } from "@/components/PlanStrip";
+import { PlanSheet } from "@/components/PlanSheet";
+import { selectLatestTodos } from "@/lib/todos";
 import { useSessions } from "@/state/sessions";
 import { api } from "@/api/client";
 import type {
@@ -126,6 +130,11 @@ export function ChatScreen() {
   // Mobile-only bottom-sheet for the per-session Tasks list. Desktop uses
   // the right-rail <ChatTasksRail /> instead (gated by `showTasks`).
   const [showTasksDrawer, setShowTasksDrawer] = useState(false);
+  // Plan (TodoWrite) sheet — opened from the sticky PlanStrip, from the
+  // inline chat pointer, and from the mobile header. One surface works
+  // for both mobile (bottom sheet) and desktop (right slide-over); see
+  // PlanSheet for the responsive DOM.
+  const [showPlanSheet, setShowPlanSheet] = useState(false);
   // Click-to-expand image overlay. Populated by the thumbnail click handlers
   // in Piece below — we hold the state here so the lightbox renders at the
   // Chat root, above every other drawer / sheet.
@@ -256,6 +265,14 @@ export function ChatScreen() {
     () => applyViewMode(pieces, viewMode),
     [pieces, viewMode],
   );
+
+  // Latest TodoWrite snapshot — drives the sticky PlanStrip, the PlanSheet,
+  // and the inline lightweight pointer. Empty snapshot (total === 0)
+  // hides every plan surface so we don't eat space on sessions that
+  // never call TodoWrite. Recomputed O(n) walk when pieces change, but
+  // the walk is a tight loop and pieces.length is bounded by the
+  // transcript size the user is already paying for to render.
+  const planSnapshot = useMemo(() => selectLatestTodos(pieces), [pieces]);
 
   // Index of the newest user-message piece in the current visible list.
   // Drives the "Edit" affordance on that bubble only — older user turns
@@ -751,6 +768,15 @@ export function ChatScreen() {
         </div>
       </header>
 
+      {/* Plan strip — sticky under both mobile and desktop session
+          headers. Hidden entirely when the session has no TodoWrite
+          plan yet (PlanStrip returns null). Tapping opens PlanSheet
+          (bottom sheet on mobile, right slide-over on desktop). */}
+      <PlanStrip
+        snapshot={planSnapshot}
+        onOpen={() => setShowPlanSheet(true)}
+      />
+
       {/* Messages — `flex-1 min-h-0` is the magic pair that lets the child
           scroller take the remaining column height. Without `min-h-0` a
           flex child would grow past the viewport and the composer would
@@ -820,6 +846,7 @@ export function ChatScreen() {
               if (id) resolvePlanAccept(id, planId, decision);
             }}
             onOpenLightbox={(images, index) => setLightbox({ images, index })}
+            onOpenPlan={() => setShowPlanSheet(true)}
             revealedSeq={revealedSeq}
             onToggleReveal={(seq) =>
               setRevealedSeq((current) => (current === seq ? null : seq))
@@ -988,6 +1015,20 @@ export function ChatScreen() {
             }
           }}
           onClose={() => setShowTasksDrawer(false)}
+        />
+      )}
+      {showPlanSheet && (
+        <PlanSheet
+          snapshot={planSnapshot}
+          onReveal={(seq) => {
+            const el = scroller.current?.querySelector(
+              `[data-event-seq="${String(seq)}"]`,
+            );
+            if (el) {
+              el.scrollIntoView({ behavior: "smooth", block: "center" });
+            }
+          }}
+          onClose={() => setShowPlanSheet(false)}
         />
       )}
       {lightbox && (
@@ -1216,6 +1257,7 @@ function Piece({
   onAnswerAskUserQuestion,
   onDecidePlan,
   onOpenLightbox,
+  onOpenPlan,
   isLastUserMessage,
   canEdit,
   onEditLastUserMessage,
@@ -1240,6 +1282,10 @@ function Piece({
   ) => void;
   onDecidePlan: (planId: string, decision: "accept" | "reject") => void;
   onOpenLightbox: (images: ImageRef[], index: number) => void;
+  /** Open the session's plan sheet from an inline TodoWrite pointer.
+   *  Omitted when the parent doesn't want to expose the quick-jump
+   *  (e.g. embedded preview surfaces). */
+  onOpenPlan?: () => void;
   /** True when this piece is the newest user_message currently visible. */
   isLastUserMessage?: boolean;
   /** True when the session is idle and the user can actually submit an edit. */
@@ -1379,6 +1425,53 @@ function Piece({
             data-event-seq={p.seq}
           >
             <DiffView diff={diff} />
+            {p.createdAt && (
+              <div
+                className="mono text-[10px] text-ink-faint mt-1"
+                title={new Date(p.createdAt).toLocaleString()}
+              >
+                {timeAgoShort(p.createdAt)}
+              </div>
+            )}
+          </div>
+        );
+      }
+      // TodoWrite — the full list lives in the persistent PlanStrip
+      // + PlanSheet surfaces (mockup s-16). Rendering it again as a
+      // fat `N todos` chip in the chat would duplicate state and eat
+      // vertical space on every revision. Instead emit a one-line
+      // "Plan updated" pointer that opens the sheet. Keep
+      // `data-event-seq` for permalink + PlanPanel → transcript
+      // reveal, and `data-tool-use-id` so the tasks rail's
+      // `onReveal("tool-use-id", ...)` still scrolls to this row.
+      if (p.name === "TodoWrite") {
+        const rawTodos = (p.input as Record<string, unknown>).todos;
+        const todos = Array.isArray(rawTodos) ? rawTodos : [];
+        const total = todos.length;
+        const doneCount = todos.reduce((acc, t) => {
+          if (t && typeof t === "object" && (t as Record<string, unknown>).status === "completed") {
+            return acc + 1;
+          }
+          return acc;
+        }, 0);
+        return (
+          <div data-tool-use-id={p.id} data-event-seq={p.seq}>
+            <button
+              type="button"
+              onClick={() => onOpenPlan?.()}
+              className="inline-flex items-center gap-2 py-1 pl-2.5 pr-2.5 rounded-[8px] bg-klein-wash/40 border border-dashed border-klein/35 text-left hover:bg-klein-wash/60 disabled:opacity-60"
+              disabled={!onOpenPlan}
+              title="Open the plan panel"
+            >
+              <ListChecks className="w-3.5 h-3.5 text-klein-ink shrink-0" aria-hidden />
+              <span className="mono text-[11px] text-klein-ink uppercase tracking-[0.1em]">
+                Plan updated
+              </span>
+              <span className="text-[12.5px] text-ink-soft">
+                {total} item{total === 1 ? "" : "s"} · {doneCount} done
+              </span>
+              <span className="mono text-[11px] text-ink-muted">→ view</span>
+            </button>
             {p.createdAt && (
               <div
                 className="mono text-[10px] text-ink-faint mt-1"
