@@ -101,6 +101,7 @@
           <a href="#s-12" class="px-2 h-7 inline-flex items-center gap-1 rounded-[6px] hover:bg-paper text-[12px] text-ink-soft"><span class="mono text-[10px] text-ink-faint">12</span>Global</a>
           <a href="#s-14" class="px-2 h-7 inline-flex items-center gap-1 rounded-[6px] hover:bg-paper text-[12px] text-ink-soft"><span class="mono text-[10px] text-ink-faint">14</span>Files</a>
           <a href="#s-15" class="px-2 h-7 inline-flex items-center gap-1 rounded-[6px] hover:bg-paper text-[12px] text-ink-soft"><span class="mono text-[10px] text-ink-faint">15</span>Session diff</a>
+          <a href="#s-16" class="px-2 h-7 inline-flex items-center gap-1 rounded-[6px] hover:bg-paper text-[12px] text-ink-soft"><span class="mono text-[10px] text-ink-faint">16</span>Plan</a>
         </nav>
         <div class="ml-auto flex items-center gap-3 text-[12px] text-ink-muted">
           <span class="hidden sm:inline">High-fidelity mockup · 12 screens · mobile + desktop</span>
@@ -3168,6 +3169,490 @@
     </section>
 
     <!-- =========================================================
+      SCREEN 16 · PLAN & TODOS
+    ========================================================= -->
+    <section id="s-16" class="border-b border-line bg-paper/30">
+      <div class="max-w-[1600px] mx-auto px-5 lg:px-10 pt-14">
+        <div class="flex items-baseline gap-4 mb-3">
+          <span class="mono text-[12px] text-ink-faint">screen · 16</span>
+          <h2 class="display text-[1.75rem] leading-tight">Plan &amp; todos</h2>
+        </div>
+        <p class="max-w-[78ch] text-[15px] text-ink-muted mb-4">Claude's <span class="mono">TodoWrite</span> output is the agent's self-written plan — more than a tool result, it tells you <em>where</em> you are. Instead of burying it mid-thread, claudex promotes it to two persistent surfaces so you can always glance at progress without scrolling.</p>
+        <ul class="text-[14px] text-ink-soft space-y-1.5 mb-10 max-w-[78ch]">
+          <li class="flex items-start gap-2"><span class="mono text-klein text-[12px] mt-[3px]">01</span><span><span class="font-medium">Plan strip</span> — a thin, always-sticky bar under the session header showing the in-progress item + tiny progress dots. Tap to expand.</span></li>
+          <li class="flex items-start gap-2"><span class="mono text-klein text-[12px] mt-[3px]">02</span><span><span class="font-medium">Plan card</span> — a dedicated panel (right rail on desktop, bottom sheet on mobile) with the full checklist, grouped Done / Now / Next.</span></li>
+          <li class="flex items-start gap-2"><span class="mono text-klein text-[12px] mt-[3px]">03</span><span><span class="font-medium">Lightweight pointer</span> — when Claude calls <span class="mono text-[13px]">TodoWrite</span> mid-thread, the chat shows a one-line "Plan updated → view" marker, not a fat repeated list.</span></li>
+        </ul>
+
+        <div class="flex flex-col xl:flex-row flex-wrap gap-10 items-start justify-center pb-16">
+
+          <!-- ==================== iPhone A · collapsed strip + pointer in thread ==================== -->
+          <div class="flex flex-col items-center gap-3">
+            <div class="caps text-ink-muted">iPhone · strip + pointer in thread</div>
+            <div class="iphone">
+              <div class="iphone-inner">
+                <div class="iphone-island"></div>
+                <div class="iphone-status"><span class="mono">9:41</span><span class="flex items-center gap-1"><span class="h-2 w-4 bg-ink rounded-sm"></span><span class="mono text-[11px]">5G</span><span class="h-2.5 w-5 border border-ink rounded-sm flex items-center justify-end pr-[1px]"><span class="h-1.5 w-3.5 bg-ink rounded-[1px]"></span></span></span></div>
+                <div class="iphone-home"></div>
+                <div class="iphone-content flex flex-col bg-canvas">
+                  <!-- session header -->
+                  <div class="px-4 py-2.5 border-b border-line flex items-center gap-2 shrink-0">
+                    <button class="h-8 w-8 rounded-[8px] bg-paper border border-line flex items-center justify-center"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-4 h-4"><path d="M15 6l-6 6 6 6"/></svg></button>
+                    <div class="min-w-0 flex-1">
+                      <div class="flex items-center gap-1.5"><span class="h-2 w-2 rounded-full bg-success animate-pulse"></span><div class="text-[14px] font-medium truncate">Fix hydration mismatch…</div></div>
+                      <div class="flex items-center gap-1.5 text-[11px] text-ink-muted mt-0.5"><span class="mono">spindle</span><span>·</span><span class="mono">opus-4.7</span></div>
+                    </div>
+                    <svg width="22" height="22"><circle cx="11" cy="11" r="9" fill="none" stroke="#e8e4d8" stroke-width="2.5"/><circle cx="11" cy="11" r="9" fill="none" stroke="#cc785c" stroke-width="2.5" stroke-linecap="round" stroke-dasharray="56.55" stroke-dashoffset="38.45" transform="rotate(-90 11 11)"/></svg>
+                  </div>
+
+                  <!-- PLAN STRIP (collapsed, persistent) -->
+                  <button class="w-full px-3 py-2 bg-paper/70 border-b border-line flex items-center gap-2 shrink-0 active:bg-paper">
+                    <span class="inline-flex items-center gap-1 px-1.5 h-5 rounded-[4px] border border-klein/30 bg-klein-wash text-klein-ink mono text-[10px] font-medium uppercase tracking-[0.08em] shrink-0">Plan</span>
+                    <!-- progress dots: done · done · now (pulsing) · next · next -->
+                    <span class="flex items-center gap-[3px] shrink-0">
+                      <span class="h-1.5 w-1.5 rounded-full bg-success"></span>
+                      <span class="h-1.5 w-1.5 rounded-full bg-success"></span>
+                      <span class="h-1.5 w-3 rounded-full bg-klein" style="box-shadow:0 0 0 2px rgba(204,120,92,0.18)"></span>
+                      <span class="h-1.5 w-1.5 rounded-full border border-line-strong"></span>
+                      <span class="h-1.5 w-1.5 rounded-full border border-line-strong"></span>
+                    </span>
+                    <span class="mono text-[10.5px] text-ink-muted shrink-0">2/5</span>
+                    <span class="text-[12.5px] text-ink font-medium truncate flex-1 text-left">Pinning server render locale to en-US</span>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-3.5 h-3.5 text-ink-muted shrink-0"><path d="M6 9l6 6 6-6"/></svg>
+                  </button>
+
+                  <!-- messages -->
+                  <div class="flex-1 overflow-y-auto px-4 py-4 space-y-4">
+                    <div class="flex justify-end"><div class="max-w-[88%] bg-ink text-canvas rounded-[14px] rounded-br-[4px] px-3.5 py-2.5 shadow-card text-[14px] leading-[1.5]">Go with option 2. Pin to "en-US" for the initial render, then run tests and open a PR.</div></div>
+
+                    <div>
+                      <div class="flex items-center gap-2 mb-1.5"><svg viewBox="0 0 32 32" class="w-4 h-4"><path d="M9 22 L16 8 L23 22 Z" fill="#cc785c"/><circle cx="16" cy="18" r="2.2" fill="#faf9f5"/></svg><span class="mono text-[11px] text-ink-muted">claude · opus-4.7</span></div>
+                      <div class="text-[14px] leading-[1.6] text-ink">On it. Breaking this into five steps so you can see where I am at a glance.</div>
+
+                      <!-- LIGHTWEIGHT POINTER (replaces old "N todos" chip) -->
+                      <button class="w-full mt-2 flex items-center gap-2 py-1.5 pl-2.5 pr-2 rounded-[8px] bg-klein-wash/40 border border-dashed border-klein/35 text-left">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-3.5 h-3.5 text-klein-ink shrink-0"><path d="M9 11l3 3 8-8"/><path d="M20 12v7a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h10"/></svg>
+                        <span class="mono text-[11px] text-klein-ink uppercase tracking-[0.1em]">Plan updated</span>
+                        <span class="text-[12px] text-ink-soft truncate">5 items · 0 done → view in strip</span>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-3 h-3 text-klein ml-auto shrink-0"><path d="M7 17L17 7M9 7h8v8"/></svg>
+                      </button>
+                      <div class="text-[14px] leading-[1.6] text-ink mt-2">Starting with the edit to <span class="mono text-[13px]">lib/date.ts</span>.</div>
+                    </div>
+
+                    <div>
+                      <!-- a tool call mid-flow -->
+                      <div class="relative pl-4 my-2"><span class="absolute left-[3px] top-3 bottom-3 w-px bg-line-strong"></span>
+                        <div class="flex items-center gap-2 py-1.5 pl-2 pr-3 rounded-[8px] bg-paper border border-line">
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-3 h-3 text-ink-muted"><path d="M9 6l6 6-6 6"/></svg>
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-3.5 h-3.5 text-ink-soft"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6ZM14 2v6h6"/></svg>
+                          <span class="mono text-[12px] text-ink-soft">edit</span>
+                          <span class="mono text-[11px] text-ink-muted truncate flex-1">lib/date.ts</span>
+                          <span class="mono text-[11px] text-success">+5</span><span class="mono text-[11px] text-danger">−3</span>
+                        </div>
+                      </div>
+
+                      <!-- Second pointer: plan advanced -->
+                      <button class="w-full mt-1 flex items-center gap-2 py-1.5 pl-2.5 pr-2 rounded-[8px] bg-paper border border-dashed border-line-strong text-left">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="w-3.5 h-3.5 text-success shrink-0"><path d="M5 12l5 5 9-10"/></svg>
+                        <span class="mono text-[11px] text-ink-muted uppercase tracking-[0.1em]">Plan · step 01 done</span>
+                        <span class="text-[12px] text-ink-soft truncate">Audit hydration source</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  <!-- composer -->
+                  <div class="px-3 pt-2 pb-3 border-t border-line flex items-end gap-2 bg-canvas">
+                    <div class="flex-1 rounded-[14px] border border-line bg-paper p-2">
+                      <div class="text-[13px] text-ink-muted px-2 py-1">Reply to claude…<span class="caret"></span></div>
+                    </div>
+                    <button class="h-9 w-9 rounded-full bg-klein text-canvas flex items-center justify-center shadow-card shrink-0"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" class="w-3.5 h-3.5"><path d="M5 12l7-7 7 7M12 5v14"/></svg></button>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="text-[11px] text-ink-muted max-w-[300px] text-center">Strip stays pinned as you scroll — always tells you the current <em>activeForm</em>. Two compact pointers replace the fat "N todos" chip.</div>
+          </div>
+
+          <!-- ==================== iPhone B · expanded bottom sheet ==================== -->
+          <div class="flex flex-col items-center gap-3">
+            <div class="caps text-ink-muted">iPhone · plan sheet expanded</div>
+            <div class="iphone">
+              <div class="iphone-inner">
+                <div class="iphone-island"></div>
+                <div class="iphone-status"><span class="mono">9:41</span><span class="flex items-center gap-1"><span class="h-2 w-4 bg-ink rounded-sm"></span><span class="mono text-[11px]">5G</span><span class="h-2.5 w-5 border border-ink rounded-sm flex items-center justify-end pr-[1px]"><span class="h-1.5 w-3.5 bg-ink rounded-[1px]"></span></span></span></div>
+                <div class="iphone-home"></div>
+                <div class="iphone-content relative bg-canvas flex flex-col">
+                  <!-- header (visible behind overlay) -->
+                  <div class="px-4 py-2.5 border-b border-line flex items-center gap-2 shrink-0">
+                    <div class="h-8 w-8 rounded-[8px] bg-paper border border-line flex items-center justify-center"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-4 h-4 text-ink-soft"><path d="M15 6l-6 6 6 6"/></svg></div>
+                    <div class="min-w-0 flex-1">
+                      <div class="flex items-center gap-1.5"><span class="h-2 w-2 rounded-full bg-success"></span><div class="text-[14px] font-medium truncate">Fix hydration mismatch…</div></div>
+                      <div class="flex items-center gap-1.5 text-[11px] text-ink-muted mt-0.5"><span class="mono">spindle</span><span>·</span><span class="mono">opus-4.7</span></div>
+                    </div>
+                    <div class="h-8 w-8 rounded-[8px] bg-klein-wash/60 border border-klein/30 flex items-center justify-center"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-4 h-4 text-klein-ink"><path d="M9 11l3 3 8-8"/><path d="M20 12v7a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h10"/></svg></div>
+                  </div>
+                  <!-- faint thread underneath -->
+                  <div class="flex-1 overflow-hidden px-4 py-3 space-y-3 opacity-60">
+                    <div class="flex justify-end"><div class="bg-ink text-canvas rounded-[14px] rounded-br-[4px] px-3.5 py-2 text-[13px]">Pin to "en-US" for the initial render, then run tests.</div></div>
+                    <div class="text-[13px] text-ink">On it — breaking this into five steps…</div>
+                  </div>
+                  <!-- dim overlay -->
+                  <div class="absolute inset-0 bg-ink/30 backdrop-blur-[2px] pointer-events-none"></div>
+
+                  <!-- BOTTOM SHEET · full plan -->
+                  <div class="absolute left-0 right-0 bottom-0 top-[72px] rounded-t-[20px] bg-canvas border-t border-x border-line shadow-lift flex flex-col">
+                    <div class="flex justify-center pt-3"><span class="h-1 w-12 bg-line-strong rounded-full"></span></div>
+                    <div class="px-4 pt-3 pb-3 border-b border-line flex items-start gap-3">
+                      <div class="flex-1 min-w-0">
+                        <div class="flex items-center gap-2"><span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-[6px] border border-klein/30 bg-klein-wash text-klein-ink text-[10px] font-medium uppercase tracking-[0.1em]"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="w-2.5 h-2.5"><path d="M9 11l3 3 8-8"/></svg>Plan</span><span class="caps text-ink-muted">2 of 5 done</span></div>
+                        <div class="display text-[18px] leading-tight mt-1">Pin locale, run tests, ship.</div>
+                      </div>
+                      <!-- progress ring -->
+                      <svg width="36" height="36"><circle cx="18" cy="18" r="15" fill="none" stroke="#e8e4d8" stroke-width="3"/><circle cx="18" cy="18" r="15" fill="none" stroke="#cc785c" stroke-width="3" stroke-linecap="round" stroke-dasharray="94.25" stroke-dashoffset="56.55" transform="rotate(-90 18 18)"/></svg>
+                      <button class="h-8 w-8 rounded-[8px] border border-line flex items-center justify-center"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-3.5 h-3.5 text-ink-soft"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+                    </div>
+                    <div class="flex-1 overflow-y-auto">
+                      <!-- Done group -->
+                      <div class="px-4 pt-3 pb-1.5 flex items-baseline gap-2">
+                        <span class="caps text-ink-soft">Done</span>
+                        <span class="mono text-[11px] text-ink-muted">· 2</span>
+                      </div>
+                      <ul class="px-3 space-y-1">
+                        <li class="flex items-start gap-2.5 px-2 py-2 rounded-[8px]">
+                          <span class="mt-[1px] h-4 w-4 rounded-full bg-success flex items-center justify-center shrink-0"><svg viewBox="0 0 24 24" fill="none" stroke="#faf9f5" stroke-width="3" class="w-2.5 h-2.5"><path d="M5 12l5 5 9-10"/></svg></span>
+                          <span class="text-[13.5px] text-ink-muted line-through">Audit hydration source in <span class="mono text-[12px]">app/(marketing)</span></span>
+                        </li>
+                        <li class="flex items-start gap-2.5 px-2 py-2 rounded-[8px]">
+                          <span class="mt-[1px] h-4 w-4 rounded-full bg-success flex items-center justify-center shrink-0"><svg viewBox="0 0 24 24" fill="none" stroke="#faf9f5" stroke-width="3" class="w-2.5 h-2.5"><path d="M5 12l5 5 9-10"/></svg></span>
+                          <span class="text-[13.5px] text-ink-muted line-through">Decide fix strategy (option 2: pinned locale)</span>
+                        </li>
+                      </ul>
+                      <!-- Now group -->
+                      <div class="px-4 pt-3 pb-1.5 flex items-baseline gap-2">
+                        <span class="caps text-klein">Now</span>
+                        <span class="mono text-[11px] text-ink-muted">· 1 · activeForm</span>
+                      </div>
+                      <ul class="px-3">
+                        <li class="relative flex items-start gap-2.5 px-2 py-2.5 rounded-[8px] bg-klein-wash/40 border border-klein/25">
+                          <span class="absolute left-0 top-2 bottom-2 w-[2px] bg-klein rounded-full"></span>
+                          <span class="mt-[2px] relative h-4 w-4 rounded-full border-2 border-klein shrink-0 ml-0.5">
+                            <span class="absolute inset-[3px] rounded-full bg-klein animate-pulse"></span>
+                          </span>
+                          <div class="flex-1 min-w-0">
+                            <div class="text-[14px] font-medium text-ink leading-snug">Pinning server render locale to <span class="mono text-[13px]">en-US</span></div>
+                            <div class="text-[11.5px] text-ink-muted mt-0.5 mono">lib/date.ts · editing</div>
+                          </div>
+                        </li>
+                      </ul>
+                      <!-- Next group -->
+                      <div class="px-4 pt-3 pb-1.5 flex items-baseline gap-2">
+                        <span class="caps text-ink-soft">Next</span>
+                        <span class="mono text-[11px] text-ink-muted">· 2</span>
+                      </div>
+                      <ul class="px-3 space-y-1 pb-3">
+                        <li class="flex items-start gap-2.5 px-2 py-2 rounded-[8px]">
+                          <span class="mt-[2px] h-4 w-4 rounded-full border-2 border-line-strong bg-canvas shrink-0"></span>
+                          <div class="flex-1">
+                            <div class="text-[13.5px] text-ink">Run <span class="mono text-[13px]">pnpm vitest run --changed</span></div>
+                          </div>
+                        </li>
+                        <li class="flex items-start gap-2.5 px-2 py-2 rounded-[8px]">
+                          <span class="mt-[2px] h-4 w-4 rounded-full border-2 border-line-strong bg-canvas shrink-0"></span>
+                          <div class="flex-1">
+                            <div class="text-[13.5px] text-ink">Open PR against <span class="mono text-[13px]">main</span> with summary</div>
+                          </div>
+                        </li>
+                      </ul>
+                    </div>
+                    <div class="px-4 py-2.5 border-t border-line flex items-center text-[11px] text-ink-muted">
+                      <span>Updated <span class="mono text-ink-soft">12s ago</span></span>
+                      <span class="ml-auto mono">TodoWrite · seq 23</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="text-[11px] text-ink-muted max-w-[300px] text-center">Tap the strip (or pointer) — bottom sheet slides up with the full list grouped by state. Swipe down to dismiss.</div>
+          </div>
+
+          <!-- ==================== Desktop · strip + right-rail Plan card ==================== -->
+          <div class="flex-1 w-full min-w-0 flex flex-col items-center gap-3">
+            <div class="caps text-ink-muted">Desktop · plan strip + right-rail card</div>
+            <div class="desktop">
+              <div class="desktop-chrome"><span style="background:#ff5f57"></span><span style="background:#febc2e"></span><span style="background:#28c840"></span><span class="ml-4 mono text-[11px] text-canvas/70">claudex.local — s/fix-hydration-marketing</span></div>
+              <div class="desktop-inner grid grid-cols-[220px_minmax(0,1fr)_320px] min-w-[960px] overflow-x-auto">
+
+                <!-- left global rail (condensed) -->
+                <aside class="border-r border-line bg-paper/40 flex flex-col">
+                  <div class="p-4 flex items-center gap-2"><svg viewBox="0 0 32 32" class="w-5 h-5"><path d="M9 22 L16 8 L23 22 Z" fill="#cc785c"/><circle cx="16" cy="18" r="2.2" fill="#faf9f5"/></svg><span class="mono text-[13px]">claudex</span><span class="ml-auto text-[11px] mono text-ink-muted">3</span></div>
+                  <div class="px-3 caps text-ink-muted mb-2">Sessions</div>
+                  <div class="px-2 space-y-1">
+                    <div class="px-2.5 py-2 rounded-[6px] bg-canvas border-l-2 border-klein bg-klein-wash/40">
+                      <div class="flex items-center gap-1.5"><span class="h-1.5 w-1.5 rounded-full bg-success animate-pulse"></span><span class="text-[12px] font-medium truncate">Fix hydration …</span></div>
+                      <!-- tiny plan indicator on session card too -->
+                      <div class="mt-1 flex items-center gap-1.5">
+                        <span class="flex items-center gap-[2px]">
+                          <span class="h-1 w-1 rounded-full bg-success"></span>
+                          <span class="h-1 w-1 rounded-full bg-success"></span>
+                          <span class="h-1 w-2 rounded-full bg-klein"></span>
+                          <span class="h-1 w-1 rounded-full bg-line-strong"></span>
+                          <span class="h-1 w-1 rounded-full bg-line-strong"></span>
+                        </span>
+                        <span class="mono text-[10px] text-ink-muted">2/5</span>
+                      </div>
+                    </div>
+                    <button class="w-full text-left px-2.5 py-2 rounded-[6px] hover:bg-canvas/60 border-l-2 border-transparent">
+                      <div class="flex items-center gap-1.5"><span class="h-1.5 w-1.5 rounded-full bg-success"></span><span class="text-[12px] truncate">Add retry + jitter …</span></div>
+                      <div class="mt-1 flex items-center gap-1.5">
+                        <span class="flex items-center gap-[2px]"><span class="h-1 w-1 rounded-full bg-success"></span><span class="h-1 w-1 rounded-full bg-success"></span><span class="h-1 w-1 rounded-full bg-success"></span><span class="h-1 w-2 rounded-full bg-klein"></span></span>
+                        <span class="mono text-[10px] text-ink-muted">3/4</span>
+                      </div>
+                    </button>
+                    <button class="w-full text-left px-2.5 py-2 rounded-[6px] hover:bg-canvas/60 border-l-2 border-transparent">
+                      <div class="flex items-center gap-1.5"><span class="h-1.5 w-1.5 rounded-full bg-ink-faint"></span><span class="text-[12px] truncate">Port config YAML→TOML</span></div>
+                      <div class="mono text-[10px] text-ink-muted mt-0.5 truncate">no plan</div>
+                    </button>
+                  </div>
+                  <div class="mt-auto p-4 border-t border-line text-[11px] text-ink-muted mono flex items-center gap-1.5"><span class="h-1.5 w-1.5 rounded-full bg-success"></span>connected</div>
+                </aside>
+
+                <!-- center thread -->
+                <section class="min-w-0 flex flex-col bg-canvas">
+                  <!-- session header -->
+                  <div class="px-5 py-3 border-b border-line flex items-center gap-3">
+                    <span class="h-2 w-2 rounded-full bg-success animate-pulse" style="box-shadow:0 0 0 4px rgba(63,145,66,0.18)"></span>
+                    <div class="min-w-0">
+                      <div class="text-[14px] font-medium truncate">Fix hydration mismatch on marketing page</div>
+                      <div class="flex items-center gap-2 text-[11px] text-ink-muted mt-0.5"><span class="mono">spindle</span><span>·</span><span class="mono">claude/fix-hydration-marketing</span></div>
+                    </div>
+                    <div class="ml-auto flex items-center gap-1.5">
+                      <button class="h-8 px-2.5 rounded-[6px] border border-line bg-canvas text-[12px] flex items-center gap-1"><span class="mono">Opus 4.7</span> <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-3 h-3"><path d="M6 9l6 6 6-6"/></svg></button>
+                      <svg width="28" height="28"><circle cx="14" cy="14" r="11" fill="none" stroke="#e8e4d8" stroke-width="3"/><circle cx="14" cy="14" r="11" fill="none" stroke="#cc785c" stroke-width="3" stroke-linecap="round" stroke-dasharray="69.11" stroke-dashoffset="47" transform="rotate(-90 14 14)"/></svg>
+                    </div>
+                  </div>
+
+                  <!-- PLAN STRIP · persistent, just under session header -->
+                  <div class="px-5 py-2 bg-paper/70 border-b border-line flex items-center gap-3">
+                    <span class="inline-flex items-center gap-1 px-1.5 h-5 rounded-[4px] border border-klein/30 bg-klein-wash text-klein-ink mono text-[10px] font-medium uppercase tracking-[0.08em]">Plan</span>
+                    <!-- dot progress -->
+                    <span class="flex items-center gap-[3px]">
+                      <span class="h-1.5 w-1.5 rounded-full bg-success"></span>
+                      <span class="h-1.5 w-1.5 rounded-full bg-success"></span>
+                      <span class="h-1.5 w-3.5 rounded-full bg-klein" style="box-shadow:0 0 0 2px rgba(204,120,92,0.18)"></span>
+                      <span class="h-1.5 w-1.5 rounded-full border border-line-strong"></span>
+                      <span class="h-1.5 w-1.5 rounded-full border border-line-strong"></span>
+                    </span>
+                    <span class="mono text-[11px] text-ink-muted">2/5</span>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-3 h-3 text-ink-faint"><path d="M9 6l6 6-6 6"/></svg>
+                    <span class="text-[13px] text-ink font-medium truncate">Pinning server render locale to <span class="mono text-[12px]">en-US</span></span>
+                    <span class="ml-auto flex items-center gap-2 text-[11px] text-ink-muted shrink-0">
+                      <span>next · run vitest</span>
+                      <span class="mono">·</span>
+                      <span>updated <span class="mono text-ink-soft">12s ago</span></span>
+                      <button class="ml-1 h-6 px-2 rounded-[6px] border border-line bg-canvas text-[11px] flex items-center gap-1 hover:bg-paper"><span>Collapse</span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-3 h-3"><path d="M18 15l-6-6-6 6"/></svg></button>
+                    </span>
+                  </div>
+
+                  <!-- thread -->
+                  <div class="flex-1 overflow-y-auto px-6 py-5 space-y-5">
+                    <div class="flex justify-end"><div class="max-w-[70%] bg-ink text-canvas rounded-[14px] rounded-br-[4px] px-4 py-2.5 shadow-card text-[14.5px]">Go with option 2. Pin to "en-US" for the initial render, then run tests and open a PR.</div></div>
+
+                    <div>
+                      <div class="flex items-center gap-2 mb-1.5"><svg viewBox="0 0 32 32" class="w-4 h-4"><path d="M9 22 L16 8 L23 22 Z" fill="#cc785c"/><circle cx="16" cy="18" r="2.2" fill="#faf9f5"/></svg><span class="mono text-[11px] text-ink-muted">claude · opus-4.7 · 14:04</span></div>
+                      <div class="text-[14.5px] leading-[1.65] text-ink max-w-[72ch]">On it. I'll break this into five tracked steps so you can always see where I am — see the Plan strip above and the full card in the right rail.</div>
+
+                      <!-- LIGHTWEIGHT POINTER (desktop) -->
+                      <button class="mt-3 inline-flex items-center gap-2 py-1.5 pl-2.5 pr-2.5 rounded-[8px] bg-klein-wash/40 border border-dashed border-klein/35 text-left hover:bg-klein-wash/60">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-3.5 h-3.5 text-klein-ink"><path d="M9 11l3 3 8-8"/><path d="M20 12v7a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h10"/></svg>
+                        <span class="mono text-[11px] text-klein-ink uppercase tracking-[0.1em]">Plan updated</span>
+                        <span class="text-[12.5px] text-ink-soft">5 items · 0 done</span>
+                        <span class="mono text-[11px] text-ink-muted">→ right rail</span>
+                      </button>
+
+                      <div class="text-[14.5px] leading-[1.65] text-ink max-w-[72ch] mt-3">Starting with the <span class="mono text-[13px]">lib/date.ts</span> edit. Tests and PR follow automatically once the diff is accepted.</div>
+                    </div>
+
+                    <div>
+                      <div class="relative pl-4 my-3"><span class="absolute left-[3px] top-3 bottom-3 w-px bg-line-strong"></span>
+                        <div class="flex items-center gap-2 py-1.5 pl-2 pr-3 rounded-[8px] bg-paper border border-line">
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-3 h-3 text-ink-muted"><path d="M9 6l6 6-6 6"/></svg>
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-3.5 h-3.5 text-ink-soft"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6ZM14 2v6h6"/></svg>
+                          <span class="mono text-[12px] text-ink-soft">edit</span>
+                          <span class="mono text-[11px] text-ink-muted truncate flex-1">lib/date.ts · pinned locale</span>
+                          <span class="mono text-[11px] text-success">+5</span>
+                          <span class="mono text-[11px] text-danger">−3</span>
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" class="w-3.5 h-3.5 text-success"><path d="M5 12l5 5 9-10"/></svg>
+                        </div>
+                      </div>
+
+                      <!-- second lightweight pointer: step completed -->
+                      <button class="mt-1 inline-flex items-center gap-2 py-1 pl-2.5 pr-2.5 rounded-[8px] bg-paper border border-dashed border-line-strong text-left hover:bg-paper">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="w-3.5 h-3.5 text-success"><path d="M5 12l5 5 9-10"/></svg>
+                        <span class="mono text-[11px] text-ink-muted uppercase tracking-[0.1em]">Plan · step 01 done</span>
+                        <span class="text-[12px] text-ink-soft">Audit hydration source</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  <!-- composer -->
+                  <div class="px-5 pt-3 pb-4 border-t border-line">
+                    <div class="rounded-[10px] border border-line bg-paper/50 p-2.5">
+                      <div class="text-[13.5px] text-ink-muted px-2 py-1">Reply to claude…<span class="caret"></span></div>
+                      <div class="flex items-center px-2 mt-1"><div class="flex items-center gap-2 text-[11px] text-ink-muted"><span class="mono">Opus 4.7</span><span>·</span><span>ask</span></div><button class="ml-auto h-7 px-3 rounded-[8px] bg-klein text-canvas text-[12px] font-medium flex items-center gap-1 shadow-card">Send<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="w-3.5 h-3.5"><path d="M5 12l7-7 7 7M12 5v14"/></svg></button></div>
+                    </div>
+                  </div>
+                </section>
+
+                <!-- ==================== RIGHT RAIL · Plan card (above Tasks) ==================== -->
+                <aside class="border-l border-line bg-paper/40 flex flex-col min-h-0">
+                  <!-- PLAN panel -->
+                  <div class="px-4 py-3 border-b border-line flex items-center gap-2">
+                    <span class="inline-flex items-center gap-1 px-1.5 h-5 rounded-[4px] border border-klein/30 bg-klein-wash text-klein-ink mono text-[10px] font-medium uppercase tracking-[0.08em]"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="w-2.5 h-2.5"><path d="M9 11l3 3 8-8"/></svg>Plan</span>
+                    <span class="mono text-[11px] text-ink-muted">2 of 5</span>
+                    <svg width="18" height="18" class="ml-auto"><circle cx="9" cy="9" r="7" fill="none" stroke="#e8e4d8" stroke-width="2.5"/><circle cx="9" cy="9" r="7" fill="none" stroke="#cc785c" stroke-width="2.5" stroke-linecap="round" stroke-dasharray="43.98" stroke-dashoffset="26.39" transform="rotate(-90 9 9)"/></svg>
+                    <button class="h-6 w-6 rounded-[6px] border border-line bg-canvas flex items-center justify-center hover:bg-paper" title="Pin"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-3 h-3 text-ink-muted"><path d="M12 17v5M7 4h10l-1 7H8Z"/></svg></button>
+                  </div>
+                  <div class="overflow-y-auto">
+                    <!-- Done group -->
+                    <div class="px-4 pt-2.5 pb-1 flex items-baseline gap-2">
+                      <span class="caps text-ink-soft">Done</span>
+                      <span class="mono text-[10.5px] text-ink-muted">· 2</span>
+                    </div>
+                    <ul class="px-2.5 space-y-0.5">
+                      <li class="flex items-start gap-2 px-1.5 py-1.5 rounded-[6px] hover:bg-canvas/60">
+                        <span class="mt-[2px] h-3.5 w-3.5 rounded-full bg-success flex items-center justify-center shrink-0"><svg viewBox="0 0 24 24" fill="none" stroke="#faf9f5" stroke-width="3.2" class="w-2 h-2"><path d="M5 12l5 5 9-10"/></svg></span>
+                        <span class="text-[12.5px] text-ink-muted line-through flex-1">Audit hydration source in <span class="mono text-[11px]">app/(marketing)</span></span>
+                        <a class="mono text-[10px] text-ink-faint hover:text-klein-ink shrink-0" href="#" title="Jump to turn">seq 18</a>
+                      </li>
+                      <li class="flex items-start gap-2 px-1.5 py-1.5 rounded-[6px] hover:bg-canvas/60">
+                        <span class="mt-[2px] h-3.5 w-3.5 rounded-full bg-success flex items-center justify-center shrink-0"><svg viewBox="0 0 24 24" fill="none" stroke="#faf9f5" stroke-width="3.2" class="w-2 h-2"><path d="M5 12l5 5 9-10"/></svg></span>
+                        <span class="text-[12.5px] text-ink-muted line-through flex-1">Decide fix strategy (option 2: pinned locale)</span>
+                        <a class="mono text-[10px] text-ink-faint hover:text-klein-ink shrink-0" href="#">seq 20</a>
+                      </li>
+                    </ul>
+
+                    <!-- Now group -->
+                    <div class="px-4 pt-3 pb-1 flex items-baseline gap-2">
+                      <span class="caps text-klein">Now</span>
+                      <span class="mono text-[10.5px] text-ink-muted">· activeForm</span>
+                    </div>
+                    <ul class="px-2.5">
+                      <li class="relative flex items-start gap-2 px-2 py-2 rounded-[8px] bg-klein-wash/40 border border-klein/25">
+                        <span class="absolute left-0 top-2 bottom-2 w-[2px] bg-klein rounded-full"></span>
+                        <span class="mt-[2px] relative h-3.5 w-3.5 rounded-full border-2 border-klein shrink-0 ml-0.5">
+                          <span class="absolute inset-[2px] rounded-full bg-klein animate-pulse"></span>
+                        </span>
+                        <div class="flex-1 min-w-0">
+                          <div class="text-[13px] font-medium text-ink leading-snug">Pinning server render locale to <span class="mono text-[12px]">en-US</span></div>
+                          <div class="text-[10.5px] text-ink-muted mt-0.5 mono flex items-center gap-1.5"><span>lib/date.ts</span><span>·</span><span>edit pending</span><span>·</span><span>0:14</span></div>
+                        </div>
+                      </li>
+                    </ul>
+
+                    <!-- Next group -->
+                    <div class="px-4 pt-3 pb-1 flex items-baseline gap-2">
+                      <span class="caps text-ink-soft">Next</span>
+                      <span class="mono text-[10.5px] text-ink-muted">· 2</span>
+                    </div>
+                    <ul class="px-2.5 space-y-0.5">
+                      <li class="flex items-start gap-2 px-1.5 py-1.5 rounded-[6px]">
+                        <span class="mt-[2px] h-3.5 w-3.5 rounded-full border-2 border-line-strong bg-canvas shrink-0"></span>
+                        <span class="text-[12.5px] text-ink flex-1">Run <span class="mono text-[11px]">pnpm vitest run --changed</span></span>
+                      </li>
+                      <li class="flex items-start gap-2 px-1.5 py-1.5 rounded-[6px]">
+                        <span class="mt-[2px] h-3.5 w-3.5 rounded-full border-2 border-line-strong bg-canvas shrink-0"></span>
+                        <span class="text-[12.5px] text-ink flex-1">Open PR against <span class="mono text-[11px]">main</span> with summary</span>
+                      </li>
+                    </ul>
+
+                    <div class="px-4 py-2.5 mt-2 border-t border-line border-b flex items-center gap-2 text-[10.5px] text-ink-muted">
+                      <span>Updated <span class="mono text-ink-soft">12s ago</span></span>
+                      <span class="ml-auto mono">TodoWrite · seq 23</span>
+                    </div>
+                  </div>
+
+                  <!-- TASKS panel (sibling, pre-existing) -->
+                  <div class="px-4 py-3 border-b border-line flex items-center">
+                    <span class="caps text-ink-muted">Tasks</span>
+                    <span class="mono text-[11px] text-ink-muted ml-auto">2 active</span>
+                  </div>
+                  <div class="p-3 space-y-2 overflow-y-auto">
+                    <div class="rounded-[8px] border border-line bg-canvas p-2.5">
+                      <div class="flex items-center gap-2"><span class="h-1.5 w-1.5 rounded-full bg-success animate-pulse"></span><span class="mono text-[11.5px] text-ink-soft truncate">edit</span><span class="mono text-[10.5px] text-ink-muted ml-auto">0:14</span></div>
+                      <div class="text-[11.5px] mono text-ink-muted mt-1 truncate">lib/date.ts · +5 −3</div>
+                    </div>
+                    <div class="rounded-[8px] border border-line bg-canvas p-2.5 opacity-80">
+                      <div class="flex items-center gap-2"><span class="h-1.5 w-1.5 rounded-full bg-ink-faint"></span><span class="mono text-[11.5px] text-ink-soft">grep</span><span class="mono text-[10.5px] text-ink-muted ml-auto">done</span></div>
+                      <div class="text-[11.5px] text-ink-muted mt-1 truncate">"Intl.DateTimeFormat" in lib/</div>
+                    </div>
+                  </div>
+                  <div class="mt-auto p-3 border-t border-line text-[10.5px] text-ink-muted flex items-center gap-2">
+                    <span>Plan pinned · rail sticky</span>
+                    <span class="ml-auto mono">live</span>
+                  </div>
+                </aside>
+
+              </div>
+            </div>
+            <div class="text-[11px] text-ink-muted max-w-[720px] text-center">Strip is the always-visible summary; right-rail Plan card is the source of truth. Chat thread only carries one-line pointers — never duplicates the list. When the rail is collapsed the strip alone stays, and clicking it opens the card as a popover.</div>
+          </div>
+
+        </div>
+
+        <!-- ==================== DESIGN NOTES · legend + states ==================== -->
+        <div class="grid md:grid-cols-3 gap-5 pb-16 max-w-[1280px] mx-auto">
+          <div class="rounded-[12px] border border-line bg-canvas p-5">
+            <div class="caps text-ink-muted mb-2">Legend · item states</div>
+            <ul class="space-y-2 text-[13px]">
+              <li class="flex items-center gap-2.5">
+                <span class="h-4 w-4 rounded-full bg-success flex items-center justify-center shrink-0"><svg viewBox="0 0 24 24" fill="none" stroke="#faf9f5" stroke-width="3" class="w-2.5 h-2.5"><path d="M5 12l5 5 9-10"/></svg></span>
+                <span class="text-ink-muted line-through">completed</span>
+                <span class="ml-auto mono text-[10.5px] text-ink-faint">content · strikethrough</span>
+              </li>
+              <li class="flex items-center gap-2.5">
+                <span class="relative h-4 w-4 rounded-full border-2 border-klein shrink-0"><span class="absolute inset-[2px] rounded-full bg-klein animate-pulse"></span></span>
+                <span class="font-medium">in progress</span>
+                <span class="ml-auto mono text-[10.5px] text-ink-faint">activeForm · bold</span>
+              </li>
+              <li class="flex items-center gap-2.5">
+                <span class="h-4 w-4 rounded-full border-2 border-line-strong bg-canvas shrink-0"></span>
+                <span class="text-ink">pending</span>
+                <span class="ml-auto mono text-[10.5px] text-ink-faint">content · ink</span>
+              </li>
+            </ul>
+          </div>
+          <div class="rounded-[12px] border border-line bg-canvas p-5">
+            <div class="caps text-ink-muted mb-2">Progress dots · fallback</div>
+            <div class="flex items-center gap-2 mb-3">
+              <span class="flex items-center gap-[3px]">
+                <span class="h-1.5 w-1.5 rounded-full bg-success"></span>
+                <span class="h-1.5 w-1.5 rounded-full bg-success"></span>
+                <span class="h-1.5 w-3.5 rounded-full bg-klein"></span>
+                <span class="h-1.5 w-1.5 rounded-full border border-line-strong"></span>
+                <span class="h-1.5 w-1.5 rounded-full border border-line-strong"></span>
+              </span>
+              <span class="mono text-[11px] text-ink-muted">≤ 8 items</span>
+            </div>
+            <div class="flex items-center gap-2 mb-3">
+              <span class="flex-1 h-1.5 rounded-full bg-line overflow-hidden"><span class="block h-full bg-klein" style="width:38%"></span></span>
+              <span class="mono text-[11px] text-ink-muted">≥ 9 items</span>
+            </div>
+            <p class="text-[12px] text-ink-muted leading-[1.5]">Dots show one-per-item while the list is short; collapse to a single progress bar when dense so the strip stays at 36–40&nbsp;px tall.</p>
+          </div>
+          <div class="rounded-[12px] border border-line bg-canvas p-5">
+            <div class="caps text-ink-muted mb-2">Empty state</div>
+            <div class="rounded-[10px] border border-dashed border-line-strong bg-paper/40 px-3 py-3 flex items-center gap-2">
+              <span class="inline-flex items-center gap-1 px-1.5 h-5 rounded-[4px] border border-line bg-canvas mono text-[10px] text-ink-muted uppercase tracking-[0.08em]">Plan</span>
+              <span class="text-[12.5px] text-ink-muted">No plan yet — Claude will write one when the task grows.</span>
+            </div>
+            <p class="mt-3 text-[12px] text-ink-muted leading-[1.5]">Strip stays visible but dims and collapses. Right-rail card shrinks to a one-line placeholder so the Tasks panel gets the space.</p>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- =========================================================
       FOOTER
     ========================================================= -->
     <footer class="border-t border-line bg-paper/40">
@@ -3194,6 +3679,7 @@
             <a class="text-ink-soft hover:text-ink" href="#s-13">13 · Subagents</a>
             <a class="text-ink-soft hover:text-ink" href="#s-14">14 · Files</a>
             <a class="text-ink-soft hover:text-ink" href="#s-15">15 · Session diff</a>
+            <a class="text-ink-soft hover:text-ink" href="#s-16">16 · Plan</a>
           </div>
           <div class="ml-auto text-[12px] text-ink-muted mono self-end">v0.1 · mockup</div>
         </div>
