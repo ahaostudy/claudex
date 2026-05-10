@@ -2,6 +2,7 @@ import type {
   Attachment,
   AuditListResponse,
   BrowseResponse,
+  BrowseReadResponse,
   ChangePasswordRequest,
   CliSessionSummary,
   CreateQueuedPromptRequest,
@@ -142,6 +143,11 @@ export const api = {
   browse(absPath: string) {
     return request<BrowseResponse>(
       `/api/browse?path=${encodeURIComponent(absPath)}`,
+    );
+  },
+  browseRead(absPath: string) {
+    return request<BrowseReadResponse>(
+      `/api/browse/read?path=${encodeURIComponent(absPath)}`,
     );
   },
   listSessions(opts?: { project?: string; archived?: boolean }) {

@@ -3,37 +3,47 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  Eye,
+  EyeOff,
   File as FileIcon,
   Folder,
+  FolderOpen,
+  HardDrive,
+  Home,
   Search,
   X,
 } from "lucide-react";
 import type {
+  BrowseEntry,
+  BrowseReadResponse,
   Project,
-  FilesTreeEntry,
-  FilesReadResponse,
-  FilesStatusResponse,
 } from "@claudex/shared";
 import { api, ApiError } from "@/api/client";
 import { AppShell } from "@/components/AppShell";
 import { cn } from "@/lib/cn";
 
 // ---------------------------------------------------------------------------
-// Files browser (mockup s-14). Read-only project file viewer.
+// Files browser (mockup s-14). Read-only, general-purpose host filesystem
+// viewer — not project-scoped. Defaults to the user's home directory and
+// supports Home / Up / Root navigation so the user can browse anywhere on
+// the host.
 //
-// Mobile: project chip + breadcrumb + tree list (one level at a time). Tap
-//   a folder to drill in; tap a file to show a preview strip below.
-// Desktop: 3-col grid [260px | 1fr | 240px] — tree | preview | meta. Follows
-//   the mockup layout; "Files is read-only" hint sits in the meta panel
-//   footer so users know claudex won't write here.
+// This used to be a project-scoped tree view keyed to a Project row, but
+// that made the Files tab useless for anyone trying to look at a file
+// outside a project they'd already registered. The tree expansion model
+// also didn't play well with crossing into directories above the project
+// root, so we collapsed it to a flat one-directory-at-a-time list — same
+// UX as FolderPicker and the @-file mention sheet, which were already
+// doing this right.
 //
 // Non-goals for this cut:
 //   - Editing (read-only only)
-//   - Full-text search across files (we only filter the loaded tree)
+//   - Full-text search across files (we only filter the current listing)
 //   - Syntax highlighting (plain <pre> with line numbers; fine for now)
+//   - Git status annotations (those live in the project-scoped /api/files/*
+//     endpoints; re-adding them here would require walking up to find a
+//     .git and running git-status per viewed directory — scope creep)
 // ---------------------------------------------------------------------------
-
-// ---- small helpers ---------------------------------------------------------
 
 function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -51,26 +61,6 @@ function formatRelTime(mtimeMs: number): string {
   if (hrs < 24) return `${hrs}h ago`;
   const days = Math.floor(hrs / 24);
   return `${days}d ago`;
-}
-
-function gitBadge(status: "M" | "A" | "D" | "R" | null) {
-  if (!status) return null;
-  const colors: Record<string, string> = {
-    M: "bg-warn/15 text-[#7a4700]",
-    A: "bg-success/15 text-success",
-    D: "bg-danger/15 text-danger",
-    R: "bg-klein/15 text-klein",
-  };
-  return (
-    <span
-      className={cn(
-        "inline-flex items-center px-1 rounded-[3px] text-[9px] font-medium uppercase tracking-[0.1em] shrink-0",
-        colors[status] ?? "bg-warn/15 text-[#7a4700]",
-      )}
-    >
-      {status}
-    </span>
-  );
 }
 
 /** Copy text to the clipboard with an HTTP (non-secure-context) fallback.
@@ -101,41 +91,105 @@ function fallbackCopy(text: string) {
   ta.remove();
 }
 
-// ---- tree node model --------------------------------------------------------
-
-interface TreeNode {
-  entry: FilesTreeEntry;
-  depth: number;
-  expanded: boolean;
+function errorMessage(code: string): string {
+  switch (code) {
+    case "not_absolute":
+      return "Path must be absolute.";
+    case "not_found":
+      return "This path does not exist on the host.";
+    case "not_a_directory":
+      return "That path is a file, not a folder.";
+    case "is_a_directory":
+      return "That path is a folder, not a file.";
+    case "permission_denied":
+      return "Permission denied. The server can't read this path.";
+    case "binary_file":
+      return "Binary file — no preview available.";
+    default:
+      return `Couldn't load this path (${code}).`;
+  }
 }
 
 // ---- screen ----------------------------------------------------------------
 
+interface BrowseData {
+  path: string;
+  parent: string | null;
+  entries: BrowseEntry[];
+}
+
 export function FilesScreen() {
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(
-    null,
-  );
-  const [treeNodes, setTreeNodes] = useState<TreeNode[]>([]);
-  const [treeLoading, setTreeLoading] = useState(false);
-  const [treeError, setTreeError] = useState<string | null>(null);
-  const [selectedRelPath, setSelectedRelPath] = useState<string | null>(null);
-  const [fileData, setFileData] = useState<FilesReadResponse | null>(null);
+  // current directory the listing is showing
+  const [currentPath, setCurrentPath] = useState<string | null>(null);
+  const [browse, setBrowse] = useState<BrowseData | null>(null);
+  const [listLoading, setListLoading] = useState(false);
+  const [listError, setListError] = useState<string | null>(null);
+
+  // selected file preview
+  const [selectedFilePath, setSelectedFilePath] = useState<string | null>(null);
+  const [fileData, setFileData] = useState<BrowseReadResponse | null>(null);
   const [fileLoading, setFileLoading] = useState(false);
   const [fileError, setFileError] = useState<string | null>(null);
-  const [gitStatus, setGitStatus] = useState<FilesStatusResponse | null>(null);
-  const [searchQuery, setSearchQuery] = useState("");
 
+  // projects (for the "jump to project" dropdown — a convenience, not the
+  // primary nav anymore)
+  const [projects, setProjects] = useState<Project[]>([]);
+
+  const [searchQuery, setSearchQuery] = useState("");
+  const [showHidden, setShowHidden] = useState(false);
+
+  // First render: fetch user's home directory and land there.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const home = await api.browseHome();
+        if (cancelled) return;
+        setCurrentPath(home.path);
+      } catch {
+        // Very unlikely, but if /api/browse/home fails we still try "/" so
+        // the screen isn't permanently stuck.
+        if (!cancelled) setCurrentPath("/");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Load listing whenever `currentPath` changes.
+  useEffect(() => {
+    if (!currentPath) return;
+    let cancelled = false;
+    setListLoading(true);
+    setListError(null);
+    // Reset search when changing directories — stale filter would hide
+    // everything in the new folder.
+    setSearchQuery("");
+    (async () => {
+      try {
+        const res = await api.browse(currentPath);
+        if (cancelled) return;
+        setBrowse(res);
+      } catch (e) {
+        if (cancelled) return;
+        setListError(e instanceof ApiError ? e.code : "load_failed");
+      } finally {
+        if (!cancelled) setListLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [currentPath]);
+
+  // Best-effort: load projects once so the "jump to project" dropdown works.
   useEffect(() => {
     let cancelled = false;
     api
       .listProjects()
       .then((r) => {
-        if (cancelled) return;
-        setProjects(r.projects);
-        if (r.projects.length > 0 && !selectedProjectId) {
-          setSelectedProjectId(r.projects[0].id);
-        }
+        if (!cancelled) setProjects(r.projects);
       })
       .catch(() => {
         /* best-effort */
@@ -143,248 +197,166 @@ export function FilesScreen() {
     return () => {
       cancelled = true;
     };
-    // intentionally only on mount
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const loadRoot = useCallback(async (projectId: string) => {
-    setTreeLoading(true);
-    setTreeError(null);
+  const openFile = useCallback(async (absPath: string) => {
+    setSelectedFilePath(absPath);
+    setFileLoading(true);
+    setFileError(null);
     try {
-      const res = await api.filesTree(projectId, "");
-      const nodes: TreeNode[] = res.entries.map((e) => ({
-        entry: e,
-        depth: 0,
-        expanded: false,
-      }));
-      setTreeNodes(nodes);
+      const res = await api.browseRead(absPath);
+      setFileData(res);
     } catch (e) {
-      setTreeError(e instanceof ApiError ? e.code : "load_failed");
+      setFileError(
+        e instanceof ApiError ? errorMessage(e.code) : "Couldn't load this file.",
+      );
+      setFileData(null);
     } finally {
-      setTreeLoading(false);
+      setFileLoading(false);
     }
   }, []);
 
-  useEffect(() => {
-    if (!selectedProjectId) return;
-    setTreeNodes([]);
-    setSelectedRelPath(null);
-    setFileData(null);
-    setFileError(null);
-    setSearchQuery("");
-    void loadRoot(selectedProjectId);
-    api.filesStatus(selectedProjectId).then(setGitStatus).catch(() => {});
-  }, [selectedProjectId, loadRoot]);
-
-  /** Toggle a folder node's expand state. On expand, fetch the folder's
-   *  immediate children and splice them in right after the parent row, so
-   *  the flat list reads like an indented tree. On collapse, remove every
-   *  row with depth > parent.depth that comes after the parent until we
-   *  hit a row of equal or shallower depth. */
-  const toggleFolder = useCallback(
-    async (idx: number) => {
-      if (!selectedProjectId) return;
-      const node = treeNodes[idx];
-      if (!node) return;
-      if (node.expanded) {
-        setTreeNodes((prev) => {
-          const next = [...prev];
-          next[idx] = { ...node, expanded: false };
-          let i = idx + 1;
-          while (i < next.length && next[i].depth > node.depth) {
-            next.splice(i, 1);
-          }
-          return next;
-        });
-        return;
-      }
-      try {
-        const res = await api.filesTree(selectedProjectId, node.entry.relPath);
-        const children: TreeNode[] = res.entries.map((e) => ({
-          entry: e,
-          depth: node.depth + 1,
-          expanded: false,
-        }));
-        setTreeNodes((prev) => {
-          const next = [...prev];
-          next[idx] = { ...node, expanded: true };
-          next.splice(idx + 1, 0, ...children);
-          return next;
-        });
-      } catch {
-        /* silently fail the expand */
-      }
-    },
-    [selectedProjectId, treeNodes],
-  );
-
-  const openFile = useCallback(
-    async (relPath: string) => {
-      if (!selectedProjectId) return;
-      setSelectedRelPath(relPath);
-      setFileLoading(true);
-      setFileError(null);
-      try {
-        const res = await api.filesRead(selectedProjectId, relPath);
-        setFileData(res);
-      } catch (e) {
-        setFileError(
-          e instanceof ApiError && e.code === "binary_file"
-            ? "Binary file — no preview available"
-            : e instanceof ApiError
-              ? e.code
-              : "load_failed",
-        );
-        setFileData(null);
-      } finally {
-        setFileLoading(false);
-      }
-    },
-    [selectedProjectId],
-  );
-
-  // Dismiss the preview and return to the tree. Called by the mobile
-  // preview sheet's back button. We clear `selectedRelPath` so the sheet
-  // unmounts, plus `fileData`/`fileError` so stale content doesn't flash
-  // the next time the user taps a different file.
   const closePreview = useCallback(() => {
-    setSelectedRelPath(null);
+    setSelectedFilePath(null);
     setFileData(null);
     setFileError(null);
   }, []);
 
-  const selectedProject = useMemo(
-    () => projects.find((p) => p.id === selectedProjectId) ?? null,
-    [projects, selectedProjectId],
-  );
+  const goHome = useCallback(async () => {
+    try {
+      const home = await api.browseHome();
+      setCurrentPath(home.path);
+    } catch {
+      /* ignore — toolbar button is best-effort */
+    }
+  }, []);
 
-  const visibleNodes = searchQuery.trim()
-    ? treeNodes.filter((n) =>
-        n.entry.name.toLowerCase().includes(searchQuery.toLowerCase()),
-      )
-    : treeNodes;
+  const goRoot = useCallback(() => {
+    // POSIX filesystem root. Windows users would need a drive letter here
+    // but claudex is a Mac/Linux-first product and "/" is the right default.
+    setCurrentPath("/");
+  }, []);
+
+  const goUp = useCallback(() => {
+    if (browse?.parent) setCurrentPath(browse.parent);
+  }, [browse]);
+
+  const goToProject = useCallback((projectPath: string) => {
+    setCurrentPath(projectPath);
+  }, []);
+
+  const visibleEntries = useMemo(() => {
+    if (!browse) return [] as BrowseEntry[];
+    const base = browse.entries.filter((e) => showHidden || !e.isHidden);
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return base;
+    return base.filter((e) => e.name.toLowerCase().includes(q));
+  }, [browse, showHidden, searchQuery]);
+
+  const hiddenCount = browse
+    ? browse.entries.filter((e) => e.isHidden).length
+    : 0;
 
   return (
     <AppShell tab="files">
       {/* Mobile */}
       <div className="flex-1 min-h-0 flex flex-col md:hidden overflow-hidden">
         <MobileFilesView
-          projects={projects}
-          selectedProject={selectedProject}
-          selectedProjectId={selectedProjectId}
-          onSelectProject={setSelectedProjectId}
-          selectedRelPath={selectedRelPath}
-          gitStatus={gitStatus}
-          treeNodes={visibleNodes}
-          treeLoading={treeLoading}
-          treeError={treeError}
+          currentPath={currentPath}
+          browse={browse}
+          listLoading={listLoading}
+          listError={listError}
+          visibleEntries={visibleEntries}
+          hiddenCount={hiddenCount}
+          showHidden={showHidden}
+          onToggleHidden={() => setShowHidden((v) => !v)}
           searchQuery={searchQuery}
           onSearchChange={setSearchQuery}
-          onToggleFolder={toggleFolder}
-          onOpenFile={openFile}
-          onClosePreview={closePreview}
+          selectedFilePath={selectedFilePath}
           fileData={fileData}
           fileLoading={fileLoading}
           fileError={fileError}
+          onNavigate={setCurrentPath}
+          onOpenFile={openFile}
+          onClosePreview={closePreview}
+          onHome={goHome}
+          onRoot={goRoot}
+          onUp={goUp}
+          projects={projects}
+          onGoToProject={goToProject}
         />
       </div>
       {/* Desktop */}
       <div className="hidden md:flex flex-1 min-h-0 overflow-hidden">
         <DesktopFilesView
-          projects={projects}
-          selectedProject={selectedProject}
-          selectedProjectId={selectedProjectId}
-          onSelectProject={setSelectedProjectId}
-          selectedRelPath={selectedRelPath}
-          gitStatus={gitStatus}
-          treeNodes={visibleNodes}
-          treeLoading={treeLoading}
-          treeError={treeError}
+          currentPath={currentPath}
+          browse={browse}
+          listLoading={listLoading}
+          listError={listError}
+          visibleEntries={visibleEntries}
+          hiddenCount={hiddenCount}
+          showHidden={showHidden}
+          onToggleHidden={() => setShowHidden((v) => !v)}
           searchQuery={searchQuery}
           onSearchChange={setSearchQuery}
-          onToggleFolder={toggleFolder}
-          onOpenFile={openFile}
-          onClosePreview={closePreview}
+          selectedFilePath={selectedFilePath}
           fileData={fileData}
           fileLoading={fileLoading}
           fileError={fileError}
+          onNavigate={setCurrentPath}
+          onOpenFile={openFile}
+          onClosePreview={closePreview}
+          onHome={goHome}
+          onRoot={goRoot}
+          onUp={goUp}
+          projects={projects}
+          onGoToProject={goToProject}
         />
       </div>
     </AppShell>
   );
 }
 
-// ---- tree row (shared between mobile + desktop) ----------------------------
+// ---- shared row ------------------------------------------------------------
 
-interface TreeRowProps {
-  entry: FilesTreeEntry;
-  indent: number;
-  active: boolean;
-  expanded: boolean;
-  onClick: () => void;
-  variant: "mobile" | "desktop";
-}
-
-function TreeRow({
+function EntryRow({
   entry,
-  indent,
   active,
-  expanded,
   onClick,
   variant,
-}: TreeRowProps) {
+}: {
+  entry: BrowseEntry;
+  active: boolean;
+  onClick: () => void;
+  variant: "mobile" | "desktop";
+}) {
   const isMobile = variant === "mobile";
-  const basePad = isMobile ? 16 : 12;
-  const perLevel = isMobile ? 20 : 16;
-  const paddingLeft = basePad + indent * perLevel;
-
   return (
     <button
       type="button"
       onClick={onClick}
       className={cn(
-        "w-full flex items-center gap-1.5 pr-3 text-left border-l-2",
-        isMobile ? "py-2 text-[14px]" : "py-1 text-[13px]",
+        "w-full flex items-center gap-3 text-left border-l-2",
+        isMobile ? "px-4 py-2.5 text-[14px]" : "px-3 py-1.5 text-[13px]",
         active
           ? "bg-klein-wash/50 border-l-klein"
           : "hover:bg-canvas/60 border-l-transparent",
       )}
-      style={{ paddingLeft }}
     >
       {entry.isDir ? (
-        <>
-          {expanded ? (
-            <ChevronDown
-              className={cn(
-                "shrink-0 text-ink-muted",
-                isMobile ? "w-3.5 h-3.5" : "w-3 h-3",
-              )}
-            />
-          ) : (
-            <ChevronRight
-              className={cn(
-                "shrink-0 text-ink-muted",
-                isMobile ? "w-3.5 h-3.5" : "w-3 h-3",
-              )}
-            />
+        <Folder
+          className={cn(
+            "shrink-0 text-klein",
+            isMobile ? "w-4 h-4" : "w-3.5 h-3.5",
           )}
-          <Folder
-            className={cn(
-              "shrink-0 text-klein",
-              isMobile ? "w-4 h-4" : "w-3.5 h-3.5",
-            )}
-          />
-        </>
+        />
       ) : (
-        <>
-          <span className={cn("shrink-0", isMobile ? "w-3.5 h-3.5" : "w-3 h-3")} />
-          <FileIcon
-            className={cn(
-              "shrink-0 text-ink-faint",
-              isMobile ? "w-4 h-4" : "w-3.5 h-3.5",
-            )}
-          />
-        </>
+        <FileIcon
+          className={cn(
+            "shrink-0 text-ink-faint",
+            isMobile ? "w-4 h-4" : "w-3.5 h-3.5",
+          )}
+        />
       )}
       <span
         className={cn(
@@ -394,32 +366,214 @@ function TreeRow({
       >
         {entry.name}
       </span>
-      {gitBadge(entry.gitStatus)}
-      {entry.additions !== null && entry.additions > 0 && (
-        <span className="mono text-[10px] text-success">+{entry.additions}</span>
+      {!entry.isDir && entry.size !== undefined && (
+        <span className="mono text-[10px] text-ink-faint shrink-0">
+          {formatSize(entry.size)}
+        </span>
       )}
-      {entry.deletions !== null && entry.deletions > 0 && (
-        <span className="mono text-[10px] text-danger">−{entry.deletions}</span>
+      {entry.isDir && (
+        <ChevronRight className="w-3.5 h-3.5 text-ink-faint shrink-0" />
       )}
-      {!entry.isDir &&
-        entry.gitStatus === null &&
-        entry.size !== undefined && (
-          <span className="mono text-[10px] text-ink-faint">
-            {formatSize(entry.size)}
-          </span>
-        )}
     </button>
   );
 }
 
-// ---- preview panel with line numbers ---------------------------------------
+// ---- toolbar ---------------------------------------------------------------
+
+function Toolbar({
+  onHome,
+  onRoot,
+  onUp,
+  canUp,
+  showHidden,
+  onToggleHidden,
+  hiddenCount,
+  compact,
+}: {
+  onHome: () => void;
+  onRoot: () => void;
+  onUp: () => void;
+  canUp: boolean;
+  showHidden: boolean;
+  onToggleHidden: () => void;
+  hiddenCount: number;
+  compact?: boolean;
+}) {
+  const size = compact ? "h-7 px-2 text-[11px]" : "h-8 px-2.5 text-[12px]";
+  return (
+    <div className="flex items-center gap-1.5 overflow-x-auto">
+      <ToolbarButton onClick={onHome} icon={<Home className="w-3.5 h-3.5" />} label="Home" size={size} />
+      <ToolbarButton onClick={onRoot} icon={<HardDrive className="w-3.5 h-3.5" />} label="Root" size={size} />
+      <ToolbarButton
+        onClick={canUp ? onUp : undefined}
+        icon={<ChevronRight className="w-3.5 h-3.5 rotate-180" />}
+        label="Up"
+        disabled={!canUp}
+        size={size}
+      />
+      <button
+        onClick={onToggleHidden}
+        className={cn(
+          "inline-flex items-center gap-1.5 rounded-[6px] border border-line bg-paper text-ink-soft shrink-0",
+          size,
+        )}
+      >
+        {showHidden ? (
+          <EyeOff className="w-3.5 h-3.5" />
+        ) : (
+          <Eye className="w-3.5 h-3.5" />
+        )}
+        {showHidden ? "Hide dotfiles" : `Dotfiles (${hiddenCount})`}
+      </button>
+    </div>
+  );
+}
+
+function ToolbarButton({
+  onClick,
+  icon,
+  label,
+  disabled,
+  size,
+}: {
+  onClick?: () => void;
+  icon: React.ReactNode;
+  label: string;
+  disabled?: boolean;
+  size: string;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      className={cn(
+        "inline-flex items-center gap-1.5 rounded-[6px] border border-line shrink-0",
+        size,
+        disabled
+          ? "bg-paper/40 text-ink-faint cursor-not-allowed"
+          : "bg-canvas text-ink-soft hover:bg-paper/60",
+      )}
+    >
+      {icon}
+      {label}
+    </button>
+  );
+}
+
+function ProjectJumpSelect({
+  projects,
+  onGoToProject,
+  compact,
+}: {
+  projects: Project[];
+  onGoToProject: (path: string) => void;
+  compact?: boolean;
+}) {
+  if (projects.length === 0) return null;
+  return (
+    <div className="relative shrink-0">
+      <select
+        value=""
+        onChange={(e) => {
+          const pr = projects.find((p) => p.id === e.target.value);
+          if (pr) onGoToProject(pr.path);
+          // reset so the same option can be selected again
+          e.target.value = "";
+        }}
+        className={cn(
+          "appearance-none pl-2.5 pr-7 rounded-[6px] bg-paper border border-line mono cursor-pointer",
+          compact ? "h-7 text-[11px]" : "h-8 text-[12px]",
+        )}
+        title="Jump to a project's root"
+      >
+        <option value="">Jump to project…</option>
+        {projects.map((pr) => (
+          <option key={pr.id} value={pr.id}>
+            {pr.name}
+          </option>
+        ))}
+      </select>
+      <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2">
+        <ChevronDown className="w-3.5 h-3.5 text-ink-muted" />
+      </span>
+    </div>
+  );
+}
+
+// ---- breadcrumb ------------------------------------------------------------
+//
+// Turns `/Users/haowu/Code/AI/claudex` into a set of clickable segments. Each
+// segment navigates to the absolute path up to and including itself. The
+// leading "/" is rendered as its own clickable root segment so the user can
+// jump straight to `/` from anywhere.
+
+interface Crumb {
+  label: string;
+  path: string;
+}
+
+function buildCrumbs(absPath: string): Crumb[] {
+  if (!absPath || absPath === "/") {
+    return [{ label: "/", path: "/" }];
+  }
+  const parts = absPath.split("/").filter(Boolean);
+  const crumbs: Crumb[] = [{ label: "/", path: "/" }];
+  let acc = "";
+  for (const p of parts) {
+    acc += "/" + p;
+    crumbs.push({ label: p, path: acc });
+  }
+  return crumbs;
+}
+
+function Breadcrumb({
+  path,
+  onNavigate,
+  className,
+}: {
+  path: string;
+  onNavigate: (p: string) => void;
+  className?: string;
+}) {
+  const crumbs = buildCrumbs(path);
+  return (
+    <div
+      className={cn(
+        "flex items-center gap-1 overflow-x-auto mono text-[11.5px] text-ink-muted",
+        className,
+      )}
+    >
+      {crumbs.map((c, i) => {
+        const last = i === crumbs.length - 1;
+        return (
+          <span key={c.path} className="inline-flex items-center gap-1 shrink-0">
+            <button
+              type="button"
+              onClick={() => onNavigate(c.path)}
+              className={cn(
+                "hover:text-ink",
+                last && "text-ink",
+              )}
+              title={c.path}
+            >
+              {c.label}
+            </button>
+            {!last && <span className="text-ink-faint">/</span>}
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
+// ---- preview panel ---------------------------------------------------------
 
 function PreviewPanel({
   fileData,
   loading,
   error,
 }: {
-  fileData: FilesReadResponse | null;
+  fileData: BrowseReadResponse | null;
   loading: boolean;
   error: string | null;
 }) {
@@ -472,122 +626,116 @@ function PreviewPanel({
 // ---- mobile view -----------------------------------------------------------
 
 interface FilesViewProps {
-  projects: Project[];
-  selectedProject: Project | null;
-  selectedProjectId: string | null;
-  onSelectProject: (id: string) => void;
-  selectedRelPath: string | null;
-  gitStatus: FilesStatusResponse | null;
-  treeNodes: TreeNode[];
-  treeLoading: boolean;
-  treeError: string | null;
+  currentPath: string | null;
+  browse: BrowseData | null;
+  listLoading: boolean;
+  listError: string | null;
+  visibleEntries: BrowseEntry[];
+  hiddenCount: number;
+  showHidden: boolean;
+  onToggleHidden: () => void;
   searchQuery: string;
   onSearchChange: (q: string) => void;
-  onToggleFolder: (idx: number) => void;
-  onOpenFile: (relPath: string) => void;
-  onClosePreview: () => void;
-  fileData: FilesReadResponse | null;
+  selectedFilePath: string | null;
+  fileData: BrowseReadResponse | null;
   fileLoading: boolean;
   fileError: string | null;
+  onNavigate: (absPath: string) => void;
+  onOpenFile: (absPath: string) => void;
+  onClosePreview: () => void;
+  onHome: () => void;
+  onRoot: () => void;
+  onUp: () => void;
+  projects: Project[];
+  onGoToProject: (path: string) => void;
 }
 
 function MobileFilesView(p: FilesViewProps) {
   return (
     <div className="relative flex-1 min-h-0 flex flex-col overflow-hidden">
-      <div className="px-4 pt-3 pb-3 bg-canvas/95 backdrop-blur border-b border-line shrink-0">
-        <div className="flex items-center gap-2">
-          <div className="relative">
-            <select
-              value={p.selectedProjectId ?? ""}
-              onChange={(e) => p.onSelectProject(e.target.value)}
-              className="appearance-none h-9 pl-2.5 pr-6 rounded-[8px] bg-paper border border-line mono text-[12px] cursor-pointer"
-            >
-              {p.projects.length === 0 && <option value="">No projects</option>}
-              {p.projects.map((pr) => (
-                <option key={pr.id} value={pr.id}>
-                  {pr.name}
-                </option>
-              ))}
-            </select>
-            <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2">
-              <ChevronDown className="w-3.5 h-3.5 text-ink-muted" />
-            </span>
-          </div>
-          <div className="flex-1 flex items-center gap-2 h-9 px-3 bg-paper border border-line rounded-[8px]">
-            <Search className="w-3.5 h-3.5 text-ink-muted shrink-0" />
-            <input
-              type="text"
-              placeholder="Find file by name…"
-              value={p.searchQuery}
-              onChange={(e) => p.onSearchChange(e.target.value)}
-              className="flex-1 bg-transparent text-[13px] text-ink outline-none placeholder:text-ink-muted"
+      <div className="px-3 pt-3 pb-2 bg-canvas/95 backdrop-blur border-b border-line shrink-0 space-y-2">
+        {/* Breadcrumb row */}
+        <Breadcrumb
+          path={p.currentPath ?? ""}
+          onNavigate={p.onNavigate}
+          className="px-1"
+        />
+        {/* Toolbar + project jump */}
+        <div className="flex items-center gap-1.5 overflow-x-auto">
+          <Toolbar
+            onHome={p.onHome}
+            onRoot={p.onRoot}
+            onUp={p.onUp}
+            canUp={!!p.browse?.parent}
+            showHidden={p.showHidden}
+            onToggleHidden={p.onToggleHidden}
+            hiddenCount={p.hiddenCount}
+          />
+          <div className="ml-auto">
+            <ProjectJumpSelect
+              projects={p.projects}
+              onGoToProject={p.onGoToProject}
             />
-            {p.searchQuery && (
-              <button
-                type="button"
-                onClick={() => p.onSearchChange("")}
-                className="text-ink-muted"
-                aria-label="Clear search"
-              >
-                <X className="w-3.5 h-3.5" />
-              </button>
-            )}
           </div>
+        </div>
+        {/* Search */}
+        <div className="flex items-center gap-2 h-9 px-3 bg-paper border border-line rounded-[8px]">
+          <Search className="w-3.5 h-3.5 text-ink-muted shrink-0" />
+          <input
+            type="text"
+            placeholder="Filter this folder…"
+            value={p.searchQuery}
+            onChange={(e) => p.onSearchChange(e.target.value)}
+            className="flex-1 bg-transparent text-[13px] text-ink outline-none placeholder:text-ink-muted"
+          />
+          {p.searchQuery && (
+            <button
+              type="button"
+              onClick={() => p.onSearchChange("")}
+              className="text-ink-muted"
+              aria-label="Clear search"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          )}
         </div>
       </div>
 
       <div className="flex-1 min-h-0 overflow-y-auto">
-        {p.gitStatus && p.gitStatus.isGitRepo && (
-          <div className="px-4 py-2.5 bg-paper/60 flex items-center gap-2 text-[11px] border-b border-line/60">
-            <span className="caps text-ink-muted">working tree</span>
-            <span className="mono text-ink-soft">
-              <span className="text-success">+{p.gitStatus.totalAdditions}</span>{" "}
-              <span className="text-danger">−{p.gitStatus.totalDeletions}</span>
-            </span>
-            <span className="ml-auto mono text-ink-muted">
-              {p.gitStatus.changedCount} changed
-            </span>
-          </div>
-        )}
-        {p.treeLoading && (
+        {p.listLoading && (
           <div className="px-4 py-4 text-[13px] text-ink-muted mono">loading…</div>
         )}
-        {p.treeError && (
-          <div className="px-4 py-4 text-[13px] text-danger mono">{p.treeError}</div>
-        )}
-        {!p.treeLoading && p.treeNodes.length === 0 && !p.searchQuery && (
-          <div className="px-4 py-4 text-[13px] text-ink-muted">
-            {p.projects.length === 0 ? "No projects added yet." : "Empty directory."}
+        {p.listError && !p.listLoading && (
+          <div className="px-4 py-4 text-[13px] text-danger mono">
+            {errorMessage(p.listError)}
           </div>
         )}
-        {!p.treeLoading &&
-          p.treeNodes.map((node, idx) => (
-            <TreeRow
-              key={`${node.entry.relPath}::${idx}`}
-              entry={node.entry}
-              indent={node.depth}
-              active={p.selectedRelPath === node.entry.relPath}
-              expanded={node.expanded}
+        {!p.listLoading && !p.listError && p.visibleEntries.length === 0 && (
+          <div className="px-4 py-6 text-[13px] text-ink-muted text-center">
+            {p.browse?.entries.length === 0
+              ? "This folder is empty."
+              : p.searchQuery
+              ? `Nothing in this folder matches “${p.searchQuery}”.`
+              : "No visible entries. Toggle dotfiles to see hidden items."}
+          </div>
+        )}
+        {!p.listLoading &&
+          p.visibleEntries.map((e) => (
+            <EntryRow
+              key={e.path}
+              entry={e}
+              active={p.selectedFilePath === e.path}
               onClick={() =>
-                node.entry.isDir
-                  ? void p.onToggleFolder(idx)
-                  : void p.onOpenFile(node.entry.relPath)
+                e.isDir ? p.onNavigate(e.path) : p.onOpenFile(e.path)
               }
               variant="mobile"
             />
           ))}
       </div>
 
-      {/* Mobile file preview — overlay sheet. The previous inline strip
-          below the tree was invisible on any non-trivial tree (preview
-          rendered way below the user's scroll position, so tapping a file
-          looked like a no-op). A full-height sheet slid over the tree is
-          what a phone-first file browser expects anyway. Close button
-          returns to the tree; state persists so re-opening scrolls the
-          same tree back into view. */}
-      {(p.fileData || p.fileLoading || p.fileError) && p.selectedRelPath && (
+      {(p.fileData || p.fileLoading || p.fileError) && p.selectedFilePath && (
         <MobilePreviewSheet
-          relPath={p.selectedRelPath}
+          absPath={p.selectedFilePath}
           fileData={p.fileData}
           loading={p.fileLoading}
           error={p.fileError}
@@ -599,14 +747,14 @@ function MobileFilesView(p: FilesViewProps) {
 }
 
 function MobilePreviewSheet({
-  relPath,
+  absPath,
   fileData,
   loading,
   error,
   onClose,
 }: {
-  relPath: string;
-  fileData: FilesReadResponse | null;
+  absPath: string;
+  fileData: BrowseReadResponse | null;
   loading: boolean;
   error: string | null;
   onClose: () => void;
@@ -623,7 +771,9 @@ function MobilePreviewSheet({
           <ChevronLeft className="w-4 h-4" />
         </button>
         <div className="min-w-0 flex-1">
-          <div className="mono text-[13px] truncate">{relPath}</div>
+          <div className="mono text-[13px] truncate" title={absPath}>
+            {fileData?.name ?? absPath.split("/").pop() ?? absPath}
+          </div>
           {fileData && (
             <div className="mono text-[11px] text-ink-muted truncate">
               {fileData.lines} lines · {formatSize(fileData.sizeBytes)}
@@ -631,15 +781,13 @@ function MobilePreviewSheet({
             </div>
           )}
         </div>
-        {fileData && (
-          <button
-            type="button"
-            className="h-8 px-2.5 rounded-[8px] border border-line bg-canvas text-[12px] shrink-0"
-            onClick={() => copyText(fileData.relPath)}
-          >
-            Copy path
-          </button>
-        )}
+        <button
+          type="button"
+          className="h-8 px-2.5 rounded-[8px] border border-line bg-canvas text-[12px] shrink-0"
+          onClick={() => copyText(absPath)}
+        >
+          Copy path
+        </button>
       </header>
       <div className="flex-1 min-h-0 overflow-auto bg-canvas">
         {loading && (
@@ -683,91 +831,88 @@ function MobilePreviewSheet({
 
 function DesktopFilesView(p: FilesViewProps) {
   return (
-    <div className="flex-1 min-h-0 grid grid-cols-[260px_minmax(0,1fr)_240px] overflow-hidden">
-      {/* Left: tree */}
+    <div className="flex-1 min-h-0 grid grid-cols-[300px_minmax(0,1fr)_240px] overflow-hidden">
+      {/* Left: listing */}
       <aside className="border-r border-line bg-paper/40 flex flex-col overflow-hidden">
-        <div className="px-4 py-3 border-b border-line flex items-center gap-2 shrink-0">
-          <span className="h-1.5 w-1.5 rounded-full bg-klein shrink-0" />
-          <select
-            value={p.selectedProjectId ?? ""}
-            onChange={(e) => p.onSelectProject(e.target.value)}
-            className="flex-1 bg-transparent mono text-[12px] outline-none cursor-pointer truncate"
-          >
-            {p.projects.length === 0 && <option value="">No projects</option>}
-            {p.projects.map((pr) => (
-              <option key={pr.id} value={pr.id}>
-                {pr.name}
-              </option>
-            ))}
-          </select>
-          {p.gitStatus?.branch && (
-            <span className="mono text-[11px] text-ink-muted shrink-0">
-              {p.gitStatus.branch}
-            </span>
-          )}
-        </div>
-        <div className="px-3 py-2 border-b border-line shrink-0">
-          <div className="flex items-center gap-2 h-8 px-2.5 bg-canvas border border-line rounded-[6px]">
-            <Search className="w-3.5 h-3.5 text-ink-muted shrink-0" />
-            <input
-              type="text"
-              placeholder="Find file…"
-              value={p.searchQuery}
-              onChange={(e) => p.onSearchChange(e.target.value)}
-              className="flex-1 bg-transparent text-[12px] text-ink outline-none placeholder:text-ink-muted"
+        <div className="px-3 py-2.5 border-b border-line shrink-0 space-y-2">
+          <div className="flex items-center gap-2">
+            <FolderOpen className="w-3.5 h-3.5 text-klein shrink-0" />
+            <Breadcrumb
+              path={p.currentPath ?? ""}
+              onNavigate={p.onNavigate}
+              className="flex-1 min-w-0"
             />
-            {p.searchQuery && (
-              <button
-                type="button"
-                onClick={() => p.onSearchChange("")}
-                className="text-ink-muted"
-                aria-label="Clear search"
-              >
-                <X className="w-3 h-3" />
-              </button>
-            )}
+          </div>
+          <div className="flex items-center gap-1.5">
+            <Toolbar
+              onHome={p.onHome}
+              onRoot={p.onRoot}
+              onUp={p.onUp}
+              canUp={!!p.browse?.parent}
+              showHidden={p.showHidden}
+              onToggleHidden={p.onToggleHidden}
+              hiddenCount={p.hiddenCount}
+              compact
+            />
+          </div>
+          <div className="flex items-center gap-1.5">
+            <ProjectJumpSelect
+              projects={p.projects}
+              onGoToProject={p.onGoToProject}
+              compact
+            />
+            <div className="flex-1 flex items-center gap-2 h-7 px-2.5 bg-canvas border border-line rounded-[6px]">
+              <Search className="w-3.5 h-3.5 text-ink-muted shrink-0" />
+              <input
+                type="text"
+                placeholder="Filter…"
+                value={p.searchQuery}
+                onChange={(e) => p.onSearchChange(e.target.value)}
+                className="flex-1 bg-transparent text-[12px] text-ink outline-none placeholder:text-ink-muted"
+              />
+              {p.searchQuery && (
+                <button
+                  type="button"
+                  onClick={() => p.onSearchChange("")}
+                  className="text-ink-muted"
+                  aria-label="Clear search"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              )}
+            </div>
           </div>
         </div>
-        <div className="flex-1 min-h-0 overflow-y-auto py-2 text-[13px]">
-          {p.treeLoading && (
+        <div className="flex-1 min-h-0 overflow-y-auto py-1">
+          {p.listLoading && (
             <div className="px-3 py-2 text-[12px] text-ink-muted mono">loading…</div>
           )}
-          {p.treeError && (
-            <div className="px-3 py-2 text-[12px] text-danger mono">{p.treeError}</div>
+          {p.listError && !p.listLoading && (
+            <div className="px-3 py-2 text-[12px] text-danger mono">
+              {errorMessage(p.listError)}
+            </div>
           )}
-          {!p.treeLoading &&
-            p.treeNodes.map((node, idx) => (
-              <TreeRow
-                key={`${node.entry.relPath}::${idx}`}
-                entry={node.entry}
-                indent={node.depth}
-                active={p.selectedRelPath === node.entry.relPath}
-                expanded={node.expanded}
+          {!p.listLoading && !p.listError && p.visibleEntries.length === 0 && (
+            <div className="px-3 py-4 text-[12px] text-ink-muted text-center">
+              {p.browse?.entries.length === 0
+                ? "This folder is empty."
+                : p.searchQuery
+                ? `Nothing matches “${p.searchQuery}”.`
+                : "No visible entries."}
+            </div>
+          )}
+          {!p.listLoading &&
+            p.visibleEntries.map((e) => (
+              <EntryRow
+                key={e.path}
+                entry={e}
+                active={p.selectedFilePath === e.path}
                 onClick={() =>
-                  node.entry.isDir
-                    ? void p.onToggleFolder(idx)
-                    : void p.onOpenFile(node.entry.relPath)
+                  e.isDir ? p.onNavigate(e.path) : p.onOpenFile(e.path)
                 }
                 variant="desktop"
               />
             ))}
-        </div>
-        <div className="px-4 py-2 border-t border-line flex items-center gap-2 text-[11px] text-ink-muted shrink-0">
-          {p.gitStatus && p.gitStatus.isGitRepo ? (
-            <>
-              <span className="mono">
-                <span className="text-success">+{p.gitStatus.totalAdditions}</span>{" "}
-                <span className="text-danger">−{p.gitStatus.totalDeletions}</span>
-              </span>
-              <span className="ml-auto mono">
-                {p.gitStatus.changedCount} changed
-              </span>
-            </>
-          ) : (
-            <span className="text-ink-faint">
-              {p.selectedProject ? "No git repo" : "Select a project"}
-            </span>
-          )}
         </div>
       </aside>
 
@@ -778,25 +923,14 @@ function DesktopFilesView(p: FilesViewProps) {
             <div className="px-5 py-3 border-b border-line flex items-center gap-3 shrink-0">
               <FileIcon className="w-3.5 h-3.5 text-ink-faint shrink-0" />
               <div className="min-w-0 flex-1">
-                <div className="mono text-[13px] truncate">
-                  {p.fileData?.relPath ?? "…"}
+                <div
+                  className="mono text-[13px] truncate"
+                  title={p.selectedFilePath ?? ""}
+                >
+                  {p.selectedFilePath ?? "…"}
                 </div>
                 {p.fileData && (
                   <div className="mono text-[11px] text-ink-muted truncate">
-                    {p.fileData.additions !== null && p.fileData.additions > 0 && (
-                      <>
-                        <span className="text-success">+{p.fileData.additions}</span>{" "}
-                      </>
-                    )}
-                    {p.fileData.deletions !== null &&
-                      p.fileData.deletions > 0 && (
-                        <>
-                          <span className="text-danger">
-                            −{p.fileData.deletions}
-                          </span>
-                          {" · "}
-                        </>
-                      )}
                     {p.fileData.lines} lines · {formatSize(p.fileData.sizeBytes)}
                     {p.fileData.mtimeMs
                       ? ` · modified ${formatRelTime(p.fileData.mtimeMs)}`
@@ -807,8 +941,10 @@ function DesktopFilesView(p: FilesViewProps) {
               <button
                 type="button"
                 className="h-8 px-3 rounded-[8px] border border-line bg-canvas text-[12px] disabled:opacity-50"
-                disabled={!p.fileData}
-                onClick={() => p.fileData && copyText(p.fileData.relPath)}
+                disabled={!p.selectedFilePath}
+                onClick={() =>
+                  p.selectedFilePath && copyText(p.selectedFilePath)
+                }
               >
                 Copy path
               </button>
@@ -851,12 +987,6 @@ function DesktopFilesView(p: FilesViewProps) {
               <span className="text-ink-muted">Mode</span>
               <span className="mono">{p.fileData.mode}</span>
             </div>
-            {p.fileData.gitStatus && (
-              <div className="flex items-center justify-between">
-                <span className="text-ink-muted">Status</span>
-                {gitBadge(p.fileData.gitStatus)}
-              </div>
-            )}
           </div>
         ) : (
           <div className="px-4 py-3 text-[12px] text-ink-faint">

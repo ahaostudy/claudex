@@ -81,22 +81,21 @@ truth is `git grep -c '^|' docs/FEATURES.md` for ✅ / 🟡 / ⬜ totals and
 
 | Status | Feature | Where |
 |---|---|---|
-| ✅ | `GET /api/browse?path=<abs>` — lists immediate children. Entries are `{name, path, isDir, isHidden}` sorted dirs-first then by name. Hidden (leading-dot) entries are returned with `isHidden: true` so the UI chooses visibility. Symlinks are classified via `lstat` and never followed; dangling symlinks show up as non-dirs instead of crashing the listing | `server/src/sessions/browse.ts` |
+| ✅ | `GET /api/browse?path=<abs>` — lists immediate children. Entries are `{name, path, isDir, isHidden, size?, mtimeMs?}` sorted dirs-first then by name. Hidden (leading-dot) entries are returned with `isHidden: true` so the UI chooses visibility. Symlinks are classified via `lstat` and never followed; dangling symlinks show up as non-dirs instead of crashing the listing. `size`/`mtimeMs` added for the general Files browser; older consumers (FolderPicker, @-file mention sheet) ignore them | `server/src/sessions/browse.ts` |
 | ✅ | `GET /api/browse/home` — returns `{path: os.homedir()}` for a "back to home" shortcut | same |
-| ✅ | Errors: `400 not_absolute`, `404 not_found`, `403 not_a_directory`, `403 permission_denied` (EACCES/EPERM). Never reads file contents | same |
+| ✅ | `GET /api/browse/read?path=<abs>` — read UTF-8 text contents of an arbitrary absolute-path file, 1 MB cap (`truncated: true`), binary detection (extension blocklist + 512-byte null-byte sniff → `415 binary_file`). Used by the general Files browser; the project-scoped `/api/files/read` is the sibling that also returns git annotations | same |
+| ✅ | Errors: `400 not_absolute`, `404 not_found`, `403 not_a_directory`, `400 is_a_directory`, `415 binary_file`, `403 permission_denied` (EACCES/EPERM) | same |
 | ✅ | Login-gated alongside the rest of `/api/*` | same |
 
 ## Files browser
 
-Per-project read-only file viewer (mockup s-14). Entered from the mobile tab bar (Sessions / Routines / Files / Alerts / Settings) and from the desktop sidebar at `/files`.
+General-purpose read-only host-filesystem viewer (mockup s-14). Entered from the mobile tab bar (Sessions / Routines / Files / Alerts / Settings) and from the desktop sidebar at `/files`. Defaults to the user's `$HOME` and supports browsing anywhere on the host via Home / Up / Root toolbar + clickable breadcrumb. A "Jump to project…" dropdown is still offered as a shortcut to registered project roots, but the browser is no longer project-scoped — you can view files outside any project.
 
 | Status | Feature | Where |
 |---|---|---|
-| ✅ | `GET /api/files/tree?project=<id>&path=<rel>` — one directory level. Dirs before files, case-insensitive alphabetical within each group. Hidden (leading-dot) entries included; client decides visibility. Git status + per-file +/- counts merged in when the project root is a git repo (via `git status --porcelain=v1` + `git diff --numstat HEAD`). Symlinks are classified via `lstat` and never followed | `server/src/files/routes.ts` |
-| ✅ | `GET /api/files/read?project=<id>&path=<rel>` — UTF-8 file contents, hard-capped at 1 MB (`truncated: true` when the file is larger). Binary detection: extension blocklist (jpg/png/gif/ico/webp/bmp/tiff/exe/dll/obj/bin/wasm/so/dylib/zip/tar/gz/bz2/xz/rar/7z/pdf/doc/ttf/otf/woff/woff2/db/sqlite + others) checked first, then null-byte sniff of the first 512 bytes. Both return `415 binary_file`. Response also includes git status + +/- counts for the row | same |
-| ✅ | `GET /api/files/status?project=<id>` — git working-tree summary: branch, total +/- counts, changed count, per-file entries. `isGitRepo: false` when git isn't installed or the project isn't a repo (graceful degradation — no 5xx) | same |
-| ✅ | SECURITY: every `path` param is resolved via `path.resolve(projectRoot, normalized)` and rejected with `403 traversal_denied` if the result escapes `projectRoot` (including `../`, `..%2F`, absolute paths). All three endpoints JWT-gated | same |
-| ✅ | Web `/files` screen — mobile: project chip + breadcrumb + drill-down tree + inline preview strip. Desktop: 3-col grid `[260px | 1fr | 240px]` — tree sidebar with find-file filter, full preview with line numbers, meta panel with "Files is read-only" hint. HTTP-compatible clipboard fallback for "Copy path" | `web/src/screens/Files.tsx` |
+| ✅ | Web `/files` screen — path-based general file browser. Defaults to `os.homedir()` via `GET /api/browse/home`; toolbar has Home (user home), Up (`data.parent`), Root (`/`), dotfiles toggle, and a project-jump dropdown. Breadcrumb segments are individually clickable. Mobile: breadcrumb + toolbar + filter + flat listing + fullscreen preview sheet. Desktop: 3-col `[300px | 1fr | 240px]` with line-numbered preview + meta panel. HTTP-compatible clipboard fallback for "Copy path" | `web/src/screens/Files.tsx` |
+| 🟡 | Project-scoped `/api/files/tree` + `/api/files/read` + `/api/files/status` still exist with git-status + per-file +/- annotations. No UI surfaces them anymore — the Files screen now uses `/api/browse` + `/api/browse/read` so it can browse outside any project. The project endpoints remain for potential re-introduction of per-project git-annotated views (e.g. a diff-oriented tab) | `server/src/files/routes.ts` |
+| ✅ | SECURITY: project-scoped `/api/files/*` rejects traversal via `resolveRelPath`. General `/api/browse*` accepts any absolute path — by design, this is a host-machine service and the user knows their own paths | `server/src/files/routes.ts`, `server/src/sessions/browse.ts` |
 | ✅ | Mobile tab bar now 5 tabs — Sessions / Routines / Files / Alerts / Settings. Queue drops to desktop-only sidebar (like Usage). `AppShell.MOBILE_NAV` excludes `usage` + `queue` | `web/src/components/AppShell.tsx` |
 
 ## Slash commands

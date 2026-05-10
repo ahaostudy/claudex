@@ -558,6 +558,11 @@ export const BrowseEntry = z.object({
   path: z.string(), // absolute host path
   isDir: z.boolean(),
   isHidden: z.boolean(), // leading-dot entries; UI decides whether to show
+  // Optional metadata for general-purpose file browsers. Older consumers
+  // (FolderPicker, @-file mention sheet) ignore these; the Files screen
+  // uses them to render size + mtime per row.
+  size: z.number().int().nonnegative().optional(),
+  mtimeMs: z.number().nonnegative().optional(),
 });
 export type BrowseEntry = z.infer<typeof BrowseEntry>;
 
@@ -567,6 +572,23 @@ export const BrowseResponse = z.object({
   entries: z.array(BrowseEntry),
 });
 export type BrowseResponse = z.infer<typeof BrowseResponse>;
+
+// Response from GET /api/browse/read?path=<abs>. Used by the general-purpose
+// Files browser to preview arbitrary host files (not project-scoped). See
+// `FilesReadResponse` below for the project-scoped sibling — that one carries
+// git annotations, this one doesn't.
+export const BrowseReadResponse = z.object({
+  path: z.string(), // absolute host path of the file
+  parent: z.string().nullable(), // absolute parent directory
+  name: z.string(), // basename
+  content: z.string(),
+  lines: z.number().int().nonnegative(),
+  sizeBytes: z.number().int().nonnegative(),
+  mtimeMs: z.number().nonnegative(),
+  mode: z.string(), // "-rw-r--r--" style
+  truncated: z.boolean(), // true when the file was larger than the 1 MB cap
+});
+export type BrowseReadResponse = z.infer<typeof BrowseReadResponse>;
 
 // ============================================================================
 // CLI session discovery & import
