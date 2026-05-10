@@ -500,8 +500,16 @@ function MobileTabBar({ tab, alertCount }: { tab: ShellTab; alertCount: number }
   const navigate = useNavigate();
   return (
     <nav
-      className="md:hidden fixed bottom-0 left-0 right-0 z-30 border-t border-line bg-canvas/95 backdrop-blur flex items-center justify-around h-[58px] px-2"
-      style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
+      className="md:hidden fixed bottom-0 left-0 right-0 z-30 border-t border-line bg-canvas/95 backdrop-blur flex items-center justify-around px-2"
+      style={{
+        // `h-[58px]` used to be the height, but with box-sizing: border-box
+        // the safe-area padding ate into it — on notched phones the content
+        // area shrunk to ~23px and the icons overflowed UP through the
+        // border-t. min-height w/ calc() guarantees 58px of CONTENT room
+        // even when safe-area is 34px (iPhone home indicator).
+        minHeight: "calc(58px + env(safe-area-inset-bottom))",
+        paddingBottom: "env(safe-area-inset-bottom)",
+      }}
     >
       {MOBILE_NAV.map(({ id, label, icon: Icon, href }) => {
         const active = tab === id;
