@@ -865,6 +865,7 @@ export function ChatScreen() {
             }}
             onOpenLightbox={(images, index) => setLightbox({ images, index })}
             onOpenPlan={() => setShowPlanSheet(true)}
+            onOpenSubagents={() => setShowTasksDrawer(true)}
             revealedSeq={revealedSeq}
             onToggleReveal={(seq) =>
               setRevealedSeq((current) => (current === seq ? null : seq))
@@ -1276,6 +1277,7 @@ function Piece({
   onDecidePlan,
   onOpenLightbox,
   onOpenPlan,
+  onOpenSubagents,
   isLastUserMessage,
   canEdit,
   onEditLastUserMessage,
@@ -1304,6 +1306,9 @@ function Piece({
    *  Omitted when the parent doesn't want to expose the quick-jump
    *  (e.g. embedded preview surfaces). */
   onOpenPlan?: () => void;
+  /** Open the subagents drawer/rail from an inline Task/Agent/Explore
+   *  pointer. Same omission rule as onOpenPlan. */
+  onOpenSubagents?: () => void;
   /** True when this piece is the newest user_message currently visible. */
   isLastUserMessage?: boolean;
   /** True when the session is idle and the user can actually submit an edit. */
@@ -1487,6 +1492,99 @@ function Piece({
               </span>
               <span className="text-[12.5px] text-ink-soft">
                 {total} item{total === 1 ? "" : "s"} · {doneCount} done
+              </span>
+              <span className="mono text-[11px] text-ink-muted">→ view</span>
+            </button>
+            {p.createdAt && (
+              <div
+                className="mono text-[10px] text-ink-faint mt-1"
+                title={new Date(p.createdAt).toLocaleString()}
+              >
+                {timeAgoShort(p.createdAt)}
+              </div>
+            )}
+          </div>
+        );
+      }
+      // Task / Agent / Explore — the subagent-family tools. Fat
+      // JSON chips are duplicative: the SubagentsStrip shows the latest
+      // activeForm above the thread, and the SubagentsPanel (right rail
+      // / bottom sheet) streams the full live transcript. Render a
+      // one-line pointer here instead, matching s-17's "Agent started
+      // / done" pattern. Keep data-tool-use-id so rail "reveal" clicks
+      // still scroll back to this row.
+      if (p.name === "Task" || p.name === "Agent" || p.name === "Explore") {
+        const resultIsError = matchedResult?.isError === true;
+        const hasResult = matchedResult != null;
+        const inputObj = p.input as Record<string, unknown>;
+        const label =
+          typeof inputObj.description === "string"
+            ? inputObj.description
+            : typeof inputObj.subagent_type === "string"
+              ? (inputObj.subagent_type as string)
+              : p.name;
+        const pillClass = hasResult
+          ? resultIsError
+            ? "bg-danger-wash/40 border-danger/25 hover:bg-danger-wash/60"
+            : "bg-paper border-line-strong/70 hover:bg-paper"
+          : "bg-klein-wash/40 border-klein/35 hover:bg-klein-wash/60";
+        const captionClass = hasResult
+          ? resultIsError
+            ? "text-danger"
+            : "text-ink-muted"
+          : "text-klein-ink";
+        return (
+          <div data-tool-use-id={p.id} data-event-seq={p.seq}>
+            <button
+              type="button"
+              onClick={() => onOpenSubagents?.()}
+              disabled={!onOpenSubagents}
+              className={`inline-flex items-center gap-2 py-1 pl-2.5 pr-2.5 rounded-[8px] border border-dashed text-left ${pillClass} disabled:opacity-60`}
+              title="Open the subagents panel"
+            >
+              {hasResult && !resultIsError ? (
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  className="w-3.5 h-3.5 text-success shrink-0"
+                  aria-hidden
+                >
+                  <path d="M5 12l5 5 9-10" />
+                </svg>
+              ) : hasResult && resultIsError ? (
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  className="w-3.5 h-3.5 text-danger shrink-0"
+                  aria-hidden
+                >
+                  <path d="M6 6l12 12M18 6L6 18" />
+                </svg>
+              ) : (
+                <svg
+                  className="w-3.5 h-3.5 text-klein animate-spin shrink-0"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  aria-hidden
+                >
+                  <path d="M21 12a9 9 0 1 1-6.2-8.6" />
+                </svg>
+              )}
+              <span className={`mono text-[11px] ${captionClass} uppercase tracking-[0.1em] shrink-0`}>
+                {hasResult
+                  ? resultIsError
+                    ? `${p.name} failed`
+                    : `${p.name} done`
+                  : `${p.name} started`}
+              </span>
+              <span className="text-[12.5px] text-ink-soft max-w-[50ch] truncate">
+                {label}
               </span>
               <span className="mono text-[11px] text-ink-muted">→ view</span>
             </button>
@@ -4052,12 +4150,39 @@ function applyViewMode(
   pieces: UIPiece[],
   mode: ViewMode,
 ): { visiblePieces: UIPiece[]; changes: ChangeEntry[] } {
+  // Drop pieces that came from inside a subagent (parentToolUseId set)
+  // and drop the subagent lifecycle pieces themselves — both are
+  // surfaced in the SubagentsStrip / SubagentsPanel instead of inlined
+  // in the main thread. Keeping them here would duplicate content + the
+  // rail's live-stream rows. See s-17 plan.
+  const topLevel = pieces.filter((p) => {
+    if (
+      p.kind === "subagent_start" ||
+      p.kind === "subagent_progress" ||
+      p.kind === "subagent_update" ||
+      p.kind === "subagent_end" ||
+      p.kind === "subagent_tool_progress"
+    ) {
+      return false;
+    }
+    if (
+      (p.kind === "assistant_text" ||
+        p.kind === "thinking" ||
+        p.kind === "tool_use" ||
+        p.kind === "tool_result") &&
+      typeof p.parentToolUseId === "string" &&
+      p.parentToolUseId.length > 0
+    ) {
+      return false;
+    }
+    return true;
+  });
   if (mode === "verbose") {
-    return { visiblePieces: pieces, changes: [] };
+    return { visiblePieces: topLevel, changes: [] };
   }
   if (mode === "normal") {
     return {
-      visiblePieces: pieces.filter((p) => p.kind !== "thinking"),
+      visiblePieces: topLevel.filter((p) => p.kind !== "thinking"),
       changes: [],
     };
   }
@@ -4065,7 +4190,7 @@ function applyViewMode(
   // run of assistant activity keep only the final assistant_text.
   const out: UIPiece[] = [];
   let pendingTextIdx = -1; // index into `out` of the last assistant_text
-  for (const p of pieces) {
+  for (const p of topLevel) {
     if (p.kind === "user") {
       out.push(p);
       pendingTextIdx = -1;
@@ -4091,7 +4216,7 @@ function applyViewMode(
   // edit that removed those same 3) are dropped — per mockup s-07 the
   // Changes card is a scan-mode signal, not an audit log.
   const changesMap = new Map<string, ChangeEntry>();
-  for (const p of pieces) {
+  for (const p of topLevel) {
     if (p.kind !== "tool_use") continue;
     const d = diffForToolCall(p.name, p.input);
     if (!d) continue;
