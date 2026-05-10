@@ -1,0 +1,667 @@
+import { useEffect, useState } from "react";
+import { ChevronRight, Loader2, Square } from "lucide-react";
+import { cn } from "@/lib/cn";
+import { timeAgoShort } from "@/lib/format";
+import { summarizeToolCall, toolIcon } from "@/lib/tool-summary";
+import type { SubagentRun, SubagentStreamEvent, UIPiece } from "@/state/sessions";
+
+/**
+ * SubagentsPanel — grouped Running / Done / Failed / Stopped list of
+ * every Task · Agent · Explore run the session has dispatched. Rendered
+ * inside both the desktop right-rail and the mobile bottom-sheet above
+ * the existing TasksList (which still covers non-subagent tool calls).
+ *
+ * Running rows expand by default and render an inline "live stream" of
+ * the subagent's text chunks + nested tool chips (grep, read, edit, …)
+ * — the key thing that s-17 adds over the old flat TasksList. Done /
+ * Failed / Stopped rows stay collapsed until the user clicks them; on
+ * expand they show the subagent's final summary + usage + a Files link
+ * when the SDK handed back an `output_file`.
+ *
+ * A single 1-second ticker at the panel level keeps the mm:ss elapsed
+ * labels fresh on every running run + nested running tool chip. The
+ * ticker stops when nothing is running.
+ */
+export function SubagentsPanel({
+  runs,
+  onRevealToolUse,
+}: {
+  runs: SubagentRun[];
+  /** Jump the main transcript to a tool_use source piece. Used by the
+   * nested tool chips so a user can "show me the full result" the same
+   * way the main TasksList row-click does. */
+  onRevealToolUse?: (toolUseId: string) => void;
+}) {
+  // Panel-level ticker — one setInterval keeps mm:ss labels fresh for
+  // every open running row. Matches the pattern in TasksList.
+  const hasRunning = runs.some((r) => r.status === "running");
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    if (!hasRunning) return;
+    const handle = setInterval(() => setTick((n) => n + 1), 1000);
+    return () => clearInterval(handle);
+  }, [hasRunning]);
+
+  if (runs.length === 0) return null;
+
+  // Reverse-chronological ordering so the freshest run is on top —
+  // matches how the chat thread reads "latest action first" when the
+  // user scrolls to the end.
+  const running = runs.filter((r) => r.status === "running").reverse();
+  const stopped = runs.filter((r) => r.status === "stopped").reverse();
+  const failed = runs.filter((r) => r.status === "failed").reverse();
+  const done = runs.filter((r) => r.status === "completed").reverse();
+
+  return (
+    <div className="flex flex-col border-b border-line bg-paper/30">
+      <div className="px-3 py-2 flex items-center shrink-0 border-b border-line">
+        <span className="inline-flex items-center gap-1 px-1.5 h-5 rounded-[4px] border border-klein/30 bg-klein-wash text-klein-ink mono text-[10px] font-medium uppercase tracking-[0.08em]">
+          <span
+            className={cn(
+              "h-1.5 w-1.5 rounded-full",
+              hasRunning ? "bg-klein animate-pulse" : "bg-klein/50",
+            )}
+            aria-hidden
+          />
+          Agents
+        </span>
+        <span className="ml-2 mono text-[11px] text-ink-muted">
+          {running.length > 0
+            ? `${running.length} live · ${runs.length} total`
+            : `${runs.length} ${runs.length === 1 ? "run" : "runs"}`}
+        </span>
+      </div>
+      <div className="flex flex-col py-1">
+        {running.length > 0 && (
+          <Group label="Running" accent="klein" count={running.length}>
+            {running.map((run) => (
+              <RunCard
+                key={run.taskId}
+                run={run}
+                defaultExpanded
+                onRevealToolUse={onRevealToolUse}
+              />
+            ))}
+          </Group>
+        )}
+        {failed.length > 0 && (
+          <Group label="Failed" accent="danger" count={failed.length}>
+            {failed.map((run) => (
+              <RunCard
+                key={run.taskId}
+                run={run}
+                onRevealToolUse={onRevealToolUse}
+              />
+            ))}
+          </Group>
+        )}
+        {stopped.length > 0 && (
+          <Group label="Stopped" accent="muted" count={stopped.length}>
+            {stopped.map((run) => (
+              <RunCard
+                key={run.taskId}
+                run={run}
+                onRevealToolUse={onRevealToolUse}
+              />
+            ))}
+          </Group>
+        )}
+        {done.length > 0 && (
+          <Group label="Done" accent="success" count={done.length}>
+            {done.map((run) => (
+              <RunCard
+                key={run.taskId}
+                run={run}
+                onRevealToolUse={onRevealToolUse}
+              />
+            ))}
+          </Group>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function Group({
+  label,
+  accent,
+  count,
+  children,
+}: {
+  label: string;
+  accent: "klein" | "success" | "danger" | "muted";
+  count: number;
+  children: React.ReactNode;
+}) {
+  const accentClass = {
+    klein: "text-klein",
+    success: "text-ink-soft",
+    danger: "text-danger",
+    muted: "text-ink-muted",
+  }[accent];
+  return (
+    <section>
+      <div className="px-4 pt-2.5 pb-1 flex items-baseline gap-2">
+        <span
+          className={cn(
+            "uppercase tracking-[0.12em] text-[10px] font-medium",
+            accentClass,
+          )}
+        >
+          {label}
+        </span>
+        <span className="mono text-[10.5px] text-ink-muted">· {count}</span>
+      </div>
+      <div className="px-0.5">{children}</div>
+    </section>
+  );
+}
+
+function RunCard({
+  run,
+  defaultExpanded = false,
+  onRevealToolUse,
+}: {
+  run: SubagentRun;
+  defaultExpanded?: boolean;
+  onRevealToolUse?: (toolUseId: string) => void;
+}) {
+  const [expanded, setExpanded] = useState(defaultExpanded);
+  const tint = tintFor(run.status);
+  return (
+    <div
+      className={cn(
+        "mx-2.5 mb-2 rounded-[10px] border overflow-hidden relative",
+        tint.border,
+        tint.bg,
+      )}
+    >
+      <div
+        aria-hidden
+        className={cn("absolute left-0 top-0 bottom-0 w-[3px]", tint.strip)}
+      />
+      <button
+        type="button"
+        onClick={() => setExpanded((x) => !x)}
+        aria-expanded={expanded}
+        className={cn(
+          "w-full pl-3 pr-2 py-2 flex items-center gap-2 text-left",
+          expanded && "border-b",
+          expanded && tint.headerBorder,
+          "hover:bg-paper/40",
+        )}
+      >
+        <span
+          className={cn(
+            "inline-flex items-center gap-1 px-1.5 h-5 rounded-[4px] border mono text-[10px] shrink-0",
+            tint.chip,
+          )}
+        >
+          Agent
+        </span>
+        {run.agentType && (
+          <span className="mono text-[10.5px] text-ink-soft shrink-0 max-w-[14ch] truncate">
+            {run.agentType}
+          </span>
+        )}
+        <StatusDot run={run} />
+        <span className="text-[12px] text-ink truncate flex-1 font-medium">
+          {run.description || "(no description)"}
+        </span>
+        {run.isBackgrounded && (
+          <span
+            className="inline-flex items-center px-1 h-4 rounded-[3px] border border-indigo/30 bg-indigo-wash/60 text-indigo mono text-[9px] uppercase tracking-[0.12em] shrink-0"
+            title="Backgrounded"
+          >
+            bg
+          </span>
+        )}
+        <span
+          className={cn(
+            "mono text-[10px] shrink-0 tabular-nums",
+            run.status === "failed" ? "text-danger" : "text-ink-muted",
+          )}
+          title={run.startedAt ? new Date(run.startedAt).toLocaleString() : undefined}
+        >
+          {renderRightLabel(run)}
+        </span>
+        <ChevronRight
+          className={cn(
+            "w-3 h-3 text-ink-muted shrink-0 transition-transform",
+            expanded && "rotate-90",
+          )}
+          aria-hidden
+        />
+      </button>
+      {expanded && <RunBody run={run} onRevealToolUse={onRevealToolUse} />}
+    </div>
+  );
+}
+
+function RunBody({
+  run,
+  onRevealToolUse,
+}: {
+  run: SubagentRun;
+  onRevealToolUse?: (toolUseId: string) => void;
+}) {
+  return (
+    <div className="bg-canvas/60">
+      <InputPreview prompt={run.prompt} />
+      <LiveStream run={run} onRevealToolUse={onRevealToolUse} />
+      <RunFooter run={run} />
+    </div>
+  );
+}
+
+function InputPreview({ prompt }: { prompt: string | null }) {
+  const [open, setOpen] = useState(false);
+  if (!prompt) return null;
+  return (
+    <div className="px-3 pt-2 pb-1 bg-paper/40 border-b border-line/40">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="w-full flex items-center gap-2 text-left"
+        aria-expanded={open}
+      >
+        <ChevronRight
+          className={cn(
+            "w-3 h-3 text-ink-muted transition-transform",
+            open && "rotate-90",
+          )}
+          aria-hidden
+        />
+        <span className="uppercase tracking-[0.12em] text-[10px] font-medium text-ink-muted">
+          Input
+        </span>
+        {!open && (
+          <span className="mono text-[10.5px] text-ink-muted truncate flex-1">
+            {prompt.slice(0, 200)}
+          </span>
+        )}
+      </button>
+      {open && (
+        <pre className="mono text-[11px] leading-[1.5] text-canvas/90 bg-ink rounded-[8px] px-2.5 py-2 mt-1.5 mb-1.5 overflow-x-auto max-h-[180px] overflow-y-auto whitespace-pre-wrap break-words">
+          {prompt}
+        </pre>
+      )}
+    </div>
+  );
+}
+
+function LiveStream({
+  run,
+  onRevealToolUse,
+}: {
+  run: SubagentRun;
+  onRevealToolUse?: (toolUseId: string) => void;
+}) {
+  const stream = run.stream;
+  const isLive = run.status === "running";
+
+  // Pair tool_use + tool_result by toolUseId so each chip shows its
+  // status inline (spinner while pending, ok/error once the result
+  // lands). Emitted as separate pieces at the store level.
+  const resultsById = new Map<
+    string,
+    Extract<UIPiece, { kind: "tool_result" }>
+  >();
+  for (const ev of stream) {
+    if (ev.piece.kind === "tool_result") {
+      resultsById.set(ev.piece.toolUseId, ev.piece);
+    }
+  }
+  // Events we want to render in order. Skip tool_result pieces whose
+  // paired tool_use is in the same stream (rendered inline on the chip);
+  // orphan tool_results (no preceding tool_use seen) still render as a
+  // standalone line so the user isn't blind.
+  const toolUseIds = new Set<string>();
+  for (const ev of stream) {
+    if (ev.piece.kind === "tool_use") toolUseIds.add(ev.piece.id);
+  }
+  const renderable = stream.filter((ev) => {
+    if (ev.piece.kind !== "tool_result") return true;
+    return !toolUseIds.has(ev.piece.toolUseId);
+  });
+
+  return (
+    <div className="px-2.5 pt-2 pb-2.5">
+      <div className="flex items-center gap-1.5 mb-2 pl-1">
+        <span
+          className={cn(
+            "h-1.5 w-1.5 rounded-full",
+            isLive ? "bg-klein animate-pulse" : "bg-ink-faint",
+          )}
+          aria-hidden
+        />
+        <span className="uppercase tracking-[0.12em] text-[10px] font-medium text-klein-ink">
+          {isLive ? "Live stream" : "Transcript"}
+        </span>
+        <span className="mono text-[10px] text-ink-muted">
+          · {renderable.length} {renderable.length === 1 ? "event" : "events"}
+        </span>
+      </div>
+      {renderable.length === 0 ? (
+        <div className="text-[11.5px] text-ink-muted italic pl-4 pb-1">
+          {isLive
+            ? "Waiting for the first tool call…"
+            : "No inline activity — open source turn for details."}
+        </div>
+      ) : (
+        <div className="relative pl-4 space-y-2">
+          <span
+            className="absolute left-[5px] top-1 bottom-4 w-px bg-line-strong"
+            aria-hidden
+          />
+          {renderable.map((ev, idx) => (
+            <StreamItem
+              key={`${ev.seq}-${idx}`}
+              event={ev}
+              resultsById={resultsById}
+              trailingCaret={
+                isLive &&
+                idx === renderable.length - 1 &&
+                (ev.piece.kind === "assistant_text" ||
+                  ev.piece.kind === "thinking")
+              }
+              onRevealToolUse={onRevealToolUse}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function StreamItem({
+  event,
+  resultsById,
+  trailingCaret,
+  onRevealToolUse,
+}: {
+  event: SubagentStreamEvent;
+  resultsById: Map<string, Extract<UIPiece, { kind: "tool_result" }>>;
+  trailingCaret: boolean;
+  onRevealToolUse?: (toolUseId: string) => void;
+}) {
+  const p = event.piece;
+  if (p.kind === "assistant_text") {
+    return (
+      <div className="relative">
+        <span
+          className="absolute -left-[11px] top-[7px] h-1.5 w-1.5 rounded-full bg-ink-faint"
+          aria-hidden
+        />
+        <div className="text-[12px] leading-[1.55] text-ink-soft whitespace-pre-wrap break-words">
+          {p.text}
+          {trailingCaret && <Caret />}
+        </div>
+      </div>
+    );
+  }
+  if (p.kind === "thinking") {
+    return (
+      <div className="relative">
+        <span
+          className="absolute -left-[11px] top-[7px] h-1.5 w-1.5 rounded-full bg-ink-faint/70"
+          aria-hidden
+        />
+        <div className="text-[12px] leading-[1.55] text-ink-muted italic whitespace-pre-wrap break-words">
+          {p.text}
+          {trailingCaret && <Caret />}
+        </div>
+      </div>
+    );
+  }
+  if (p.kind === "tool_use") {
+    const result = resultsById.get(p.id) ?? null;
+    return <ToolChip use={p} result={result} onReveal={onRevealToolUse} />;
+  }
+  if (p.kind === "tool_result") {
+    return <ToolResultLine piece={p} />;
+  }
+  return null;
+}
+
+function ToolChip({
+  use,
+  result,
+  onReveal,
+}: {
+  use: Extract<UIPiece, { kind: "tool_use" }>;
+  result: Extract<UIPiece, { kind: "tool_result" }> | null;
+  onReveal?: (toolUseId: string) => void;
+}) {
+  const Icon = toolIcon(use.name);
+  const summary = summarizeToolCall(use.name, use.input);
+  const inFlight = !result;
+  const failed = result?.isError === true;
+  return (
+    <div className="relative">
+      <span
+        className={cn(
+          "absolute -left-[11px] top-[9px] h-1.5 w-1.5 rounded-full",
+          inFlight
+            ? "bg-klein animate-pulse"
+            : failed
+              ? "bg-danger/70"
+              : "bg-success",
+        )}
+        aria-hidden
+      />
+      <button
+        type="button"
+        onClick={() => onReveal?.(use.id)}
+        className={cn(
+          "w-full flex items-center gap-1.5 py-1 pl-1.5 pr-2 rounded-[6px] border text-left",
+          inFlight
+            ? "border-klein/30 bg-klein-wash/60"
+            : failed
+              ? "border-danger/25 bg-danger-wash/40"
+              : "border-line bg-paper",
+        )}
+        title={summary || use.name}
+      >
+        <Icon
+          className={cn(
+            "w-3 h-3 shrink-0",
+            inFlight ? "text-klein-ink" : failed ? "text-danger" : "text-ink-soft",
+          )}
+          aria-hidden
+        />
+        <span
+          className={cn(
+            "mono text-[10.5px] shrink-0",
+            inFlight
+              ? "text-klein-ink"
+              : failed
+                ? "text-danger"
+                : "text-ink-soft",
+          )}
+        >
+          {use.name.toLowerCase()}
+        </span>
+        <span className="mono text-[10px] text-ink-muted truncate flex-1">
+          {summary}
+        </span>
+        {inFlight && (
+          <Loader2 className="w-3 h-3 text-klein animate-spin shrink-0" aria-hidden />
+        )}
+      </button>
+    </div>
+  );
+}
+
+function ToolResultLine({
+  piece,
+}: {
+  piece: Extract<UIPiece, { kind: "tool_result" }>;
+}) {
+  return (
+    <div className="relative">
+      <span
+        className={cn(
+          "absolute -left-[11px] top-[9px] h-1.5 w-1.5 rounded-full",
+          piece.isError ? "bg-danger/70" : "bg-success",
+        )}
+        aria-hidden
+      />
+      <div
+        className={cn(
+          "mono text-[10.5px] leading-[1.5] rounded-[6px] border px-2 py-1 truncate",
+          piece.isError
+            ? "text-danger bg-danger-wash/40 border-danger/25"
+            : "text-ink-muted bg-paper border-line",
+        )}
+        title={piece.content}
+      >
+        {piece.isError ? "error · " : "→ "}
+        {piece.content.split("\n")[0].slice(0, 180) || "(no output)"}
+      </div>
+    </div>
+  );
+}
+
+function RunFooter({ run }: { run: SubagentRun }) {
+  // TODO(s-17): wire a client stop frame so this actually cancels the
+  // subagent (SDK has SDKControlStopTaskRequest). For now it's disabled
+  // with a tooltip so the surface is in place.
+  return (
+    <div className="px-3 pt-2 pb-2.5 border-t border-line/70 flex items-center gap-2 bg-paper/40">
+      <button
+        type="button"
+        disabled
+        title="Stopping subagents is not wired yet — use the session interrupt (⌘⇧X) to cancel the whole turn instead."
+        className="h-6 px-2 rounded-[6px] border border-line bg-canvas text-[11px] flex items-center gap-1 opacity-50 cursor-not-allowed"
+      >
+        <Square className="w-2.5 h-2.5" aria-hidden />
+        stop
+      </button>
+      {run.outputFile && (
+        <span
+          className="mono text-[10px] text-ink-muted truncate max-w-[30ch]"
+          title={run.outputFile}
+        >
+          → {run.outputFile}
+        </span>
+      )}
+      <span className="ml-auto mono text-[10px] text-ink-muted">
+        {run.taskId.slice(0, 8)}…
+      </span>
+    </div>
+  );
+}
+
+function StatusDot({ run }: { run: SubagentRun }) {
+  if (run.status === "running") {
+    return (
+      <span
+        className="relative h-2 w-2 rounded-full bg-klein animate-pulse shrink-0"
+        style={{ boxShadow: "0 0 0 3px rgba(204,120,92,0.22)" }}
+        aria-hidden
+      />
+    );
+  }
+  if (run.status === "failed") {
+    return (
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        className="w-3 h-3 text-danger shrink-0"
+        aria-hidden
+      >
+        <path d="M6 6l12 12M18 6L6 18" />
+      </svg>
+    );
+  }
+  if (run.status === "stopped") {
+    return <Square className="w-3 h-3 text-ink-muted shrink-0" aria-hidden />;
+  }
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.2"
+      className="w-3 h-3 text-success shrink-0"
+      aria-hidden
+    >
+      <path d="M5 12l5 5 9-10" />
+    </svg>
+  );
+}
+
+function tintFor(status: SubagentRun["status"]): {
+  strip: string;
+  bg: string;
+  border: string;
+  chip: string;
+  headerBorder: string;
+} {
+  if (status === "running") {
+    return {
+      strip: "bg-klein",
+      bg: "bg-klein-wash/25",
+      border: "border-klein/25",
+      chip: "border-klein/40 text-klein-ink bg-canvas/80",
+      headerBorder: "border-klein/20",
+    };
+  }
+  if (status === "failed") {
+    return {
+      strip: "bg-danger/70",
+      bg: "bg-danger-wash/40",
+      border: "border-danger/25",
+      chip: "border-danger/30 text-danger bg-canvas/70",
+      headerBorder: "border-danger/15",
+    };
+  }
+  if (status === "stopped") {
+    return {
+      strip: "bg-ink-faint",
+      bg: "bg-paper/40",
+      border: "border-line",
+      chip: "border-line text-ink-soft",
+      headerBorder: "border-line/60",
+    };
+  }
+  return {
+    strip: "bg-success/50",
+    bg: "bg-canvas",
+    border: "border-line",
+    chip: "border-line text-ink-soft",
+    headerBorder: "border-line/60",
+  };
+}
+
+function renderRightLabel(run: SubagentRun): string {
+  if (run.status === "failed") return run.endedAt ? "error" : "failing";
+  if (run.status === "running") {
+    if (!run.startedAt) return "running";
+    return formatElapsedClock(run.startedAt);
+  }
+  return timeAgoShort(run.endedAt ?? run.startedAt ?? null);
+}
+
+function formatElapsedClock(startedAtIso: string): string {
+  const started = Date.parse(startedAtIso);
+  if (!Number.isFinite(started)) return "—";
+  const elapsed = Math.max(0, Math.round((Date.now() - started) / 1000));
+  const m = Math.floor(elapsed / 60);
+  const s = elapsed % 60;
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
+
+function Caret() {
+  // Inline blinking caret for trailing partial text. Styled to match the
+  // mockup's `caret` CSS — an orange block cursor that ghosts in and out.
+  return (
+    <span
+      aria-hidden
+      className="inline-block w-[2px] h-[0.95em] align-[-0.1em] ml-[3px] bg-klein animate-pulse"
+    />
+  );
+}

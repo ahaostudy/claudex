@@ -28,9 +28,11 @@ import { ChatSessionsRail } from "@/components/ChatSessionsRail";
 import { ChatTasksRail } from "@/components/ChatTasksRail";
 import { TasksDrawer } from "@/components/TasksDrawer";
 import { PlanStrip } from "@/components/PlanStrip";
+import { SubagentsStrip } from "@/components/SubagentsStrip";
 import { PlanSheet } from "@/components/PlanSheet";
 import { selectLatestTodos } from "@/lib/todos";
 import { useSessions } from "@/state/sessions";
+import { useSubagentRuns } from "@/state/sessions";
 import { api } from "@/api/client";
 import type {
   AskUserQuestionAnnotation,
@@ -273,6 +275,11 @@ export function ChatScreen() {
   // the walk is a tight loop and pieces.length is bounded by the
   // transcript size the user is already paying for to render.
   const planSnapshot = useMemo(() => selectLatestTodos(pieces), [pieces]);
+  // Subagent lifecycle rollup used by the SubagentsStrip (always mounted)
+  // + the SubagentsPanel inside the rail/drawer. Memoized internally by
+  // the store against the transcript array reference so re-renders on
+  // every WS frame are cheap.
+  const subagentRuns = useSubagentRuns(id ?? "");
 
   // Index of the newest user-message piece in the current visible list.
   // Drives the "Edit" affordance on that bubble only — older user turns
@@ -775,6 +782,17 @@ export function ChatScreen() {
       <PlanStrip
         snapshot={planSnapshot}
         onOpen={() => setShowPlanSheet(true)}
+      />
+
+      {/* Subagents strip — same always-visible pattern as PlanStrip but
+          for Task/Agent/Explore runs (s-17). Sits directly below the
+          plan strip so the user can tell at a glance "my agent has 2
+          subagents alive, they're doing X, Y". Tapping opens the Tasks
+          drawer (mobile) / scrolls the Tasks rail into view (desktop)
+          — same trigger as the header Tasks icon. */}
+      <SubagentsStrip
+        runs={subagentRuns}
+        onOpen={() => setShowTasksDrawer(true)}
       />
 
       {/* Messages — `flex-1 min-h-0` is the magic pair that lets the child
