@@ -1985,6 +1985,7 @@ function AdvancedPanel() {
   return (
     <div className="space-y-5">
       <AppVersionCard />
+      <RestartServerCard />
       <AdvancedWorktreesCard />
       <BackupCard />
     </div>
@@ -2061,6 +2062,128 @@ function AppVersionCard() {
           Bypass the browser's HTTP cache and fetch the freshest bundle. Use
           after a server update if the app feels stuck on an old version.
         </div>
+      </div>
+    </Card>
+  );
+}
+
+// Restart-the-running-server button. POST /api/admin/restart spawns a
+// detached worker, replies 200, then SIGTERMs itself — the worker waits
+// for the port to drain and execs `pnpm exec tsx src/index.ts`. Because
+// the server dies ~150ms after responding, the browser's fetch may or
+// may not receive the body; we treat any post-send error as "restart is
+// underway" and show the same polling UI regardless.
+//
+// After triggering we poll GET /api/health until a successful response,
+// then force-reload the page so the UI re-connects to the fresh server.
+// Health polls are cheap and give the user a countdown instead of a
+// blank "please wait"; cap at ~30s (matches the detach worker's
+// port-drain ceiling) before surfacing a failure hint.
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+function RestartServerCard() {
+  const [status, setStatus] = useState<
+    "idle" | "confirming" | "restarting" | "waiting" | "done" | "failed"
+  >("idle");
+  const [err, setErr] = useState<string | null>(null);
+
+  async function triggerRestart() {
+    setStatus("restarting");
+    setErr(null);
+    try {
+      await api.adminRestart();
+    } catch {
+      // Expected: the server usually drops the TCP connection before the
+      // JSON body flushes. Silent-ok — we'll verify via /api/health.
+    }
+    setStatus("waiting");
+    await waitForHealth();
+  }
+
+  async function waitForHealth() {
+    const deadline = Date.now() + 35_000;
+    // Give the old server a beat to tear down before the first poll so
+    // we don't race a 200 from the dying process.
+    await sleep(500);
+    while (Date.now() < deadline) {
+      try {
+        const res = await fetch("/api/health", { cache: "no-store" });
+        if (res.ok) {
+          setStatus("done");
+          // Force a fresh bundle in case the deploy included new assets.
+          await sleep(400);
+          const url = new URL(window.location.href);
+          url.searchParams.set("_r", Date.now().toString(36));
+          window.location.replace(url.toString());
+          return;
+        }
+      } catch {
+        /* server is still coming up; keep polling */
+      }
+      await sleep(800);
+    }
+    setStatus("failed");
+    setErr("Timed out waiting for the server to come back up.");
+  }
+
+  const busy = status === "restarting" || status === "waiting";
+  const buttonLabel =
+    status === "idle"
+      ? "Restart server"
+      : status === "confirming"
+        ? "Confirm restart?"
+        : status === "restarting"
+          ? "Sending restart…"
+          : status === "waiting"
+            ? "Waiting for server…"
+            : status === "done"
+              ? "Server back up"
+              : "Restart failed";
+
+  return (
+    <Card header="Restart server">
+      <div className="px-4 sm:px-5 py-3 space-y-2">
+        {status === "confirming" ? (
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={triggerRestart}
+              className="h-9 px-3.5 rounded-md bg-danger text-canvas text-[13.5px] font-medium hover:opacity-90"
+            >
+              Yes, restart now
+            </button>
+            <button
+              type="button"
+              onClick={() => setStatus("idle")}
+              className="h-9 px-3.5 rounded-md border border-line bg-canvas hover:bg-paper text-[13.5px] text-ink"
+            >
+              Cancel
+            </button>
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setStatus("confirming")}
+            disabled={busy}
+            className="h-9 px-3.5 rounded-md border border-line bg-canvas hover:bg-paper text-[13.5px] font-medium text-ink disabled:opacity-60 disabled:cursor-not-allowed"
+          >
+            {buttonLabel}
+          </button>
+        )}
+        <div className="text-[12px] text-ink-muted">
+          Re-exec{"s "}
+          <span className="mono">pnpm exec tsx src/index.ts</span> in place.
+          Active sessions survive — their transcripts are on disk — but any
+          in-flight tool call will show as interrupted. Safe to run after a
+          deploy; use the script{" "}
+          <span className="mono">scripts/restart.mjs</span> instead if you're
+          at a terminal and don't want a page reload.
+        </div>
+        {err && (
+          <div className="text-[12px] text-danger mono">{err}</div>
+        )}
       </div>
     </Card>
   );

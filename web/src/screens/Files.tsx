@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ChevronDown,
+  ChevronLeft,
   ChevronRight,
   File as FileIcon,
   Folder,
@@ -242,6 +243,16 @@ export function FilesScreen() {
     [selectedProjectId],
   );
 
+  // Dismiss the preview and return to the tree. Called by the mobile
+  // preview sheet's back button. We clear `selectedRelPath` so the sheet
+  // unmounts, plus `fileData`/`fileError` so stale content doesn't flash
+  // the next time the user taps a different file.
+  const closePreview = useCallback(() => {
+    setSelectedRelPath(null);
+    setFileData(null);
+    setFileError(null);
+  }, []);
+
   const selectedProject = useMemo(
     () => projects.find((p) => p.id === selectedProjectId) ?? null,
     [projects, selectedProjectId],
@@ -271,6 +282,7 @@ export function FilesScreen() {
           onSearchChange={setSearchQuery}
           onToggleFolder={toggleFolder}
           onOpenFile={openFile}
+          onClosePreview={closePreview}
           fileData={fileData}
           fileLoading={fileLoading}
           fileError={fileError}
@@ -292,6 +304,7 @@ export function FilesScreen() {
           onSearchChange={setSearchQuery}
           onToggleFolder={toggleFolder}
           onOpenFile={openFile}
+          onClosePreview={closePreview}
           fileData={fileData}
           fileLoading={fileLoading}
           fileError={fileError}
@@ -472,6 +485,7 @@ interface FilesViewProps {
   onSearchChange: (q: string) => void;
   onToggleFolder: (idx: number) => void;
   onOpenFile: (relPath: string) => void;
+  onClosePreview: () => void;
   fileData: FilesReadResponse | null;
   fileLoading: boolean;
   fileError: string | null;
@@ -479,7 +493,7 @@ interface FilesViewProps {
 
 function MobileFilesView(p: FilesViewProps) {
   return (
-    <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+    <div className="relative flex-1 min-h-0 flex flex-col overflow-hidden">
       <div className="px-4 pt-3 pb-3 bg-canvas/95 backdrop-blur border-b border-line shrink-0">
         <div className="flex items-center gap-2">
           <div className="relative">
@@ -562,84 +576,103 @@ function MobileFilesView(p: FilesViewProps) {
               variant="mobile"
             />
           ))}
-
-        {(p.fileData || p.fileLoading || p.fileError) && (
-          <MobilePreviewStrip
-            fileData={p.fileData}
-            loading={p.fileLoading}
-            error={p.fileError}
-          />
-        )}
       </div>
+
+      {/* Mobile file preview — overlay sheet. The previous inline strip
+          below the tree was invisible on any non-trivial tree (preview
+          rendered way below the user's scroll position, so tapping a file
+          looked like a no-op). A full-height sheet slid over the tree is
+          what a phone-first file browser expects anyway. Close button
+          returns to the tree; state persists so re-opening scrolls the
+          same tree back into view. */}
+      {(p.fileData || p.fileLoading || p.fileError) && p.selectedRelPath && (
+        <MobilePreviewSheet
+          relPath={p.selectedRelPath}
+          fileData={p.fileData}
+          loading={p.fileLoading}
+          error={p.fileError}
+          onClose={p.onClosePreview}
+        />
+      )}
     </div>
   );
 }
 
-function MobilePreviewStrip({
+function MobilePreviewSheet({
+  relPath,
   fileData,
   loading,
   error,
+  onClose,
 }: {
+  relPath: string;
   fileData: FilesReadResponse | null;
   loading: boolean;
   error: string | null;
+  onClose: () => void;
 }) {
   return (
-    <div className="mx-3 my-4 border border-line rounded-[10px] overflow-hidden bg-paper/40">
-      <div className="flex items-center gap-2 px-3 py-2 bg-canvas border-b border-line">
-        <FileIcon className="w-3.5 h-3.5 text-ink-faint shrink-0" />
-        <span className="mono text-[12px] truncate flex-1">
-          {fileData?.relPath ?? "…"}
-        </span>
-        {fileData && (
-          <span className="mono text-[11px] text-ink-muted shrink-0">
-            {fileData.lines} lines
-          </span>
-        )}
-      </div>
-      {loading && (
-        <div className="p-3 mono text-[11.5px] text-ink-muted">loading…</div>
-      )}
-      {error && <div className="p-3 mono text-[11.5px] text-danger">{error}</div>}
-      {fileData && !loading && !error && (
-        <div className="mono text-[11.5px] leading-[1.6] p-3 max-h-64 overflow-auto">
-          {fileData.content
-            .split("\n")
-            .slice(0, 80)
-            .map((line, i) => (
-              <div key={i} className="grid grid-cols-[28px_1fr] gap-1">
-                <span className="text-right text-ink-faint select-none">
-                  {i + 1}
-                </span>
-                <span className="whitespace-pre">{line}</span>
-              </div>
-            ))}
-          {fileData.content.split("\n").length > 80 && (
-            <div className="mt-2 text-ink-faint text-[11px]">
-              …{fileData.lines - 80} more lines
+    <div className="absolute inset-0 z-30 bg-canvas flex flex-col">
+      <header className="shrink-0 flex items-center gap-2 px-3 py-2.5 border-b border-line bg-canvas/95 backdrop-blur">
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Back to file tree"
+          className="h-8 w-8 rounded-[8px] bg-paper border border-line flex items-center justify-center shrink-0"
+        >
+          <ChevronLeft className="w-4 h-4" />
+        </button>
+        <div className="min-w-0 flex-1">
+          <div className="mono text-[13px] truncate">{relPath}</div>
+          {fileData && (
+            <div className="mono text-[11px] text-ink-muted truncate">
+              {fileData.lines} lines · {formatSize(fileData.sizeBytes)}
+              {fileData.truncated ? " · truncated" : ""}
             </div>
           )}
         </div>
-      )}
-      <div className="flex items-center gap-1.5 px-3 py-2 border-t border-line bg-canvas">
-        <button
-          type="button"
-          className="h-7 px-2.5 rounded-[6px] border border-line text-[12px] disabled:opacity-50"
-          disabled={!fileData}
-          onClick={() => fileData && copyText(fileData.relPath)}
-        >
-          Copy path
-        </button>
-        {fileData?.gitStatus && (
-          <span className="ml-auto inline-flex items-center gap-1 text-[11px] text-ink-muted">
-            {gitBadge(fileData.gitStatus)}
-            {fileData.additions !== null && fileData.additions > 0 && (
-              <span className="mono text-success">+{fileData.additions}</span>
+        {fileData && (
+          <button
+            type="button"
+            className="h-8 px-2.5 rounded-[8px] border border-line bg-canvas text-[12px] shrink-0"
+            onClick={() => copyText(fileData.relPath)}
+          >
+            Copy path
+          </button>
+        )}
+      </header>
+      <div className="flex-1 min-h-0 overflow-auto bg-canvas">
+        {loading && (
+          <div className="p-6 text-center mono text-[12.5px] text-ink-muted">
+            loading…
+          </div>
+        )}
+        {error && !loading && (
+          <div className="p-6 text-center mono text-[12.5px] text-danger">
+            {error}
+          </div>
+        )}
+        {fileData && !loading && !error && (
+          <div className="mono text-[12.5px] leading-[1.7] px-4 py-3">
+            {fileData.content.split("\n").map((line, i) => (
+              <div key={i} className="grid grid-cols-[40px_1fr] gap-1">
+                <span className="text-right pr-2 text-ink-faint select-none">
+                  {i + 1}
+                </span>
+                <span className="whitespace-pre-wrap break-all [overflow-wrap:anywhere]">
+                  {line || " "}
+                </span>
+              </div>
+            ))}
+            {fileData.truncated && (
+              <div className="grid grid-cols-[40px_1fr] gap-1 mt-2">
+                <span className="text-right pr-2 text-ink-faint select-none">
+                  …
+                </span>
+                <span className="text-ink-faint">file truncated at 1 MB</span>
+              </div>
             )}
-            {fileData.deletions !== null && fileData.deletions > 0 && (
-              <span className="mono text-danger">−{fileData.deletions}</span>
-            )}
-          </span>
+          </div>
         )}
       </div>
     </div>

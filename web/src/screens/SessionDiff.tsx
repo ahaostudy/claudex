@@ -104,6 +104,10 @@ export function SessionDiffScreen() {
   const [error, setError] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [expandedMobile, setExpandedMobile] = useState<string | null>(null);
+  // Mobile view switcher: "files" shows the per-file rows with expand-to-
+  // diff, "timeline" shows the chronological entries list. Desktop keeps
+  // both panes on-screen (three-col grid); mobile has to choose.
+  const [mobileView, setMobileView] = useState<"files" | "timeline">("files");
 
   useEffect(() => {
     if (!id) return;
@@ -257,8 +261,52 @@ export function SessionDiffScreen() {
               </div>
             )}
 
-            {/* Mobile: file rows, tap to expand inline */}
+            {/* Mobile tab switcher — Files vs Timeline. Desktop uses the
+                3-col layout so both panes are on-screen and this tab
+                control is hidden there. */}
             {diff && (
+              <div className="md:hidden px-3 mb-2">
+                <div className="inline-flex rounded-[8px] border border-line bg-paper/60 p-0.5">
+                  <button
+                    type="button"
+                    onClick={() => setMobileView("files")}
+                    className={cn(
+                      "h-7 px-3 rounded-[6px] text-[12px] font-medium transition-colors",
+                      mobileView === "files"
+                        ? "bg-canvas text-ink shadow-card"
+                        : "text-ink-muted",
+                    )}
+                  >
+                    Files
+                    {diff.files.length > 0 && (
+                      <span className="ml-1 mono text-[11px] opacity-70">
+                        {diff.files.length}
+                      </span>
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setMobileView("timeline")}
+                    className={cn(
+                      "h-7 px-3 rounded-[6px] text-[12px] font-medium transition-colors",
+                      mobileView === "timeline"
+                        ? "bg-canvas text-ink shadow-card"
+                        : "text-ink-muted",
+                    )}
+                  >
+                    Timeline
+                    {diff.timeline.length > 0 && (
+                      <span className="ml-1 mono text-[11px] opacity-70">
+                        {diff.timeline.length}
+                      </span>
+                    )}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Mobile · Files view: file rows, tap to expand inline. */}
+            {diff && mobileView === "files" && (
               <div className="md:hidden">
                 {diff.files.length === 0 && (
                   <div className="px-4 py-6 text-center text-[13px] text-ink-muted">
@@ -310,22 +358,28 @@ export function SessionDiffScreen() {
                         </span>
                       </div>
                     </button>
+                    {/* Expanded: borderless, edge-to-edge hunks — no second
+                        file-path header (the row above already owns that). */}
                     {expandedMobile === f.path && f.hunks.length > 0 && (
-                      <div className="px-4 pb-3 bg-canvas">
-                        <DiffView diff={toFileDiff(f)} defaultOpen />
-                      </div>
+                      <DiffView diff={toFileDiff(f)} defaultOpen headerless />
                     )}
                   </div>
                 ))}
+              </div>
+            )}
 
-                {/* Mobile timeline as a card at the bottom */}
-                {diff.timeline.length > 0 && (
-                  <div className="mx-3 mt-4 mb-6 rounded-[10px] border border-line bg-paper/40 p-3">
-                    <div className="caps text-ink-muted text-[11px] mb-2">
-                      Timeline
-                    </div>
-                    <TimelineList entries={diff.timeline} />
+            {/* Mobile · Timeline view. Intentionally NOT wrapped in a card so
+                long file paths can wrap/truncate against the viewport edge
+                instead of against a card inset that makes them even harder
+                to read. */}
+            {diff && mobileView === "timeline" && (
+              <div className="md:hidden px-4 py-2">
+                {diff.timeline.length === 0 ? (
+                  <div className="py-6 text-center text-[13px] text-ink-muted">
+                    No tool-use activity in this session yet.
                   </div>
+                ) : (
+                  <TimelineList entries={diff.timeline} />
                 )}
               </div>
             )}
@@ -383,9 +437,7 @@ export function SessionDiffScreen() {
                         </button>
                       </div>
                       {!isCollapsed && f.hunks.length > 0 && (
-                        <div className="p-5">
-                          <DiffView diff={toFileDiff(f)} defaultOpen />
-                        </div>
+                        <DiffView diff={toFileDiff(f)} defaultOpen headerless />
                       )}
                     </div>
                   );
@@ -452,7 +504,7 @@ function TimelineList({
     <div className={cn("relative pl-5", desktop ? "space-y-4" : "space-y-3")}>
       <div className="absolute left-[7px] top-2 bottom-2 w-px bg-line-strong" />
       {entries.map((e) => (
-        <div key={e.toolUseId} className="relative">
+        <div key={e.toolUseId} className="relative min-w-0">
           <span
             className={cn(
               "absolute -left-5 top-1 rounded-full border-2 border-paper",
@@ -465,15 +517,25 @@ function TimelineList({
                 : undefined
             }
           />
-          <div className={cn("font-medium", "text-[12.5px]")}>
-            {e.action === "write"
-              ? "Wrote"
-              : e.action === "edit"
-                ? "Edited"
-                : "Multi-edited"}{" "}
-            <span className="mono">{e.filePath}</span>
+          <div className="font-medium text-[12.5px] min-w-0">
+            {/* Verb is inline; file path is its own block below so long
+                paths wrap against the viewport rather than pushing the
+                verb and dot off-screen. `break-all` + overflow-wrap:
+                anywhere is belt-and-suspenders for CJK paths and other
+                non-space-delimited strings that the default word-wrap
+                won't touch. */}
+            <span>
+              {e.action === "write"
+                ? "Wrote"
+                : e.action === "edit"
+                  ? "Edited"
+                  : "Multi-edited"}
+            </span>
+            <div className="mono text-[12px] text-ink-soft break-all [overflow-wrap:anywhere] leading-snug mt-0.5">
+              {e.filePath}
+            </div>
           </div>
-          <div className="text-[11px] text-ink-muted mono">
+          <div className="text-[11px] text-ink-muted mono mt-0.5 break-all [overflow-wrap:anywhere]">
             {e.addCount > 0 && <span className="text-success">+{e.addCount}</span>}
             {e.addCount > 0 && e.delCount > 0 && " "}
             {e.delCount > 0 && <span className="text-danger">−{e.delCount}</span>}

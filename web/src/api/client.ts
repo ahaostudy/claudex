@@ -424,6 +424,31 @@ export const api = {
   },
 
   // ---------------------------------------------------------------------------
+  // Admin — self-restart. Spawns a detached worker that waits for the listen
+  // port to drain, then execs the new server. The old server responds 200
+  // (or dryRun:true under NODE_ENV=test) and SIGTERMs itself ~150ms later;
+  // the TCP connection drops mid-response on a real restart, so the client
+  // should treat network errors AFTER the fetch resolved as success.
+  //
+  // Optional `sessionId` + `toolUseId` carry the id of the in-flight tool
+  // call that initiated the restart — the server persists a
+  // pending_restart_results row and the next boot's sweep converts it into
+  // a synthetic success tool_result so the chat UI shows green instead of
+  // a dangling failed tool call. The UI "Restart server" button omits them
+  // (there's no triggering tool_use to preserve); Claude's Bash/HTTP path
+  // is where they're wired.
+  adminRestart(opts?: { sessionId?: string; toolUseId?: string }) {
+    const body: Record<string, string> = {};
+    if (opts?.sessionId) body.sessionId = opts.sessionId;
+    if (opts?.toolUseId) body.toolUseId = opts.toolUseId;
+    return request<{ ok: true; dryRun?: boolean }>("/api/admin/restart", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  },
+
+  // ---------------------------------------------------------------------------
   // Alerts — persistent queue of "needs your attention" rows, keyed on
   // session status transitions. The badge in AppShell and the dedicated
   // /alerts screen both consume this.
