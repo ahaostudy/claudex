@@ -227,7 +227,7 @@ function InputPreview({ prompt }: { prompt: string | null }) {
         )}
       </button>
       {open && (
-        <pre className="mono text-[11px] leading-[1.5] text-canvas/90 bg-ink rounded-[8px] px-2.5 py-2 mt-1.5 mb-1.5 overflow-x-auto max-h-[180px] overflow-y-auto whitespace-pre-wrap break-words">
+        <pre className="mono text-[11px] leading-[1.5] text-ink-soft bg-paper border border-line rounded-[8px] px-2.5 py-2 mt-1.5 mb-1.5 overflow-x-auto max-h-[180px] overflow-y-auto whitespace-pre-wrap break-words">
           {prompt}
         </pre>
       )}
@@ -292,7 +292,7 @@ function LiveStream({
       ) : (
         <div className="relative pl-4 space-y-2">
           <span
-            className="absolute left-[5px] top-1 bottom-4 w-px bg-line-strong"
+            className="absolute left-[7px] top-1 bottom-4 w-px bg-line-strong"
             aria-hidden
           />
           {renderable.map((ev, idx) => (
