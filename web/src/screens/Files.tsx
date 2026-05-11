@@ -529,16 +529,34 @@ function Toolbar({
   compact?: boolean;
 }) {
   const size = compact ? "h-7 px-2 text-[11px]" : "h-8 px-2.5 text-[12px]";
+  // Compact mode lives inside the 300px desktop left panel where labels +
+  // three buttons + the HiddenToggle pill overflow and scroll `Up` off the
+  // right edge. Drop the labels in compact — `title` / `aria-label` keep
+  // the a11y + hover affordance intact.
+  const iconOnly = !!compact;
   return (
     <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar">
-      <ToolbarButton onClick={onHome} icon={<Home className="w-3.5 h-3.5" />} label="Home" size={size} />
-      <ToolbarButton onClick={onRoot} icon={<HardDrive className="w-3.5 h-3.5" />} label="Root" size={size} />
+      <ToolbarButton
+        onClick={onHome}
+        icon={<Home className="w-3.5 h-3.5" />}
+        label="Home"
+        size={size}
+        iconOnly={iconOnly}
+      />
+      <ToolbarButton
+        onClick={onRoot}
+        icon={<HardDrive className="w-3.5 h-3.5" />}
+        label="Root"
+        size={size}
+        iconOnly={iconOnly}
+      />
       <ToolbarButton
         onClick={canUp ? onUp : undefined}
         icon={<ChevronRight className="w-3.5 h-3.5 rotate-180" />}
         label="Up"
         disabled={!canUp}
         size={size}
+        iconOnly={iconOnly}
       />
     </div>
   );
@@ -568,11 +586,21 @@ function HiddenToggle({
   compact?: boolean;
 }) {
   const size = compact ? "h-7 px-2 text-[11px]" : "h-8 px-2.5 text-[12px]";
+  // Compact mode → icon-only pill. On the desktop 300px left panel the
+  // full "Show hidden 1" label was crowding the Toolbar and scrolling
+  // `Up` off-screen. Keep the visual language (background swap + badge)
+  // so the state is still readable at a glance.
+  const iconOnly = !!compact;
   return (
     <button
       type="button"
       onClick={onToggle}
       aria-pressed={showHidden}
+      aria-label={
+        showHidden
+          ? "Hide entries starting with a dot"
+          : `Show hidden entries (${hiddenCount} here)`
+      }
       title={
         showHidden
           ? "Hide entries starting with a dot"
@@ -591,7 +619,7 @@ function HiddenToggle({
       ) : (
         <Eye className="w-3.5 h-3.5" />
       )}
-      <span>{showHidden ? "Hidden" : "Show hidden"}</span>
+      {!iconOnly && <span>{showHidden ? "Hidden" : "Show hidden"}</span>}
       {!showHidden && hiddenCount > 0 && (
         <span className="mono text-[10px] px-1 rounded-[3px] bg-canvas border border-line text-ink-muted">
           {hiddenCount}
@@ -607,17 +635,21 @@ function ToolbarButton({
   label,
   disabled,
   size,
+  iconOnly,
 }: {
   onClick?: () => void;
   icon: React.ReactNode;
   label: string;
   disabled?: boolean;
   size: string;
+  iconOnly?: boolean;
 }) {
   return (
     <button
       onClick={onClick}
       disabled={disabled}
+      title={iconOnly ? label : undefined}
+      aria-label={iconOnly ? label : undefined}
       className={cn(
         "inline-flex items-center gap-1.5 rounded-[6px] border border-line shrink-0",
         size,
@@ -627,7 +659,7 @@ function ToolbarButton({
       )}
     >
       {icon}
-      {label}
+      {!iconOnly && label}
     </button>
   );
 }
