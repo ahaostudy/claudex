@@ -340,18 +340,18 @@ export function HomeScreen() {
             on, with an inline × to clear. Beats the old caps-above-display
             stack where "Sessions / All projects" read like two titles
             fighting for the same slot. */}
-        <h1 className="display text-[18px] md:text-[22px] leading-tight flex items-baseline gap-1.5 min-w-0">
+        <h1 className="display text-[18px] md:text-[26px] leading-tight flex items-baseline gap-1.5 min-w-0">
           <span className="shrink-0">Sessions</span>
           {activeProject && (
             <>
               <span
-                className="text-ink-faint shrink-0 font-sans text-[14px] md:text-[16px]"
+                className="text-ink-faint shrink-0 font-sans text-[14px] md:text-[18px]"
                 aria-hidden
               >
                 ·
               </span>
               <span
-                className="font-sans text-[14px] md:text-[15px] font-medium text-ink-soft truncate min-w-0"
+                className="font-sans text-[14px] md:text-[16px] font-medium text-ink-soft truncate min-w-0"
                 title={activeProject.name}
               >
                 {activeProject.name}
@@ -1048,7 +1048,7 @@ function SessionRow({
                   aria-label="Pinned"
                 />
               )}
-              <span className="text-[14px] font-medium truncate">
+              <span className="text-[15px] font-medium truncate">
                 {s.title || "Untitled"}
               </span>
               {s.worktreePath && (
@@ -1226,7 +1226,7 @@ function SessionRow({
 function EmptyState({ onNew }: { onNew: () => void }) {
   return (
     <div className="rounded-[12px] border border-dashed border-line-strong p-8 text-center">
-      <div className="display text-[1.25rem] mb-2">No sessions yet.</div>
+      <div className="display text-[20px] mb-2">No sessions yet.</div>
       <p className="text-[14px] text-ink-muted max-w-[42ch] mx-auto mb-5">
         Point claudex at a project folder on this host and start a session.
         The folder will be trusted — claudex asks claude to do things inside it.
@@ -1503,7 +1503,7 @@ function NewSessionSheet({
             <div className="text-[11px] uppercase tracking-[0.14em] text-ink-muted">
               New session
             </div>
-            <h2 id="new-session-sheet-title" className="display text-[1.25rem] leading-tight mt-0.5">
+            <h2 id="new-session-sheet-title" className="display text-[20px] md:text-[22px] leading-tight mt-0.5">
               Tell claude where to work.
             </h2>
           </div>
@@ -1738,7 +1738,7 @@ function TrustConfirmCard({
     <div className="fixed inset-0 z-50 bg-ink/40 flex items-end sm:items-center justify-center">
       <div role="dialog" aria-modal="true" aria-labelledby="trust-folder-modal-title" className="w-full max-w-md bg-canvas border-t sm:border border-line rounded-t-[20px] sm:rounded-[14px] shadow-lift p-5">
         <div className="caps text-ink-muted">Security</div>
-        <h2 id="trust-folder-modal-title" className="display text-[1.25rem] leading-tight mt-0.5">
+        <h2 id="trust-folder-modal-title" className="display text-[20px] md:text-[22px] leading-tight mt-0.5">
           Trust this folder?
         </h2>
         <div className="mt-3 rounded-[8px] border border-line bg-paper px-3 py-2">
@@ -1930,7 +1930,7 @@ function ProjectsSheet({ onClose }: { onClose: () => void }) {
             <div className="text-[11px] uppercase tracking-[0.14em] text-ink-muted">
               Projects
             </div>
-            <h2 id="projects-sheet-title" className="display text-[1.25rem] leading-tight mt-0.5">
+            <h2 id="projects-sheet-title" className="display text-[20px] md:text-[22px] leading-tight mt-0.5">
               Manage where claude can work.
             </h2>
           </div>

@@ -129,7 +129,7 @@ export function SubagentsSheet({
             follow
           </label>
         </div>
-        <div className="display text-[18px] md:text-[20px] leading-tight mt-1">
+        <div className="display text-[18px] md:text-[22px] leading-tight mt-1">
           {displayTitle}
         </div>
       </div>

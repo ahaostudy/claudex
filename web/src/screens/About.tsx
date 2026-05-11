@@ -50,7 +50,7 @@ export function AboutScreen() {
         <section className="p-5 sm:p-8 pb-24 md:pb-10">
           <div className="max-w-[760px]">
             <div className="caps text-ink-muted">Settings · about</div>
-            <h1 className="display text-[24px] md:text-[28px] leading-tight mt-1">
+            <h1 className="display text-[24px] md:text-[26px] leading-tight mt-1">
               What am I running?
             </h1>
             <p className="text-[14px] md:text-[15px] text-ink-muted mt-2 max-w-[60ch]">

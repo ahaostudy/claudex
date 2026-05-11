@@ -171,7 +171,7 @@ export function UsagePage() {
         <header className="flex items-baseline gap-4 mb-6">
           <div>
             <div className="caps text-ink-muted">Usage</div>
-            <h1 className="display text-[24px] leading-tight mt-0.5">
+            <h1 className="display text-[24px] md:text-[26px] leading-tight mt-0.5">
               Today's consumption
             </h1>
           </div>

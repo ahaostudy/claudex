@@ -75,7 +75,7 @@ export function PlanSheet({
             {total === 0 ? "empty" : `${done} of ${total} done`}
           </span>
         </div>
-        <div className="display text-[18px] md:text-[20px] leading-tight mt-1">
+        <div className="display text-[18px] md:text-[22px] leading-tight mt-1">
           {total === 0
             ? "No plan yet"
             : snapshot.current?.activeForm ||

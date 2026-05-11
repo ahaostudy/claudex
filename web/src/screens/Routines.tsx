@@ -121,7 +121,7 @@ export function RoutinesScreen() {
       <header className="shrink-0 bg-canvas/90 backdrop-blur border-b border-line px-5 py-3 flex items-center gap-3">
         <div>
           <div className="caps text-ink-muted">Routines</div>
-          <h1 className="display text-[1.25rem] leading-tight mt-0.5">
+          <h1 className="display text-[20px] md:text-[26px] leading-tight mt-0.5">
             Scheduled sessions
           </h1>
         </div>
@@ -410,7 +410,7 @@ function RoutineEditor({
             <div className="text-[11px] uppercase tracking-[0.14em] text-ink-muted">
               {initial ? "Edit routine" : "New routine"}
             </div>
-            <h2 className="display text-[1.25rem] leading-tight mt-0.5">
+            <h2 className="display text-[20px] md:text-[22px] leading-tight mt-0.5">
               {initial ? "Tweak the schedule." : "Schedule a repeating session."}
             </h2>
           </div>

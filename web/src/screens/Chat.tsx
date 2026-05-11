@@ -2967,7 +2967,7 @@ function PermissionCard({
                 permission · ask mode
               </span>
             </div>
-            <h3 className="display text-[24px] leading-tight mt-1 break-words [overflow-wrap:anywhere]">{title}</h3>
+            <h3 className="display text-[22px] leading-tight mt-1 break-words [overflow-wrap:anywhere]">{title}</h3>
             <div className="mono text-[12px] text-ink-muted mt-1 truncate">
               {metaLine}
             </div>

@@ -68,7 +68,7 @@ export function StatsSheet({ onClose }: { onClose: () => void }) {
         <div className="flex items-center p-4 border-b border-line">
           <div>
             <div className="caps text-ink-muted">Statistics</div>
-            <h2 id="stats-sheet-title" className="display text-[1.25rem] leading-tight mt-0.5">
+            <h2 id="stats-sheet-title" className="display text-[20px] md:text-[22px] leading-tight mt-0.5">
               How claudex is doing.
             </h2>
           </div>

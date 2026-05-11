@@ -151,7 +151,7 @@ export function ClientErrorsScreen() {
             <span>/</span>
             <span>Client errors</span>
           </div>
-          <h1 className="display text-[1.25rem] leading-tight mt-0.5">
+          <h1 className="display text-[20px] md:text-[26px] leading-tight mt-0.5">
             Browser crash log
           </h1>
         </div>
@@ -239,7 +239,7 @@ export function ClientErrorsScreen() {
               <div className="inline-flex h-10 w-10 rounded-full bg-paper border border-line items-center justify-center mb-3">
                 <Bug className="w-4 h-4 text-ink-muted" />
               </div>
-              <div className="display text-[1.25rem] mb-1">No errors reported.</div>
+              <div className="display text-[20px] mb-1">No errors reported.</div>
               <p className="text-[13px] text-ink-muted leading-relaxed">
                 Browser crashes, unhandled promise rejections, and
                 console.error calls get captured here. If the UI

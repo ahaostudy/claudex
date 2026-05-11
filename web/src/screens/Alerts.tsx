@@ -136,7 +136,7 @@ export function AlertsScreen() {
       <header className="shrink-0 bg-canvas/90 backdrop-blur border-b border-line px-5 py-3 flex items-center gap-3">
         <div>
           <div className="caps text-ink-muted">Alerts</div>
-          <h1 className="display text-[1.25rem] leading-tight mt-0.5">
+          <h1 className="display text-[20px] md:text-[26px] leading-tight mt-0.5">
             Needs attention
           </h1>
         </div>
@@ -184,7 +184,7 @@ export function AlertsScreen() {
             <div className="inline-flex h-10 w-10 rounded-full bg-paper border border-line items-center justify-center mb-3">
               <Bell className="w-4 h-4 text-ink-muted" />
             </div>
-            <div className="display text-[1.25rem] mb-1">
+            <div className="display text-[20px] mb-1">
               {mode === "unread"
                 ? "No unread alerts."
                 : mode === "read"

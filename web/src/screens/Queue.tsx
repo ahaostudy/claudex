@@ -239,7 +239,7 @@ export function QueueScreen() {
       <header className="shrink-0 bg-canvas/90 backdrop-blur border-b border-line px-5 py-3 flex items-center gap-3">
         <div>
           <div className="caps text-ink-muted">Queue</div>
-          <h1 className="display text-[1.25rem] leading-tight mt-0.5">Batch</h1>
+          <h1 className="display text-[20px] md:text-[26px] leading-tight mt-0.5">Batch</h1>
         </div>
         <button
           onClick={() => setCreating(true)}
@@ -852,7 +852,7 @@ function QueueEditor({
             </div>
             <h2
               id="queue-editor-title"
-              className="display text-[1.25rem] leading-tight mt-0.5"
+              className="display text-[20px] md:text-[22px] leading-tight mt-0.5"
             >
               {initial ? "Tweak before it runs." : "Compose a batch item."}
             </h2>
