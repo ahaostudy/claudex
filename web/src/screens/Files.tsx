@@ -1362,20 +1362,22 @@ function DesktopFilesView(p: FilesViewProps) {
               onGoToProject={p.onGoToProject}
               compact
             />
-            <div className="flex-1 flex items-center gap-2 h-7 px-2.5 bg-canvas border border-line rounded-[6px]">
+          </div>
+          <div className="flex items-center gap-1.5">
+            <div className="flex-1 min-w-0 flex items-center gap-2 h-7 px-2.5 bg-canvas border border-line rounded-[6px]">
               <Search className="w-3.5 h-3.5 text-ink-muted shrink-0" />
               <input
                 type="text"
                 placeholder="Filter…"
                 value={p.searchQuery}
                 onChange={(e) => p.onSearchChange(e.target.value)}
-                className="flex-1 bg-transparent text-[12px] text-ink outline-none placeholder:text-ink-muted"
+                className="flex-1 min-w-0 bg-transparent text-[12px] text-ink outline-none placeholder:text-ink-muted"
               />
               {p.searchQuery && (
                 <button
                   type="button"
                   onClick={() => p.onSearchChange("")}
-                  className="text-ink-muted"
+                  className="text-ink-muted shrink-0"
                   aria-label="Clear search"
                 >
                   <X className="w-3 h-3" />
