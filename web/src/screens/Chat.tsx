@@ -819,15 +819,17 @@ export function ChatScreen() {
     <>
       {project && (
         <>
-          <span className="mono">{project.name}</span>
-          <span>·</span>
+          <span className="mono whitespace-nowrap truncate">{project.name}</span>
+          <span className="whitespace-nowrap">·</span>
         </>
       )}
-      <span className="mono">
+      <span className="mono whitespace-nowrap">
         {session ? MODEL_LABEL[session.model] ?? session.model : "—"}
       </span>
-      <span>·</span>
-      <span>{session ? MODE_LABEL[session.mode] ?? session.mode : "—"}</span>
+      <span className="whitespace-nowrap">·</span>
+      <span className="whitespace-nowrap">
+        {session ? MODE_LABEL[session.mode] ?? session.mode : "—"}
+      </span>
     </>
   );
 
@@ -866,7 +868,7 @@ export function ChatScreen() {
               </span>
             ) : null}
           </div>
-          <div className="flex items-center gap-1.5 text-[11px] text-ink-muted mt-0.5">
+          <div className="flex items-center gap-1.5 text-[11px] text-ink-muted mt-0.5 min-w-0 overflow-hidden">
             {metaLine}
           </div>
         </div>
@@ -943,7 +945,7 @@ export function ChatScreen() {
               </span>
             ) : null}
           </div>
-          <div className="flex items-center gap-2 text-[11px] text-ink-muted mt-0.5">
+          <div className="flex items-center gap-2 text-[11px] text-ink-muted mt-0.5 min-w-0 overflow-hidden">
             {metaLine}
           </div>
         </div>
