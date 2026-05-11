@@ -163,12 +163,13 @@ function Header({
         </button>
         <span
           className={cn(
-            "inline-flex items-center gap-1.5 px-2 h-6 rounded-[6px] border text-[10px] font-medium uppercase tracking-[0.1em] shrink-0",
+            "inline-flex items-center justify-center h-9 w-9 rounded-[8px] border shrink-0",
             tint.chip,
           )}
+          aria-label="Agent"
+          title="Agent"
         >
-          <Bot className="w-3 h-3" aria-hidden />
-          Agent
+          <Bot className="w-4 h-4" aria-hidden />
         </span>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 min-w-0">
