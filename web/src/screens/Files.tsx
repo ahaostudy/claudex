@@ -964,16 +964,25 @@ function BinaryPreview({
   }
 
   if (kind === "html" && renderHtml) {
-    // Sandbox attribute `""` blocks scripts, forms, and same-origin access.
-    // Safe for locally-trusted-but-unreviewed HTML — we're rendering the
-    // user's own files, but they may have loaded something dodgy onto
-    // their own machine and we don't want to run its JS from the claudex
-    // origin where the auth cookie lives.
+    // Render the HTML via /api/browse/raw (served as text/html; charset=utf-8,
+    // Content-Disposition: inline) rather than srcDoc so the iframe has a real
+    // URL to resolve relative asset paths, fonts, <link>ed stylesheets, etc.
+    // against — srcDoc's `about:srcdoc` origin has no base URL and silently
+    // 404s every relative reference. Using the raw endpoint also sidesteps the
+    // 1 MB cap on /api/browse/read, because raw streams up to 50 MB.
+    //
+    // Sandbox is `allow-scripts` (NOT `allow-same-origin`): scripts execute
+    // — so Tailwind Play CDN, Alpine, jQuery, inline initialization, etc.
+    // all render the way they would in a real browser tab — but the iframe
+    // runs in a unique opaque origin, so any JS inside can't touch the
+    // claudex auth cookie or read the parent document. Loading still carries
+    // the session cookie because the initial GET is same-origin from the
+    // browser's POV; sandbox only constrains the document once it loads.
     return (
       <iframe
-        srcDoc={fileData?.content ?? ""}
+        src={rawUrl(absPath)}
         title={basename}
-        sandbox=""
+        sandbox="allow-scripts"
         className="flex-1 w-full h-full border-0 bg-white"
       />
     );
