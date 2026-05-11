@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
+import { createPortal } from "react-dom";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   Bell,
@@ -1894,22 +1895,38 @@ function LanguageSelect({
   onPick: (next: SupportedLanguage | null) => void;
 }) {
   const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState<{ left: number; top: number; width: number } | null>(null);
+
   useEffect(() => {
     if (!open) return;
+    const recalc = () => {
+      const el = btnRef.current;
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      setPos({ left: r.left, top: r.bottom + 6, width: r.width });
+    };
+    recalc();
     const onDoc = (ev: MouseEvent) => {
-      if (ref.current && !ref.current.contains(ev.target as Node)) {
-        setOpen(false);
-      }
+      const t = ev.target as Node;
+      if (wrapRef.current?.contains(t)) return;
+      if (menuRef.current?.contains(t)) return;
+      setOpen(false);
     };
     const onKey = (ev: KeyboardEvent) => {
       if (ev.key === "Escape") setOpen(false);
     };
     window.addEventListener("mousedown", onDoc);
     window.addEventListener("keydown", onKey);
+    window.addEventListener("resize", recalc);
+    window.addEventListener("scroll", recalc, true);
     return () => {
       window.removeEventListener("mousedown", onDoc);
       window.removeEventListener("keydown", onKey);
+      window.removeEventListener("resize", recalc);
+      window.removeEventListener("scroll", recalc, true);
     };
   }, [open]);
   const label = value
@@ -1920,8 +1937,9 @@ function LanguageSelect({
     onPick(next);
   };
   return (
-    <div ref={ref} className="relative w-full max-w-[260px]">
+    <div ref={wrapRef} className="relative w-full max-w-[260px]">
       <button
+        ref={btnRef}
         type="button"
         onClick={() => !disabled && setOpen((v) => !v)}
         disabled={disabled}
@@ -1942,27 +1960,32 @@ function LanguageSelect({
           )}
         />
       </button>
-      {open && (
-        <div
-          role="listbox"
-          className="absolute left-0 right-0 mt-1.5 z-30 rounded-[10px] border border-line bg-canvas shadow-lift p-1 max-h-[280px] overflow-auto"
-        >
-          <LangOption
-            label="Auto (defer to ~/.claude/settings.json)"
-            active={value === null}
-            onClick={() => pick(null)}
-          />
-          <div className="my-1 h-px bg-line/60" aria-hidden />
-          {SUPPORTED_LANGUAGES.map((lang) => (
-            <LangOption
-              key={lang}
-              label={LANGUAGE_LABELS[lang] ?? lang}
-              active={value === lang}
-              onClick={() => pick(lang)}
-            />
-          ))}
-        </div>
-      )}
+      {open && pos && typeof document !== "undefined"
+        ? createPortal(
+            <div
+              ref={menuRef}
+              role="listbox"
+              style={{ left: pos.left, top: pos.top, width: pos.width }}
+              className="fixed z-[60] rounded-[10px] border border-line bg-canvas shadow-lift p-1 max-h-[280px] overflow-auto"
+            >
+              <LangOption
+                label="Auto (defer to ~/.claude/settings.json)"
+                active={value === null}
+                onClick={() => pick(null)}
+              />
+              <div className="my-1 h-px bg-line/60" aria-hidden />
+              {SUPPORTED_LANGUAGES.map((lang) => (
+                <LangOption
+                  key={lang}
+                  label={LANGUAGE_LABELS[lang] ?? lang}
+                  active={value === lang}
+                  onClick={() => pick(lang)}
+                />
+              ))}
+            </div>,
+            document.body,
+          )
+        : null}
     </div>
   );
 }
