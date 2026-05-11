@@ -15,7 +15,6 @@ import {
   Loader2,
   MessageCircle,
   MoreVertical,
-  PanelRight,
   Paperclip,
   Pencil,
   Send,
@@ -830,7 +829,7 @@ export function ChatScreen() {
                 : "border-line bg-canvas text-ink-soft",
             )}
           >
-            <PanelRight className="w-4 h-4" />
+            <Settings2 className="w-4 h-4" />
           </button>
         </div>
       </header>
@@ -1081,7 +1080,7 @@ export function ChatScreen() {
           onClose={() => setShowTasks(false)}
         />
       )}
-      {showSettingsRail && session && (
+      {showSettingsRail && session && !showPlanSheet && !showSubagentsSheet && (
         <SessionSettingsSheet
           variant="rail"
           session={session}
@@ -1090,11 +1089,12 @@ export function ChatScreen() {
           onUpdated={(next) => setSession(next)}
         />
       )}
-      {/* Desktop-only push-mode rails for Plan + Subagents. Mount alongside
-          the Tasks / Settings rails so the live transcript stays visible
-          beside the panel instead of being covered by a backdrop. Mobile
-          keeps the overlay variants that render inside <main> above. Both
-          rails are self-hidden under `md:` so mobile never double-renders. */}
+      {/* Desktop-only push-mode rails for Plan + Subagents. They share the
+          right-rail slot with the Settings rail above: when either opens
+          Settings is hidden (same slot, not a second column) so the header
+          never stacks two right rails. Mobile keeps the overlay variants
+          that render inside <main> above. Both rails are self-hidden under
+          `md:` so mobile never double-renders. */}
       {showPlanSheet && (
         <PlanSheet
           variant="rail"
