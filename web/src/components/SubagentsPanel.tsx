@@ -88,11 +88,11 @@ export function SubagentsPanel({
     <div className="flex flex-col border-b border-line bg-paper/30">
       {variant === "inline" && (
         <div className="px-3 py-2 flex items-center shrink-0 border-b border-line">
-          <span className="inline-flex items-center gap-1 px-1.5 h-5 rounded-[4px] border border-indigo/30 bg-indigo-wash text-indigo mono text-[10px] font-medium uppercase tracking-[0.08em]">
+          <span className="inline-flex items-center gap-1 px-1.5 h-5 rounded-[4px] border border-purple/30 bg-purple-wash text-purple mono text-[10px] font-medium uppercase tracking-[0.08em]">
             <span
               className={cn(
                 "h-1.5 w-1.5 rounded-full",
-                hasRunning ? "bg-indigo animate-pulse" : "bg-indigo/50",
+                hasRunning ? "bg-purple animate-pulse" : "bg-purple/50",
               )}
               aria-hidden
             />
@@ -192,7 +192,7 @@ function RunCard({
           </span>
           {run.isBackgrounded && (
             <span
-              className="inline-flex items-center px-1 h-4 rounded-[3px] border border-indigo/30 bg-indigo-wash/60 text-indigo mono text-[9px] uppercase tracking-[0.12em] shrink-0"
+              className="inline-flex items-center px-1 h-4 rounded-[3px] border border-purple/30 bg-purple-wash/60 text-purple mono text-[9px] uppercase tracking-[0.12em] shrink-0"
               title="Backgrounded"
             >
               bg
@@ -219,7 +219,7 @@ function RunCard({
           <Link
             to={fullPageHref}
             onClick={() => onNavigate?.()}
-            className="h-6 w-6 rounded-[6px] border border-line bg-canvas/60 flex items-center justify-center text-ink-muted hover:text-indigo hover:border-indigo/40 shrink-0"
+            className="h-6 w-6 rounded-[6px] border border-line bg-canvas/60 flex items-center justify-center text-ink-muted hover:text-purple hover:border-purple/40 shrink-0"
             aria-label="Open full-page view"
             title="Open full view"
           >
@@ -325,11 +325,11 @@ function LiveStream({
         <span
           className={cn(
             "h-1.5 w-1.5 rounded-full",
-            isLive ? "bg-indigo animate-pulse" : "bg-ink-faint",
+            isLive ? "bg-purple animate-pulse" : "bg-ink-faint",
           )}
           aria-hidden
         />
-        <span className="uppercase tracking-[0.12em] text-[10px] font-medium text-indigo">
+        <span className="uppercase tracking-[0.12em] text-[10px] font-medium text-purple">
           {isLive ? "Live stream" : "Transcript"}
         </span>
         <span className="mono text-[10px] text-ink-muted">
@@ -597,8 +597,8 @@ function StatusDot({ run }: { run: SubagentRun }) {
   if (run.status === "running") {
     return (
       <span
-        className="relative h-2 w-2 rounded-full bg-indigo animate-pulse shrink-0"
-        style={{ boxShadow: "0 0 0 3px rgba(59,75,138,0.22)" }}
+        className="relative h-2 w-2 rounded-full bg-purple animate-pulse shrink-0"
+        style={{ boxShadow: "0 0 0 3px rgba(124,95,163,0.22)" }}
         aria-hidden
       />
     );
@@ -643,11 +643,11 @@ function tintFor(status: SubagentRun["status"]): {
 } {
   if (status === "running") {
     return {
-      strip: "bg-indigo",
-      bg: "bg-indigo-wash/25",
-      border: "border-indigo/25",
-      chip: "border-indigo/40 text-indigo bg-canvas/80",
-      headerBorder: "border-indigo/20",
+      strip: "bg-purple",
+      bg: "bg-purple-wash/25",
+      border: "border-purple/25",
+      chip: "border-purple/40 text-purple bg-canvas/80",
+      headerBorder: "border-purple/20",
     };
   }
   if (status === "failed") {
@@ -701,7 +701,7 @@ function Caret() {
   return (
     <span
       aria-hidden
-      className="inline-block w-[2px] h-[0.95em] align-[-0.1em] ml-[3px] bg-indigo animate-pulse"
+      className="inline-block w-[2px] h-[0.95em] align-[-0.1em] ml-[3px] bg-purple animate-pulse"
     />
   );
 }

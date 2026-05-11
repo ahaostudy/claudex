@@ -115,6 +115,7 @@ function selectSessions(db: Database.Database): Session[] {
     stats_lines_removed: number;
     stats_context_pct: number;
     cli_jsonl_seq: number;
+    adopted_from_cli: number;
     tags: string;
     pinned: number;
   }>;
@@ -138,6 +139,7 @@ function selectSessions(db: Database.Database): Session[] {
     parentSessionId: r.parent_session_id,
     forkedFromSessionId: r.forked_from_session_id,
     cliJsonlSeq: r.cli_jsonl_seq ?? 0,
+    adoptedFromCli: r.adopted_from_cli === 1,
     tags: parseTagsBlob(r.tags),
     pinned: r.pinned === 1,
     // Backups mirror persisted columns only. `lastUserMessage` is a

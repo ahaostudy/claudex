@@ -111,20 +111,20 @@ you are creating that mess. Commit and push now; iterate on top.
    not on main.
 6. **Merge into local main, then push main. Auto-executes — do not
    ask for approval.** The user no longer edits main directly — every
-   batch reaches main via a worktree → merge → push chain. Worktree
-   branches are **never pushed to origin**. Full procedure
-   (clean-checkout preconditions, `--no-ff` merge, **merge-commit
-   message policy**, conflict handling) is in "Merging a worktree
-   session back into main" below; read it once, then from each
-   worktree session run these commands unprompted right after the
-   commit lands (the merge commit reuses the worktree branch's HEAD
-   commit message — see the subsection for why and for the "multiple
-   commits in one batch" caveat):
+   batch reaches main via a worktree → rebase → fast-forward → push
+   chain. Worktree branches are **never pushed to origin**. Full
+   procedure (clean-checkout preconditions, fast-forward merge,
+   **batch commit message policy**, conflict handling) is in "Merging
+   a worktree session back into main" below; read it once, then from
+   each worktree session run these commands unprompted right after
+   the commit lands. We rebase onto main first so the merge is always
+   a fast-forward — main stays linear, no merge commits, each batch
+   appears exactly once in the history:
    ```sh
    ROOT="$(git worktree list --porcelain | awk '/^worktree / {print $2; exit}')"
    BRANCH="$(git rev-parse --abbrev-ref HEAD)"
-   MSG="$(git log -1 --format=%B HEAD)"
-   git -C "$ROOT" merge --no-ff "$BRANCH" -m "$MSG"
+   git rebase main                          # no-op if already on tip
+   git -C "$ROOT" merge --ff-only "$BRANCH"
    https_proxy=http://localhost:7890 http_proxy=http://localhost:7890 \
      git -C "$ROOT" push origin main
    ```
@@ -326,42 +326,46 @@ work:
    and ask. The user may be mid-something on another branch; a silent
    branch-switch breaks their mental model.
 
-The merge itself — always `--no-ff` so the merge commit records that
-the work came from a claudex worktree (useful when bisecting later):
+The merge itself — always fast-forward (`--ff-only`) so main stays
+linear and each batch appears exactly once. Rebase the worktree branch
+onto main first, so the FF merge works even if a sibling session has
+since advanced main:
 ```sh
 ROOT="$(git worktree list --porcelain | awk '/^worktree / {print $2; exit}')"
 BRANCH="$(git rev-parse --abbrev-ref HEAD)"   # claude/<slug>-<suffix>
-MSG="$(git log -1 --format=%B HEAD)"
-git -C "$ROOT" merge --no-ff "$BRANCH" -m "$MSG"
+git rebase main                               # no-op if already on tip
+git -C "$ROOT" merge --ff-only "$BRANCH"
 ```
 
-**Merge-commit message policy.** Do NOT use the default
-`Merge $BRANCH into main` template — a main history full of "Merge
-claude/<nanoid>" lines tells the reader nothing about what actually
-changed, and the branch names (slug + nanoid) are noise once the
-worktree is gone. Reuse the batch commit's own message via
-`git log -1 --format=%B HEAD` as shown above so the merge commit
-reads as a real change description instead of plumbing noise. This
-is the common case — a claudex batch is usually a single commit on
-the worktree branch, so reusing its message is exactly right.
+**Why FF-only, not `--no-ff`.** An earlier policy used `--no-ff` so the
+merge commit would record "this batch came from a worktree" for
+bisecting later. In practice that value never materialized, and the
+cost did: every batch showed up twice in `git log --oneline` (once as
+the worktree commit, once as the merge commit reusing its message),
+which made main's history confusing to read. Clean linear history wins;
+dropped the merge commits.
 
-If the batch happens to span multiple commits on the worktree branch
-(rare — only when you intentionally split the work mid-batch), don't
-grab just the last commit's message. Instead write a fresh short
-subject that summarizes the batch the same way you'd write a standalone
-commit: one-line imperative subject, optional body, no "Merge …"
-prefix. Passing `-m "<that message>"` to `git merge --no-ff` is the
-mechanical part; the content is your call.
+**Batch commit message policy.** With FF-only, the worktree branch's
+commit lands **directly on main** — whatever message you wrote in step
+5 is what users see in `git log --oneline` forever. Treat it as a
+public commit: one-line imperative subject, optional body, no "wip" /
+"fix up" / "address feedback" phrasing. If the batch ended up as
+multiple commits on the worktree branch (rare — only when you
+intentionally split the work mid-batch), each of those commits will
+also land on main as-is, so each one needs to stand on its own. If any
+of them is a fixup/squash candidate, rebase-squash it into its parent
+on the worktree branch **before** this merge step.
 
-If `git merge` exits non-zero with conflicts, **abort and stop**:
+If `git rebase main` or `git merge --ff-only` exits non-zero,
+**abort and stop**:
 ```sh
-git -C "$ROOT" merge --abort
+git rebase --abort 2>/dev/null || true        # if the rebase is the one that failed
 ```
 Then report to the user. Do NOT try to resolve conflicts across two
 checkouts — the tooling is confusing, the blast radius is large, and
 the user has better context on which side should win. They'll tell you
-whether to rebase the worktree branch onto the updated main, merge
-main into the worktree for local resolution, or hand-edit from there.
+whether to re-run the rebase with manual resolution, merge main into
+the worktree for local resolution, or hand-edit from there.
 
 After the merge succeeds, push main through the proxy:
 ```sh

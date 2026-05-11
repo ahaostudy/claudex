@@ -37,6 +37,7 @@ interface SessionRow {
   stats_context_pct: number;
   stats_computed_seq: number;
   cli_jsonl_seq: number;
+  adopted_from_cli: number;
   tags: string;
   pinned: number;
   // Not a physical column — populated by the correlated subquery wrapped
@@ -117,6 +118,7 @@ function toSession(row: SessionRow): Session {
     parentSessionId: row.parent_session_id,
     forkedFromSessionId: row.forked_from_session_id,
     cliJsonlSeq: row.cli_jsonl_seq ?? 0,
+    adoptedFromCli: row.adopted_from_cli === 1,
     tags: parseTags(row.tags),
     pinned: row.pinned === 1,
     lastUserMessage: toPreview(row.last_user_message),
@@ -184,6 +186,7 @@ export class SessionStore {
     oldestEventSeq: Statement | null;
     getCliJsonlSeq: Statement | null;
     setCliJsonlSeq: Statement | null;
+    setAdoptedFromCli: Statement | null;
     findLastEventByKind: Statement | null;
     deleteEventsAboveSeq: Statement | null;
     updateEventPayload: Statement | null;
@@ -218,6 +221,7 @@ export class SessionStore {
     oldestEventSeq: null,
     getCliJsonlSeq: null,
     setCliJsonlSeq: null,
+    setAdoptedFromCli: null,
     findLastEventByKind: null,
     deleteEventsAboveSeq: null,
     updateEventPayload: null,
@@ -376,6 +380,7 @@ export class SessionStore {
       stats_context_pct: 0,
       stats_computed_seq: -1,
       cli_jsonl_seq: 0,
+      adopted_from_cli: 0,
       tags: "[]",
       pinned: 0,
     };
@@ -388,7 +393,7 @@ export class SessionStore {
            parent_session_id, forked_from_session_id,
            stats_messages, stats_files_changed, stats_lines_added,
            stats_lines_removed, stats_context_pct, stats_computed_seq,
-           cli_jsonl_seq, tags, pinned
+           cli_jsonl_seq, adopted_from_cli, tags, pinned
          ) VALUES (
            @id, @title, @project_id, @branch, @worktree_path, @status, @model, @mode,
            @effort,
@@ -396,7 +401,7 @@ export class SessionStore {
            @parent_session_id, @forked_from_session_id,
            @stats_messages, @stats_files_changed, @stats_lines_added,
            @stats_lines_removed, @stats_context_pct, @stats_computed_seq,
-           @cli_jsonl_seq, @tags, @pinned
+           @cli_jsonl_seq, @adopted_from_cli, @tags, @pinned
          )`,
     ).run(row);
     this.search.upsertTitle(row.id, row.title);
@@ -907,6 +912,21 @@ export class SessionStore {
       "setCliJsonlSeq",
       "UPDATE sessions SET cli_jsonl_seq = ? WHERE id = ?",
     ).run(seq, id);
+  }
+
+  /**
+   * Mark (or unmark) a session as "adopted from the `claude` CLI JSONL".
+   * Native claudex-spawned sessions stay false even though they also write
+   * the JSONL via the SDK — this flag is the sole input the cli-resync /
+   * cli-sync-watcher paths consult before re-importing from disk. Writing
+   * is idempotent; the flag is touched by cli-import.ts on first adopt
+   * and never flipped back.
+   */
+  setAdoptedFromCli(id: string, adopted: boolean): void {
+    this.lazyStmt(
+      "setAdoptedFromCli",
+      "UPDATE sessions SET adopted_from_cli = ? WHERE id = ?",
+    ).run(adopted ? 1 : 0, id);
   }
 
   /**

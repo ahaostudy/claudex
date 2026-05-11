@@ -15,8 +15,8 @@ import type { SubagentRun } from "@/state/sessions";
  *   [Agents] [●●●●] 2 live · 4 total  ›  <agent-type> <activeForm>  ▾
  *
  * Dots map one-per-run:
- *   • running  → indigo pill (animated glow)
- *   • stopped  → indigo/60 pill (dimmer)
+ *   • running  → purple pill (animated glow)
+ *   • stopped  → purple/60 pill (dimmer)
  *   • completed → small success dot
  *   • failed   → small danger dot
  *
@@ -49,7 +49,7 @@ export function SubagentsStrip({
       aria-label={`Subagents · ${live.length} live of ${runs.length}. Open full panel.`}
       className="w-full px-4 md:px-5 py-2 bg-paper/70 border-b border-line flex items-center gap-2 md:gap-3 shrink-0 hover:bg-paper active:bg-paper/90 transition-colors text-left"
     >
-      <span className="inline-flex items-center gap-1 px-1.5 h-5 rounded-[4px] border border-indigo/30 bg-indigo-wash text-indigo mono text-[10px] font-medium uppercase tracking-[0.08em] shrink-0">
+      <span className="inline-flex items-center gap-1 px-1.5 h-5 rounded-[4px] border border-purple/30 bg-purple-wash text-purple mono text-[10px] font-medium uppercase tracking-[0.08em] shrink-0">
         <Bot className="w-2.5 h-2.5" aria-hidden />
         Agents
       </span>
@@ -61,7 +61,7 @@ export function SubagentsStrip({
         ›
       </span>
       {active.agentType ? (
-        <span className="mono text-[11px] text-indigo shrink-0 max-w-[32ch] truncate">
+        <span className="mono text-[11px] text-purple shrink-0 max-w-[32ch] truncate">
           {active.agentType}
         </span>
       ) : null}
@@ -76,7 +76,7 @@ export function SubagentsStrip({
       </span>
       {active.isBackgrounded && (
         <span
-          className="inline-flex items-center gap-0.5 px-1 h-4 rounded-[3px] border border-indigo/30 bg-indigo-wash/60 text-indigo mono text-[9px] uppercase tracking-[0.12em] shrink-0"
+          className="inline-flex items-center gap-0.5 px-1 h-4 rounded-[3px] border border-purple/30 bg-purple-wash/60 text-purple mono text-[9px] uppercase tracking-[0.12em] shrink-0"
           title="Backgrounded — running without blocking the parent turn"
         >
           bg
@@ -121,7 +121,7 @@ function StatusDots({ runs }: { runs: SubagentRun[] }) {
       className="h-1.5 w-20 md:w-28 rounded-full bg-line overflow-hidden shrink-0"
       aria-hidden
     >
-      <span className="block h-full bg-indigo" style={{ width: `${pct}%` }} />
+      <span className="block h-full bg-purple" style={{ width: `${pct}%` }} />
     </span>
   );
 }
@@ -130,13 +130,13 @@ function StatusDot({ run }: { run: SubagentRun }) {
   if (run.status === "running") {
     return (
       <span
-        className="h-1.5 w-3 md:w-3.5 rounded-full bg-indigo"
-        style={{ boxShadow: "0 0 0 2px rgba(59,75,138,0.20)" }}
+        className="h-1.5 w-3 md:w-3.5 rounded-full bg-purple"
+        style={{ boxShadow: "0 0 0 2px rgba(124,95,163,0.20)" }}
       />
     );
   }
   if (run.status === "stopped") {
-    return <span className="h-1.5 w-3 rounded-full bg-indigo/60" />;
+    return <span className="h-1.5 w-3 rounded-full bg-purple/60" />;
   }
   if (run.status === "failed") {
     return <span className="h-1.5 w-1.5 rounded-full bg-danger/70" />;
@@ -154,7 +154,7 @@ function Caret() {
   return (
     <span
       aria-hidden
-      className="inline-block w-[2px] h-[0.95em] align-[-0.1em] ml-[3px] bg-indigo animate-pulse"
+      className="inline-block w-[2px] h-[0.95em] align-[-0.1em] ml-[3px] bg-purple animate-pulse"
     />
   );
 }

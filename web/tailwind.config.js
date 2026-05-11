@@ -25,7 +25,8 @@ export default {
         success: { DEFAULT: "#3f9142", wash: "#e3efe0" },
         warn: { DEFAULT: "#d97706", wash: "#fbeecf" },
         danger: { DEFAULT: "#c1272d", wash: "#f5d9d9" },
-        indigo: { DEFAULT: "#3b4b8a", wash: "#dde1f0" },
+        indigo: { DEFAULT: "#3b4b8a", wash: "#dde1f0", ink: "#27325c" },
+        purple: { DEFAULT: "#7c5fa3", wash: "#eae2f2" },
       },
       fontFamily: {
         serif: ['"Fraunces"', "Georgia", "ui-serif", "serif"],

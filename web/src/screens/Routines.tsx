@@ -18,6 +18,8 @@ import type {
 import { api, ApiError } from "@/api/client";
 import { AppShell } from "@/components/AppShell";
 import { timeAgoOrInShort } from "@/lib/format";
+import { getAllModelEntries } from "@/lib/pricing";
+import { useAppSettings, useCustomModels } from "@/state/app-settings";
 
 // Inlined version of RoutinesSheet contents as a full-page screen. The old
 // sheet is kept around for the "Run now → navigate into session" flow but
@@ -340,6 +342,10 @@ function RoutineEditor({
   onCancel: () => void;
   onSaved: () => Promise<void>;
 }) {
+  const loadSettings = useAppSettings((s) => s.load);
+  const customModels = useCustomModels();
+  const modelEntries = getAllModelEntries(customModels);
+  useEffect(() => { loadSettings(); }, [loadSettings]);
   const [name, setName] = useState(initial?.name ?? "");
   const [projectId, setProjectId] = useState(
     initial?.projectId ?? projects[0]?.id ?? "",
@@ -517,13 +523,7 @@ function RoutineEditor({
               Model
             </div>
             <div className="grid grid-cols-3 gap-2">
-              {(
-                [
-                  { id: "claude-opus-4-7", label: "Opus 4.7" },
-                  { id: "claude-sonnet-4-6", label: "Sonnet 4.6" },
-                  { id: "claude-haiku-4-5", label: "Haiku 4.5" },
-                ] as Array<{ id: ModelId; label: string }>
-              ).map((m) => (
+              {modelEntries.map((m) => (
                 <button
                   key={m.id}
                   onClick={() => setModel(m.id)}

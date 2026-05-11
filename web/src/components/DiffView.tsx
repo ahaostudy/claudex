@@ -76,14 +76,15 @@ export function DiffView({
   //     (lib/tool-summary): PencilLine for Edit, FilePlus for Write —
   //     whether the Write creates a new file (kind="create") or
   //     overwrites an existing one (kind="overwrite").
-  //   - LABEL is the action verb uppercase; file is the basename only
-  //     (full path in the title so mobile hover/tap shows it).
+  //   - LABEL matches the tool-row convention — Pascal-case, same size/
+  //     color as `Bash`/`Read` labels in ToolCallBlock so a diff header
+  //     sits flush with neighboring tool rows.
   const label =
     diff.kind === "create"
-      ? "CREATE"
+      ? "Create"
       : diff.kind === "overwrite"
-        ? "OVERWRITE"
-        : "EDIT";
+        ? "Overwrite"
+        : "Edit";
   const KindIcon = diff.kind === "edit" ? PencilLine : FilePlus;
   const slash = diff.path.lastIndexOf("/");
   const basename = slash >= 0 ? diff.path.slice(slash + 1) : diff.path;
@@ -106,7 +107,7 @@ export function DiffView({
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
         className={cn(
-          "flex w-full items-center gap-2 px-3 py-1.5 bg-paper border-b border-line text-left hover:bg-paper/80 max-w-full min-w-0",
+          "flex w-full items-center gap-2 py-1.5 pl-2 pr-3 bg-paper border-b border-line text-left hover:bg-paper/80 max-w-full min-w-0",
           enableSticky && "sticky top-0 z-10 rounded-t-[9px] overflow-hidden",
         )}
         title={diff.path}
@@ -117,8 +118,8 @@ export function DiffView({
             open && "rotate-90",
           )}
         />
-        <KindIcon className="w-3.5 h-3.5 text-ink-muted shrink-0" />
-        <span className="mono text-[10px] uppercase tracking-[0.12em] text-ink-muted shrink-0">
+        <KindIcon className="w-3.5 h-3.5 text-ink-soft shrink-0" />
+        <span className="mono text-[12px] text-ink-soft shrink-0">
           {label}
         </span>
         <span

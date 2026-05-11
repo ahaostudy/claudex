@@ -16,6 +16,8 @@ import type {
 } from "@claudex/shared";
 import { effortSupportedOnModel } from "@claudex/shared";
 import { useFocusReturn } from "@/hooks/useFocusReturn";
+import { getAllModelEntries, getModelLabel } from "@/lib/pricing";
+import { useAppSettings, useCustomModels } from "@/state/app-settings";
 
 /**
  * Session settings sheet. Rebuilt to match mockup s-10.
@@ -58,6 +60,9 @@ export function SessionSettingsSheet({
   variant?: "overlay" | "rail";
 }) {
   useFocusReturn(variant !== "rail");
+  const loadSettings = useAppSettings((s) => s.load);
+  const customModels = useCustomModels();
+  useEffect(() => { loadSettings(); }, [loadSettings]);
   const [model, setModel] = useState<ModelId>(session.model);
   const [mode, setMode] = useState<PermissionMode>(session.mode);
   const [effort, setEffort] = useState<EffortLevel>(session.effort);
@@ -336,11 +341,17 @@ export function SessionSettingsSheet({
     ? "Archive session & remove worktree"
     : "Archive";
 
-  const MODELS: Array<{ id: ModelId; label: string; sub: string; subDesktop: string }> = [
-    { id: "claude-opus-4-7", label: "Opus 4.7", sub: "latest", subDesktop: "latest · adaptive" },
-    { id: "claude-sonnet-4-6", label: "Sonnet 4.6", sub: "balanced", subDesktop: "balanced" },
-    { id: "claude-haiku-4-5", label: "Haiku 4.5", sub: "fast", subDesktop: "fast" },
-  ];
+  const allEntries = getAllModelEntries(customModels);
+  const MODELS: Array<{ id: string; label: string; sub: string; subDesktop: string }> = allEntries.map((m) => {
+    const builtin = m.id === "claude-opus-4-7"
+      ? { sub: "latest", subDesktop: "latest · adaptive" }
+      : m.id === "claude-sonnet-4-6"
+        ? { sub: "balanced", subDesktop: "balanced" }
+        : m.id === "claude-haiku-4-5"
+          ? { sub: "fast", subDesktop: "fast" }
+          : { sub: "custom", subDesktop: "custom" };
+    return { id: m.id, label: m.label, ...builtin };
+  });
 
   const MODES: Array<[PermissionMode, string]> = [
     ["default", "Ask"],

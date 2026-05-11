@@ -1,12 +1,12 @@
 import type Database from "better-sqlite3";
-import type { AppSettings } from "@claudex/shared";
+import type { AppSettings, CustomModel } from "@claudex/shared";
 
 // -----------------------------------------------------------------------------
 // AppSettingsStore — global (singleton) user preferences for claudex itself.
 //
 // Unlike per-session config (which lives on the `sessions` row), these are
 // knobs that should feel "app-level" — e.g. the default output language to
-// nudge Claude toward on every new session.
+// nudge Claude toward on every new session, or user-defined custom models.
 //
 // Storage shape is a key-value table (`app_settings`, migration 24). A KV
 // store rather than a single-row typed table so future additions (theme /
@@ -20,12 +20,14 @@ import type { AppSettings } from "@claudex/shared";
 //   - Writing a `null` via `patch()` DELETEs the key rather than writing the
 //     string "null". Get-after-delete returns `null` and the runner simply
 //     omits `systemPrompt` on session start.
+//   - `customModels` is stored as a JSON string under the `custom_models` key.
+//     `null` → no custom models (empty array on read).
 // -----------------------------------------------------------------------------
 
 // Keys we persist in `app_settings`. Kept as a literal tuple so the store
 // knows which rows to SELECT back into the typed view — unknown keys in the
 // table are ignored (future-proof for partial migrations).
-const KNOWN_KEYS = ["language"] as const;
+const KNOWN_KEYS = ["language", "custom_models"] as const;
 type KnownKey = (typeof KNOWN_KEYS)[number];
 
 export class AppSettingsStore {
@@ -43,8 +45,23 @@ export class AppSettingsStore {
       )
       .all(...KNOWN_KEYS) as Array<{ key: string; value: string }>;
     const map = new Map(rows.map((r) => [r.key, r.value]));
+
+    let customModels: CustomModel[] | null = null;
+    const raw = map.get("custom_models");
+    if (raw) {
+      try {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          customModels = parsed as CustomModel[];
+        }
+      } catch {
+        // corrupted JSON — treat as no custom models
+      }
+    }
+
     return {
       language: map.get("language") ?? null,
+      customModels,
     };
   }
 
@@ -71,6 +88,13 @@ export class AppSettingsStore {
     const entries: Array<[KnownKey, string | null]> = [];
     if ("language" in partial) {
       entries.push(["language", partial.language ?? null]);
+    }
+    if ("customModels" in partial) {
+      const val = partial.customModels;
+      entries.push([
+        "custom_models",
+        val === null ? null : JSON.stringify(val),
+      ]);
     }
     tx(entries);
     return this.get();

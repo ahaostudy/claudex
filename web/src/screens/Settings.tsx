@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
+import { createPortal } from "react-dom";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   Bell,
   BellOff,
+  Bot,
   Bug,
   Check,
   ChevronDown,
@@ -13,6 +15,7 @@ import {
   Info,
   KeyRound,
   Palette,
+  Pencil,
   Plug,
   RefreshCw,
   ScrollText,
@@ -26,7 +29,10 @@ import {
 } from "lucide-react";
 import { useAuth } from "@/state/auth";
 import { api, ApiError, type WorktreeSummary } from "@/api/client";
-import type { Project, PushDevice, UserEnvResponse, AuditEvent, ToolGrant, ImportAllResponse, SupportedLanguage } from "@claudex/shared";
+import type {
+  Project, PushDevice, UserEnvResponse, AuditEvent,
+  ToolGrant, ImportAllResponse, SupportedLanguage, CustomModel,
+} from "@claudex/shared";
 import { SUPPORTED_LANGUAGES } from "@claudex/shared";
 import { Logo } from "@/components/Logo";
 import { cn } from "@/lib/cn";
@@ -45,6 +51,7 @@ import {
   unsubscribeFromPush,
 } from "@/lib/push";
 import { useFocusReturn } from "@/hooks/useFocusReturn";
+import { useAppSettings, useCustomModels } from "@/state/app-settings";
 
 // ---------------------------------------------------------------------------
 // Settings — mockup s-12 structure.
@@ -71,6 +78,7 @@ type Tab =
   | "security"
   | "notifications"
   | "appearance"
+  | "models"
   | "mcp"
   | "plugins"
   | "environment"
@@ -120,6 +128,14 @@ const TABS: TabSpec[] = [
     caps: "appearance",
     title: "Light theme today.",
     lede: "Dark and text-size live here later. For now claudex ships with a single calm-paper theme.",
+  },
+  {
+    id: "models",
+    label: "Models",
+    icon: Bot,
+    caps: "models",
+    title: "Custom models for your proxy.",
+    lede: "Add model IDs from your self-hosted API proxy (OneAPI, New API, etc.) alongside the built-in Claude models.",
   },
   {
     id: "mcp",
@@ -333,6 +349,7 @@ export function SettingsScreen() {
                 {tab === "security" && <SecurityPanel />}
                 {tab === "notifications" && <NotificationsPanel />}
                 {tab === "appearance" && <AppearancePanel />}
+                {tab === "models" && <ModelsPanel />}
                 {tab === "mcp" && <McpPanel onPlugins={() => setTab("plugins")} />}
                 {tab === "plugins" && <PluginsPanel />}
                 {tab === "environment" && <EnvironmentPanel />}
@@ -1894,22 +1911,38 @@ function LanguageSelect({
   onPick: (next: SupportedLanguage | null) => void;
 }) {
   const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState<{ left: number; top: number; width: number } | null>(null);
+
   useEffect(() => {
     if (!open) return;
+    const recalc = () => {
+      const el = btnRef.current;
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      setPos({ left: r.left, top: r.bottom + 6, width: r.width });
+    };
+    recalc();
     const onDoc = (ev: MouseEvent) => {
-      if (ref.current && !ref.current.contains(ev.target as Node)) {
-        setOpen(false);
-      }
+      const t = ev.target as Node;
+      if (wrapRef.current?.contains(t)) return;
+      if (menuRef.current?.contains(t)) return;
+      setOpen(false);
     };
     const onKey = (ev: KeyboardEvent) => {
       if (ev.key === "Escape") setOpen(false);
     };
     window.addEventListener("mousedown", onDoc);
     window.addEventListener("keydown", onKey);
+    window.addEventListener("resize", recalc);
+    window.addEventListener("scroll", recalc, true);
     return () => {
       window.removeEventListener("mousedown", onDoc);
       window.removeEventListener("keydown", onKey);
+      window.removeEventListener("resize", recalc);
+      window.removeEventListener("scroll", recalc, true);
     };
   }, [open]);
   const label = value
@@ -1920,8 +1953,9 @@ function LanguageSelect({
     onPick(next);
   };
   return (
-    <div ref={ref} className="relative w-full max-w-[260px]">
+    <div ref={wrapRef} className="relative w-full max-w-[260px]">
       <button
+        ref={btnRef}
         type="button"
         onClick={() => !disabled && setOpen((v) => !v)}
         disabled={disabled}
@@ -1942,27 +1976,32 @@ function LanguageSelect({
           )}
         />
       </button>
-      {open && (
-        <div
-          role="listbox"
-          className="absolute left-0 right-0 mt-1.5 z-30 rounded-[10px] border border-line bg-canvas shadow-lift p-1 max-h-[280px] overflow-auto"
-        >
-          <LangOption
-            label="Auto (defer to ~/.claude/settings.json)"
-            active={value === null}
-            onClick={() => pick(null)}
-          />
-          <div className="my-1 h-px bg-line/60" aria-hidden />
-          {SUPPORTED_LANGUAGES.map((lang) => (
-            <LangOption
-              key={lang}
-              label={LANGUAGE_LABELS[lang] ?? lang}
-              active={value === lang}
-              onClick={() => pick(lang)}
-            />
-          ))}
-        </div>
-      )}
+      {open && pos && typeof document !== "undefined"
+        ? createPortal(
+            <div
+              ref={menuRef}
+              role="listbox"
+              style={{ left: pos.left, top: pos.top, width: pos.width }}
+              className="fixed z-[60] rounded-[10px] border border-line bg-canvas shadow-lift p-1 max-h-[280px] overflow-auto"
+            >
+              <LangOption
+                label="Auto (defer to ~/.claude/settings.json)"
+                active={value === null}
+                onClick={() => pick(null)}
+              />
+              <div className="my-1 h-px bg-line/60" aria-hidden />
+              {SUPPORTED_LANGUAGES.map((lang) => (
+                <LangOption
+                  key={lang}
+                  label={LANGUAGE_LABELS[lang] ?? lang}
+                  active={value === lang}
+                  onClick={() => pick(lang)}
+                />
+              ))}
+            </div>,
+            document.body,
+          )
+        : null}
     </div>
   );
 }
@@ -2180,6 +2219,379 @@ function EnvironmentPanel() {
 // render with a red dot and a Remove button. A bulk "Prune N orphans" action
 // sits at the bottom when any orphans exist.
 // ----------------------------------------------------------------------------
+
+// Built-in Claude model info (read-only display in the Models panel).
+const BUILTIN_MODEL_INFO = [
+  { id: "claude-opus-4-7", label: "Opus 4.7", context: "1M tokens" },
+  { id: "claude-sonnet-4-6", label: "Sonnet 4.6", context: "1M tokens" },
+  { id: "claude-haiku-4-5", label: "Haiku 4.5", context: "200k tokens" },
+];
+
+// Context-window input helper. We display the value in a user-friendly unit
+// (tokens / k / M) but persist the raw token count. `pickDisplayUnit` picks
+// the cleanest unit for a given token count so round values (128000 → 128k,
+// 1000000 → 1M) avoid awkward decimal representations.
+type CtxUnit = "tokens" | "k" | "M";
+const CTX_UNIT_MULTIPLIER: Record<CtxUnit, number> = {
+  tokens: 1,
+  k: 1_000,
+  M: 1_000_000,
+};
+function pickDisplayUnit(tokens: number): { value: string; unit: CtxUnit } {
+  if (tokens >= 1_000_000 && tokens % 1_000_000 === 0) {
+    return { value: String(tokens / 1_000_000), unit: "M" };
+  }
+  if (tokens >= 1_000 && tokens % 1_000 === 0) {
+    return { value: String(tokens / 1_000), unit: "k" };
+  }
+  return { value: String(tokens), unit: "tokens" };
+}
+
+// Common presets — tap to fill.
+const CTX_PRESETS: Array<{ label: string; tokens: number }> = [
+  { label: "128k", tokens: 128_000 },
+  { label: "200k", tokens: 200_000 },
+  { label: "256k", tokens: 256_000 },
+  { label: "1M", tokens: 1_000_000 },
+];
+
+const CTX_UNIT_LABEL: Record<CtxUnit, string> = {
+  tokens: "tokens",
+  k: "k tokens",
+  M: "M tokens",
+};
+
+// Custom dropdown for the context-window unit selector. Native <select>
+// renders differently per platform (iOS especially) — we want the same
+// calm-paper look as the rest of the form. Matches the PillPicker pattern
+// from Chat.tsx (outside-click + Escape to close).
+function CtxUnitDropdown({
+  value,
+  onChange,
+}: {
+  value: CtxUnit;
+  onChange: (next: CtxUnit) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (ev: MouseEvent) => {
+      if (ref.current && !ref.current.contains(ev.target as Node)) setOpen(false);
+    };
+    const onKey = (ev: KeyboardEvent) => {
+      if (ev.key === "Escape") setOpen(false);
+    };
+    window.addEventListener("mousedown", onDoc);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", onDoc);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+  const UNITS: CtxUnit[] = ["tokens", "k", "M"];
+  return (
+    <div ref={ref} className="relative shrink-0">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="h-9 px-3 rounded-[6px] border border-line bg-canvas text-[13px] flex items-center gap-1.5 hover:bg-paper whitespace-nowrap"
+      >
+        <span>{CTX_UNIT_LABEL[value]}</span>
+        <ChevronDown className="w-3.5 h-3.5 text-ink-muted shrink-0" />
+      </button>
+      {open && (
+        <div
+          role="menu"
+          className="absolute right-0 mt-1.5 z-30 w-[140px] rounded-[10px] border border-line bg-canvas shadow-lift p-1"
+        >
+          {UNITS.map((u) => {
+            const active = u === value;
+            return (
+              <button
+                key={u}
+                type="button"
+                role="menuitemradio"
+                aria-checked={active}
+                onClick={() => {
+                  onChange(u);
+                  setOpen(false);
+                }}
+                className={cn(
+                  "w-full flex items-center gap-2 px-2 py-1.5 rounded-[6px] text-left text-[13px]",
+                  active
+                    ? "bg-klein-wash/40 text-ink"
+                    : "text-ink-soft hover:bg-paper/60",
+                )}
+              >
+                <span
+                  className={cn(
+                    "h-3.5 w-3.5 rounded-full border-2 shrink-0 flex items-center justify-center",
+                    active
+                      ? "border-klein bg-klein text-canvas"
+                      : "border-line-strong bg-canvas",
+                  )}
+                >
+                  {active && <Check className="w-2 h-2" />}
+                </span>
+                <span>{CTX_UNIT_LABEL[u]}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ModelsPanel() {
+  const loadSettings = useAppSettings((s) => s.load);
+  const patch = useAppSettings((s) => s.patch);
+  const customModels = useCustomModels();
+  useEffect(() => { loadSettings(); }, [loadSettings]);
+
+  const [adding, setAdding] = useState(false);
+  const [editId, setEditId] = useState<string | null>(null);
+  const [draft, setDraft] = useState<{
+    id: string;
+    label: string;
+    contextWindow: string;
+    ctxUnit: CtxUnit;
+  }>({ id: "", label: "", contextWindow: "", ctxUnit: "k" });
+  const [err, setErr] = useState<string | null>(null);
+
+  function startAdd() {
+    setDraft({ id: "", label: "", contextWindow: "", ctxUnit: "k" });
+    setErr(null);
+    setAdding(true);
+    setEditId(null);
+  }
+
+  function startEdit(m: CustomModel) {
+    const d = m.contextWindow
+      ? pickDisplayUnit(m.contextWindow)
+      : { value: "", unit: "k" as CtxUnit };
+    setDraft({
+      id: m.id,
+      label: m.label,
+      contextWindow: d.value,
+      ctxUnit: d.unit,
+    });
+    setErr(null);
+    setEditId(m.id);
+    setAdding(false);
+  }
+
+  function cancelForm() {
+    setAdding(false);
+    setEditId(null);
+    setErr(null);
+  }
+
+  function applyPreset(tokens: number) {
+    const d = pickDisplayUnit(tokens);
+    setDraft({ ...draft, contextWindow: d.value, ctxUnit: d.unit });
+  }
+
+  function save() {
+    const id = draft.id.trim();
+    const label = draft.label.trim();
+    if (!id) return setErr("Model ID is required.");
+    if (!label) return setErr("Label is required.");
+    // Check for duplicate id (excluding the entry being edited)
+    const others = customModels.filter((m) => m.id !== editId);
+    if (others.some((m) => m.id === id)) {
+      return setErr("A model with this ID already exists.");
+    }
+    const ctxRaw = draft.contextWindow.trim();
+    let ctxTokens: number | undefined;
+    if (ctxRaw) {
+      const num = parseFloat(ctxRaw);
+      if (!Number.isFinite(num) || num <= 0) {
+        return setErr("Context window must be a positive number.");
+      }
+      ctxTokens = Math.round(num * CTX_UNIT_MULTIPLIER[draft.ctxUnit]);
+    }
+    const entry: CustomModel = {
+      id,
+      label,
+      ...(ctxTokens ? { contextWindow: ctxTokens } : {}),
+    };
+    const next = editId
+      ? others.concat(entry)
+      : [...customModels, entry];
+    patch({ customModels: next });
+    setAdding(false);
+    setEditId(null);
+  }
+
+  function remove(id: string) {
+    patch({ customModels: customModels.filter((m) => m.id !== id) });
+  }
+
+  const showForm = adding || editId !== null;
+
+  return (
+    <div className="space-y-5">
+      {/* Built-in models */}
+      <div className="rounded-[12px] border border-line bg-paper/30 overflow-hidden">
+        <div className="px-5 py-3 border-b border-line">
+          <div className="display text-[16px] leading-tight">Built-in models</div>
+          <div className="text-[13px] text-ink-muted mt-1">Shipped with claudex. Always available.</div>
+        </div>
+        <div className="divide-y divide-line">
+          {BUILTIN_MODEL_INFO.map((m) => (
+            <div key={m.id} className="flex items-center justify-between px-5 py-3">
+              <div>
+                <div className="text-[14px] font-medium">{m.label}</div>
+                <div className="text-[12px] text-ink-muted font-mono">{m.id} · {m.context}</div>
+              </div>
+              <span className="text-[11px] font-medium uppercase tracking-[0.1em] text-ink-muted px-2 py-0.5 rounded-[4px] bg-paper border border-line">built-in</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Custom models */}
+      <div className="rounded-[12px] border border-line bg-paper/30 overflow-hidden">
+        <div className="flex items-center justify-between px-5 py-3 border-b border-line">
+          <div>
+            <div className="display text-[16px] leading-tight">Custom models</div>
+            <div className="text-[13px] text-ink-muted mt-1">Models from your self-hosted API proxy.</div>
+          </div>
+          <button
+            onClick={startAdd}
+            className="h-8 px-3 rounded-[6px] bg-ink text-canvas text-[12px] font-medium flex items-center gap-1.5 shrink-0"
+          >
+            + Add
+          </button>
+        </div>
+
+        {customModels.length === 0 && !showForm && (
+          <div className="px-5 py-6 text-[13px] text-ink-muted text-center">
+            No custom models yet. Add one to use models from your proxy.
+          </div>
+        )}
+
+        {customModels.length > 0 && (
+          <div className="divide-y divide-line">
+            {customModels.map((m) => (
+              <div key={m.id} className="flex items-center justify-between px-5 py-3">
+                <div className="min-w-0">
+                  <div className="text-[14px] font-medium">{m.label}</div>
+                  <div className="text-[12px] text-ink-muted font-mono truncate">
+                    {m.id}{m.contextWindow ? ` · ${(m.contextWindow / 1000).toLocaleString()}k tokens` : ""}
+                  </div>
+                </div>
+                <div className="flex items-center gap-1 shrink-0 ml-2">
+                  <button
+                    onClick={() => startEdit(m)}
+                    className="h-7 w-7 flex items-center justify-center rounded-[4px] text-ink-muted hover:bg-paper"
+                    title="Edit"
+                  >
+                    <Pencil className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    onClick={() => remove(m.id)}
+                    className="h-7 w-7 flex items-center justify-center rounded-[4px] text-danger hover:bg-danger/10"
+                    title="Remove"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {showForm && (
+          <div className="px-5 py-4 border-t border-line space-y-3">
+            <div>
+              <label className="text-[12px] uppercase tracking-[0.14em] text-ink-muted mb-1 block">Model ID</label>
+              <input
+                value={draft.id}
+                onChange={(e) => setDraft({ ...draft, id: e.target.value })}
+                placeholder="e.g. gpt-4o, deepseek-chat"
+                className="w-full h-9 px-3 bg-canvas border border-line rounded-[6px] text-[13px] font-mono"
+                disabled={editId !== null}
+              />
+              <div className="text-[11px] text-ink-muted mt-1">The exact model string your proxy accepts.</div>
+            </div>
+            <div>
+              <label className="text-[12px] uppercase tracking-[0.14em] text-ink-muted mb-1 block">Label</label>
+              <input
+                value={draft.label}
+                onChange={(e) => setDraft({ ...draft, label: e.target.value })}
+                placeholder="e.g. GPT-4o, DeepSeek Chat"
+                className="w-full h-9 px-3 bg-canvas border border-line rounded-[6px] text-[13px]"
+              />
+            </div>
+            <div>
+              <label className="text-[12px] uppercase tracking-[0.14em] text-ink-muted mb-1 block">Context window (optional)</label>
+              {/* Quick presets — tap to fill with the most common values. */}
+              <div className="flex gap-1.5 mb-2 flex-wrap">
+                {CTX_PRESETS.map((p) => {
+                  const currentTokens =
+                    draft.contextWindow.trim() && Number.isFinite(parseFloat(draft.contextWindow))
+                      ? Math.round(parseFloat(draft.contextWindow) * CTX_UNIT_MULTIPLIER[draft.ctxUnit])
+                      : 0;
+                  const active = currentTokens === p.tokens;
+                  return (
+                    <button
+                      key={p.label}
+                      type="button"
+                      onClick={() => applyPreset(p.tokens)}
+                      className={`h-7 px-2.5 rounded-[6px] text-[12px] font-medium border ${
+                        active
+                          ? "border-ink bg-canvas text-ink"
+                          : "border-line bg-paper text-ink-muted hover:text-ink"
+                      }`}
+                    >
+                      {p.label}
+                    </button>
+                  );
+                })}
+              </div>
+              {/* Value + unit selector. Value is displayed in the chosen unit
+                  and multiplied at save-time. */}
+              <div className="flex gap-1.5">
+                <input
+                  value={draft.contextWindow}
+                  onChange={(e) => setDraft({ ...draft, contextWindow: e.target.value })}
+                  placeholder="e.g. 128"
+                  type="number"
+                  step="any"
+                  min="0"
+                  className="flex-1 min-w-0 h-9 px-3 bg-canvas border border-line rounded-[6px] text-[13px]"
+                />
+                <CtxUnitDropdown
+                  value={draft.ctxUnit}
+                  onChange={(u) => setDraft({ ...draft, ctxUnit: u })}
+                />
+              </div>
+              <div className="text-[11px] text-ink-muted mt-1">Used for the context-percentage ring. Leave blank for the 1M default.</div>
+            </div>
+            {err && <div className="text-[12px] text-danger">{err}</div>}
+            <div className="flex gap-2">
+              <button
+                onClick={save}
+                className="h-9 px-4 rounded-[6px] bg-ink text-canvas text-[13px] font-medium"
+              >
+                {editId ? "Update" : "Add"}
+              </button>
+              <button
+                onClick={cancelForm}
+                className="h-9 px-4 rounded-[6px] border border-line text-[13px] text-ink-muted"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
 
 function AdvancedPanel() {
   return (

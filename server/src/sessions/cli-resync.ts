@@ -50,6 +50,17 @@ export async function resyncCliSession(
 ): Promise<CliResyncResult> {
   const sdkId = session.sdkSessionId;
   if (!sdkId) return { added: 0, newJsonlSeq: 0 };
+  // Native claudex sessions share the same `<sdk-id>.jsonl` file on disk
+  // (because the SDK writes the CLI's transcript format), but that file is
+  // a *consequence* of events claudex already has, not a source of truth
+  // we should re-import. Re-importing here is what caused user_message
+  // attachments to vanish after migration 25 — the JSONL only carries the
+  // rendered `@<path>` prompt, not the original attachment metadata.
+  // `adoptedFromCli` is the sole gate; cli-import.ts flips it on when a
+  // real adoption happens.
+  if (session.adoptedFromCli !== true) {
+    return { added: 0, newJsonlSeq: session.cliJsonlSeq ?? 0 };
+  }
 
   const root = deps.cliProjectsRoot ?? defaultCliProjectsRoot();
   // The CLI's slug is `cwd.replaceAll("/", "-")`. We know the cwd via the
@@ -125,6 +136,10 @@ export function triggerCliResync(args: {
   };
 }): void {
   const id = args.sessionRow.id;
+  // Fast-path: skip native sessions entirely rather than spin up a promise
+  // just to bail inside `resyncCliSession`. Keeps the `inflight` map clean
+  // and the logs quiet — every `GET /api/sessions/:id` used to fire this.
+  if (args.sessionRow.adoptedFromCli !== true) return;
   if (inflight.has(id)) return;
   const p = resyncCliSession(
     {

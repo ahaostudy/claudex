@@ -21,6 +21,8 @@ import { api, ApiError } from "@/api/client";
 import { AppShell } from "@/components/AppShell";
 import { timeAgoShort } from "@/lib/format";
 import { useFocusReturn } from "@/hooks/useFocusReturn";
+import { getAllModelEntries } from "@/lib/pricing";
+import { useAppSettings, useCustomModels } from "@/state/app-settings";
 
 /**
  * Queue screen — the user composes several prompts and the server dispatches
@@ -734,6 +736,10 @@ function QueueEditor({
   onSaved: () => Promise<void>;
 }) {
   useFocusReturn();
+  const loadSettings = useAppSettings((s) => s.load);
+  const customModels = useCustomModels();
+  const modelEntries = getAllModelEntries(customModels);
+  useEffect(() => { loadSettings(); }, [loadSettings]);
   const [projectId, setProjectId] = useState(
     initial?.projectId ?? projects[0]?.id ?? "",
   );
@@ -935,13 +941,7 @@ function QueueEditor({
               Model
             </div>
             <div className="grid grid-cols-3 gap-2">
-              {(
-                [
-                  { id: "claude-opus-4-7", label: "Opus 4.7" },
-                  { id: "claude-sonnet-4-6", label: "Sonnet 4.6" },
-                  { id: "claude-haiku-4-5", label: "Haiku 4.5" },
-                ] as Array<{ id: ModelId; label: string }>
-              ).map((m) => (
+              {modelEntries.map((m) => (
                 <button
                   key={m.id}
                   onClick={() => setModel(m.id)}

@@ -72,19 +72,15 @@ import type { SlashCommand } from "@/lib/slash-commands";
 import { BUILTIN_FALLBACK_SLASH_COMMANDS } from "@/lib/slash-commands";
 import type { UIPiece } from "@/state/sessions";
 import { contextWindowTokens } from "@/lib/usage";
-import { MODEL_LABEL } from "@/lib/pricing";
+import { getModelLabel, getAllModelEntries } from "@/lib/pricing";
+import { useAppSettings, useCustomModels } from "@/state/app-settings";
 import { extractImagesFromText, type ImageRef } from "@/lib/images";
 import { useVisualViewport } from "@/hooks/useVisualViewport";
 
 // ---------------------------------------------------------------------------
 // Model / mode label tables shared by the desktop header pills and the chat
-// overflow sheet. Keep these in sync with NewSessionSheet in Home.
+// overflow sheet. Built-in list from pricing.ts + custom models from app settings.
 // ---------------------------------------------------------------------------
-const MODEL_IDS: ModelId[] = [
-  "claude-opus-4-7",
-  "claude-sonnet-4-6",
-  "claude-haiku-4-5",
-];
 const MODE_LABEL: Record<PermissionMode, string> = {
   default: "Ask",
   acceptEdits: "Accept",
@@ -143,7 +139,7 @@ type RenderEntry =
 /** True when a tool_use should fold into an adjacent group. Only two
  * kinds of tool_use opt out: pieces owned by a subagent (filtered by
  * applyViewMode upstream — guard defensively here), and the Task/Agent/
- * Explore dispatches that render as indigo pointers + have their own
+ * Explore dispatches that render as purple pointers + have their own
  * drawer. Everything else groups, including Edit/Write/MultiEdit (diff
  * cards) and TodoWrite (plan pointer) — when expanded, each child still
  * renders its existing rich surface inside the group body. */
@@ -251,9 +247,14 @@ function buildRenderEntries(
  * expanded even if the per-group `anyRunning` flag momentarily flips
  * false between runs. */
 function isFinalizerPiece(p: UIPiece): boolean {
+  // `thinking` is intentionally NOT a finalizer: the model emits thinking
+  // blocks *between* tool calls while it picks the next move, so treating
+  // one as "group closed" flips the header to ✓ done the instant the
+  // first tool_result lands — exactly when more tools are usually about
+  // to fire. We want the group to stay in the running tone until a real
+  // user-facing finalizer (prose, a prompt, a permission request) lands.
   return (
     p.kind === "assistant_text" ||
-    p.kind === "thinking" ||
     p.kind === "user" ||
     p.kind === "permission_request" ||
     p.kind === "ask_user_question" ||
@@ -265,6 +266,10 @@ export function ChatScreen() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const location = useLocation();
+  const loadSettings = useAppSettings((s) => s.load);
+  const customModels = useCustomModels();
+  const modelEntries = getAllModelEntries(customModels);
+  useEffect(() => { loadSettings(); }, [loadSettings]);
   // `sessionBase` holds the full session DTO we fetched via REST (title,
   // model, mode, tags, worktree path, etc). It's write-authoritative for
   // those fields and gets updated on explicit user edits (PATCH, settings
@@ -288,7 +293,7 @@ export function ChatScreen() {
   // PlanSheet for the responsive DOM.
   const [showPlanSheet, setShowPlanSheet] = useState(false);
   // Subagents drawer (mockup s-18) — twin of PlanSheet. Opens from the
-  // SubagentsStrip, the indigo "Agent started" pointer inside the
+  // SubagentsStrip, the purple "Agent started" pointer inside the
   // thread, and the Bot icon in the chat header.
   const [showSubagentsSheet, setShowSubagentsSheet] = useState(false);
   // Click-to-expand image overlay. Populated by the thumbnail click handlers
@@ -826,7 +831,7 @@ export function ChatScreen() {
         </>
       )}
       <span className="mono whitespace-nowrap">
-        {session ? MODEL_LABEL[session.model] ?? session.model : "—"}
+        {session ? getModelLabel(session.model, customModels) : "—"}
       </span>
       <span className="whitespace-nowrap">·</span>
       <span className="whitespace-nowrap">
@@ -894,14 +899,14 @@ export function ChatScreen() {
             className={cn(
               "relative h-9 w-9 rounded-[8px] border flex items-center justify-center shrink-0 disabled:opacity-40",
               showSubagentsSheet
-                ? "bg-indigo-wash/60 border-indigo/40 text-indigo"
+                ? "bg-purple-wash/60 border-purple/40 text-purple"
                 : "bg-paper border-line text-ink-soft hover:bg-paper",
             )}
           >
             <Bot className="w-4 h-4" />
             {subagentRuns.some((r) => r.status === "running") && (
               <span
-                className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-indigo animate-pulse border border-canvas"
+                className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-purple animate-pulse border border-canvas"
                 aria-hidden
               />
             )}
@@ -963,14 +968,14 @@ export function ChatScreen() {
             </Link>
           )}
           <PillPicker
-            label={session ? MODEL_LABEL[session.model] ?? session.model : "—"}
+            label={session ? getModelLabel(session.model, customModels) : "—"}
             disabled={!session}
-            items={MODEL_IDS.map((m) => ({
-              id: m,
-              label: MODEL_LABEL[m],
-              active: session?.model === m,
+            items={modelEntries.map((m) => ({
+              id: m.id,
+              label: m.label,
+              active: session?.model === m.id,
             }))}
-            onPick={(m) => patchSession({ model: m as ModelId })}
+            onPick={(m) => patchSession({ model: m })}
           />
           <PillPicker
             label={session ? MODE_LABEL[session.mode] ?? session.mode : "—"}
@@ -1037,14 +1042,14 @@ export function ChatScreen() {
               className={cn(
                 "relative h-8 w-8 rounded-[6px] border flex items-center justify-center hover:bg-paper shrink-0",
                 showSubagentsSheet
-                  ? "bg-indigo-wash/60 border-indigo/40 text-indigo"
+                  ? "bg-purple-wash/60 border-purple/40 text-purple"
                   : "border-line bg-canvas text-ink-soft",
               )}
             >
               <Bot className="w-4 h-4" />
               {subagentRuns.some((r) => r.status === "running") && (
                 <span
-                  className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-indigo animate-pulse border border-canvas"
+                  className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-purple animate-pulse border border-canvas"
                   aria-hidden
                 />
               )}
@@ -2054,18 +2059,19 @@ function Piece({
             : typeof inputObj.subagent_type === "string"
               ? (inputObj.subagent_type as string)
               : p.name;
-        // All three non-error states share the indigo wash so the row
+        // All three non-error states share the purple wash so the row
         // reads "this is a subagent pointer" at a glance and is visually
-        // distinct from main-agent tool chips (which use klein/neutral).
+        // distinct from main-agent tool chips (which use indigo when
+        // running, neutral when done).
         // Only the status icon color differentiates running / done. Solid
         // border + slightly heavier bg than the mockup so the pointer
         // stands out from surrounding prose instead of blending in.
         const pillClass = resultIsError
           ? "bg-danger-wash/50 border-danger/40 hover:bg-danger-wash/70"
-          : "bg-indigo-wash/60 border-indigo/40 hover:bg-indigo-wash/80";
+          : "bg-purple-wash/60 border-purple/40 hover:bg-purple-wash/80";
         const captionClass = resultIsError
           ? "text-danger"
-          : "text-indigo";
+          : "text-purple";
         return (
           <div data-tool-use-id={p.id} data-event-seq={p.seq}>
             <button
@@ -2099,7 +2105,7 @@ function Piece({
                 </svg>
               ) : (
                 <svg
-                  className="w-3.5 h-3.5 text-indigo animate-spin shrink-0"
+                  className="w-3.5 h-3.5 text-purple animate-spin shrink-0"
                   viewBox="0 0 24 24"
                   fill="none"
                   stroke="currentColor"
@@ -2119,7 +2125,7 @@ function Piece({
               <span className="text-[12.5px] text-ink font-medium flex-1 min-w-0 truncate">
                 {label}
               </span>
-              <span className="mono text-[11px] text-indigo/80 shrink-0">
+              <span className="mono text-[11px] text-purple/80 shrink-0">
                 → view
               </span>
             </button>
@@ -2486,40 +2492,40 @@ function ToolGroup({
   // rather see a running spinner than a red X while things are still
   // landing. Once the group is fully at rest, tone reflects the *last*
   // completed piece's state, not any-error aggregated over the history.
-  const tone: "danger" | "klein" | "neutral" = isLive
-    ? "klein"
+  const tone: "danger" | "indigo" | "neutral" = isLive
+    ? "indigo"
     : meta.lastError
       ? "danger"
       : "neutral";
   const frameClass =
     tone === "danger"
       ? "border-danger/35 bg-danger-wash/10"
-      : tone === "klein"
-        ? "border-klein/40 bg-klein-wash/10"
+      : tone === "indigo"
+        ? "border-indigo/40 bg-indigo-wash/10"
         : "border-line bg-paper";
   const headerBg =
     tone === "danger"
       ? "bg-danger-wash/70"
-      : tone === "klein"
-        ? "bg-klein-wash/55"
+      : tone === "indigo"
+        ? "bg-indigo-wash/55"
         : "bg-paper";
   const chipBg =
     tone === "danger"
       ? "bg-danger-wash"
-      : tone === "klein"
-        ? "bg-klein-wash/80"
+      : tone === "indigo"
+        ? "bg-indigo-wash/80"
         : "bg-canvas";
   const borderX =
     tone === "danger"
       ? "border-danger/30"
-      : tone === "klein"
-        ? "border-klein/30"
+      : tone === "indigo"
+        ? "border-indigo/30"
         : "border-line";
   const statusBandClass =
     tone === "danger"
       ? "bg-danger-wash border-l border-danger/30"
-      : tone === "klein"
-        ? "bg-klein-wash border-l border-klein/30"
+      : tone === "indigo"
+        ? "bg-indigo-wash border-l border-indigo/30"
         : "bg-success-wash border-l border-success/30";
 
   // Summary text: consecutive-collapsed tool names joined by " · ".
@@ -2609,21 +2615,19 @@ function ToolGroup({
             open &&
               (tone === "danger"
                 ? "bg-danger-wash"
-                : tone === "klein"
-                  ? "bg-klein-wash"
+                : tone === "indigo"
+                  ? "bg-indigo-wash"
                   : "bg-paper"),
           )}
         >
           {/* chevron band */}
-          <span
-            className={cn("flex items-center px-2 border-r", chipBg, borderX)}
-          >
+          <span className={cn("flex items-center pl-2 pr-1", chipBg)}>
             {open ? (
               <ChevronDown
                 className={cn(
                   "w-3 h-3",
-                  tone === "klein"
-                    ? "text-klein-ink"
+                  tone === "indigo"
+                    ? "text-indigo-ink"
                     : tone === "danger"
                       ? "text-danger"
                       : "text-ink-muted",
@@ -2633,8 +2637,8 @@ function ToolGroup({
               <ChevronRight
                 className={cn(
                   "w-3 h-3 group-hover:text-ink-soft",
-                  tone === "klein"
-                    ? "text-klein-ink"
+                  tone === "indigo"
+                    ? "text-indigo-ink"
                     : tone === "danger"
                       ? "text-danger"
                       : "text-ink-muted",
@@ -2645,7 +2649,7 @@ function ToolGroup({
           {/* tool chip strip */}
           <span
             className={cn(
-              "flex items-center gap-1 px-2 py-1.5 border-r shrink-0",
+              "flex items-center gap-1 pl-0 pr-2 py-1.5 border-r shrink-0",
               chipBg,
               borderX,
             )}
@@ -2653,14 +2657,14 @@ function ToolGroup({
             {iconStrip.shown.map((name, i) => {
               const Icon = toolIcon(name);
               const chipBorder =
-                tone === "klein"
-                  ? "border-klein/30"
+                tone === "indigo"
+                  ? "border-indigo/30"
                   : tone === "danger"
                     ? "border-danger/30"
                     : "border-line";
               const chipTone =
-                tone === "klein"
-                  ? "text-klein-ink"
+                tone === "indigo"
+                  ? "text-indigo-ink"
                   : tone === "danger"
                     ? "text-danger"
                     : "text-ink-soft";
@@ -2682,8 +2686,8 @@ function ToolGroup({
               <span
                 className={cn(
                   "h-5 min-w-[20px] px-1 rounded-[4px] border flex items-center justify-center mono text-[9.5px]",
-                  tone === "klein"
-                    ? "bg-canvas border-klein/30 text-klein-ink"
+                  tone === "indigo"
+                    ? "bg-canvas border-indigo/30 text-indigo-ink"
                     : tone === "danger"
                       ? "bg-canvas border-danger/30 text-danger"
                       : "bg-paper border-line text-ink-muted",
@@ -2703,8 +2707,8 @@ function ToolGroup({
             <span
               className={cn(
                 "mono text-[12px] font-semibold tabular-nums",
-                tone === "klein"
-                  ? "text-klein-ink"
+                tone === "indigo"
+                  ? "text-indigo-ink"
                   : tone === "danger"
                     ? "text-danger"
                     : "text-ink",
@@ -2715,8 +2719,8 @@ function ToolGroup({
             <span
               className={cn(
                 "text-[10px] uppercase tracking-[0.12em]",
-                tone === "klein"
-                  ? "text-klein-ink"
+                tone === "indigo"
+                  ? "text-indigo-ink"
                   : tone === "danger"
                     ? "text-danger"
                     : "text-ink-muted",
@@ -2735,9 +2739,9 @@ function ToolGroup({
               statusBandClass,
             )}
           >
-            {tone === "klein" ? (
+            {tone === "indigo" ? (
               <Loader2
-                className="w-3.5 h-3.5 text-klein animate-spin"
+                className="w-3.5 h-3.5 text-indigo animate-spin"
                 aria-label="running"
               />
             ) : tone === "danger" ? (
@@ -2757,8 +2761,8 @@ function ToolGroup({
               <span
                 className={cn(
                   "mono text-[10.5px] tabular-nums font-semibold",
-                  tone === "klein"
-                    ? "text-klein-ink"
+                  tone === "indigo"
+                    ? "text-indigo-ink"
                     : tone === "danger"
                       ? "text-danger"
                       : "text-success",
@@ -2852,7 +2856,7 @@ function ToolCallBlock({
         isError
           ? "bg-danger-wash/40 border-danger/30"
           : running
-            ? "bg-klein-wash/50 border-klein/30"
+            ? "bg-indigo-wash/50 border-indigo/30"
             : "bg-paper border-line",
       )}
     >
@@ -2871,7 +2875,7 @@ function ToolCallBlock({
                   ? "bg-klein-wash"
                   : "bg-paper"),
             canToggle &&
-              (running ? "hover:bg-klein-wash/70 cursor-pointer" : "hover:bg-paper/60 cursor-pointer"),
+              (running ? "hover:bg-indigo-wash/70 cursor-pointer" : "hover:bg-paper/60 cursor-pointer"),
           )}
           aria-expanded={showBody}
         >
@@ -2880,14 +2884,14 @@ function ToolCallBlock({
               <ChevronDown
                 className={cn(
                   "w-3 h-3 shrink-0",
-                  running ? "text-klein" : "text-ink-muted",
+                  running ? "text-indigo" : "text-ink-muted",
                 )}
               />
             ) : (
               <ChevronRight
                 className={cn(
                   "w-3 h-3 shrink-0",
-                  running ? "text-klein" : "text-ink-muted",
+                  running ? "text-indigo" : "text-ink-muted",
                 )}
               />
             )
@@ -2895,7 +2899,7 @@ function ToolCallBlock({
             <ChevronDown
               className={cn(
                 "w-3 h-3 shrink-0",
-                running ? "text-klein" : "text-ink-muted",
+                running ? "text-indigo" : "text-ink-muted",
               )}
             />
           )}
@@ -2906,7 +2910,7 @@ function ToolCallBlock({
             <ToolIcon
               className={cn(
                 "w-3.5 h-3.5",
-                running ? "text-klein-ink" : "text-ink-soft",
+                running ? "text-indigo-ink" : "text-ink-soft",
               )}
               aria-label={name}
             />
@@ -2914,7 +2918,7 @@ function ToolCallBlock({
           <span
             className={cn(
               "mono text-[12px]",
-              running ? "text-klein-ink" : "text-ink-soft",
+              running ? "text-indigo-ink" : "text-ink-soft",
             )}
           >
             {name}
@@ -2924,7 +2928,7 @@ function ToolCallBlock({
           </span>
           {running ? (
             <Loader2
-              className="w-3.5 h-3.5 text-klein animate-spin shrink-0"
+              className="w-3.5 h-3.5 text-indigo animate-spin shrink-0"
               aria-label={`${name} running`}
             />
           ) : rightHint ? (
@@ -4235,6 +4239,7 @@ function Composer({
   keyboardOffset?: number;
 }) {
   const isArchived = session?.status === "archived";
+  const customModels = useCustomModels();
   // Session errored — a hard runner error the SDK surfaced (exception
   // before turn_end, agent-runner init failure, etc). Composer is locked
   // out the same way archived sessions are, but with a different banner +
@@ -4991,7 +4996,7 @@ function Composer({
             <div className="mono text-[11px] text-ink-muted">
               {session ? (
                 <>
-                  {MODEL_LABEL[session.model] ?? session.model} ·{" "}
+                  {getModelLabel(session.model, customModels)} ·{" "}
                   {MODE_LABEL[session.mode] ?? session.mode} ·{" "}
                   {EFFORT_LABEL[session.effort] ?? session.effort} ·{" "}
                   <span className="mono">

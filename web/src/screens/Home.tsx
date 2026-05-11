@@ -15,6 +15,8 @@ import { cn } from "@/lib/cn";
 import { toast } from "@/lib/toast";
 import { useFocusReturn } from "@/hooks/useFocusReturn";
 import { forceReload, restartServer } from "@/lib/admin-actions";
+import { getAllModelEntries } from "@/lib/pricing";
+import { useAppSettings, useCustomModels } from "@/state/app-settings";
 
 // Status dot colors for the flat row layout. `running` and `awaiting` get a
 // soft glow ring (box-shadow) to match the mockup (s-02 lines 513, 533).
@@ -1439,6 +1441,10 @@ function NewSessionSheet({
   onCreated: (id: string) => void;
 }) {
   useFocusReturn();
+  const loadSettings = useAppSettings((s) => s.load);
+  const customModels = useCustomModels();
+  const modelEntries = getAllModelEntries(customModels);
+  useEffect(() => { loadSettings(); }, [loadSettings]);
   const NEW_PROJECT = "__new__";
   const [projects, setProjects] = useState<Project[]>([]);
   const [selected, setSelected] = useState<string>(NEW_PROJECT);
@@ -1748,13 +1754,7 @@ function NewSessionSheet({
           </div>
 
           <div className="grid grid-cols-3 gap-2">
-            {(
-              [
-                { id: "claude-opus-4-7", label: "Opus 4.7" },
-                { id: "claude-sonnet-4-6", label: "Sonnet 4.6" },
-                { id: "claude-haiku-4-5", label: "Haiku 4.5" },
-              ] as Array<{ id: ModelId; label: string }>
-            ).map((m) => (
+            {modelEntries.map((m) => (
               <button
                 key={m.id}
                 onClick={() => setModel(m.id)}
@@ -1849,22 +1849,32 @@ function NewSessionSheet({
               and let the server be the source of truth. */}
           <div>
             <label
-              className={`flex items-start gap-3 p-3 border rounded-[8px] ${
+              className={`flex items-start gap-3 p-3 border rounded-[8px] transition-colors ${
                 selectedIsGitRepo
                   ? "border-line cursor-pointer hover:bg-canvas"
                   : "border-line bg-paper opacity-60 cursor-not-allowed"
               }`}
             >
-              <input
-                type="checkbox"
-                className="mt-0.5"
-                checked={worktree && selectedIsGitRepo}
-                disabled={!selectedIsGitRepo}
-                onChange={(e) => {
-                  setUserTouchedWorktree(true);
-                  setWorktree(e.target.checked);
-                }}
-              />
+              <span className="relative inline-flex shrink-0 items-center mt-0.5">
+                <input
+                  type="checkbox"
+                  className="peer sr-only"
+                  checked={worktree && selectedIsGitRepo}
+                  disabled={!selectedIsGitRepo}
+                  onChange={(e) => {
+                    setUserTouchedWorktree(true);
+                    setWorktree(e.target.checked);
+                  }}
+                />
+                <span
+                  aria-hidden
+                  className="block h-5 w-9 rounded-full bg-line-strong transition-colors peer-checked:bg-klein peer-focus-visible:ring-2 peer-focus-visible:ring-klein/40 peer-focus-visible:ring-offset-1 peer-focus-visible:ring-offset-canvas"
+                />
+                <span
+                  aria-hidden
+                  className="pointer-events-none absolute top-1/2 left-0.5 -translate-y-1/2 h-4 w-4 rounded-full bg-canvas shadow-card ring-1 ring-black/5 transition-transform peer-checked:translate-x-4"
+                />
+              </span>
               <div className="min-w-0 flex-1">
                 <div className="text-[14px] font-medium">
                   Use git worktree

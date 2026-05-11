@@ -245,7 +245,7 @@ export function importBackupBundle(
          parent_session_id, forked_from_session_id,
          stats_messages, stats_files_changed, stats_lines_added,
          stats_lines_removed, stats_context_pct,
-         cli_jsonl_seq, tags
+         cli_jsonl_seq, adopted_from_cli, tags
        ) VALUES (
          @id, @title, @project_id, @branch, @worktree_path, @status, @model, @mode,
          @effort,
@@ -253,7 +253,7 @@ export function importBackupBundle(
          @parent_session_id, @forked_from_session_id,
          @stats_messages, @stats_files_changed, @stats_lines_added,
          @stats_lines_removed, @stats_context_pct,
-         @cli_jsonl_seq, @tags
+         @cli_jsonl_seq, @adopted_from_cli, @tags
        )`,
     );
     // Pass 1: insert rows with parent_session_id = NULL so we don't care
@@ -308,6 +308,11 @@ export function importBackupBundle(
         stats_lines_removed: s.stats.linesRemoved,
         stats_context_pct: s.stats.contextPct,
         cli_jsonl_seq: s.cliJsonlSeq ?? 0,
+        // Preserve the CLI-adoption flag across backup round-trips. Defaults
+        // to 0 when the bundle predates the column so restored native
+        // sessions stay native (the safe side — worst case the user re-
+        // adopts via Import sheet if a CLI row got lost).
+        adopted_from_cli: s.adoptedFromCli === true ? 1 : 0,
         // Tags ride along with the bundle verbatim — they're user-authored
         // and the schema is locked down at the HTTP surface, so round-trips
         // are safe. Fallback to `[]` when the bundle predates the column.
