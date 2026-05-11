@@ -2620,9 +2620,7 @@ function ToolGroup({
           )}
         >
           {/* chevron band */}
-          <span
-            className={cn("flex items-center px-2 border-r", chipBg, borderX)}
-          >
+          <span className={cn("flex items-center px-2", chipBg)}>
             {open ? (
               <ChevronDown
                 className={cn(
