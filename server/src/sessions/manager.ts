@@ -524,6 +524,7 @@ export class SessionManager {
       cwd: session.worktreePath ?? project.path,
       model: session.model,
       permissionMode: session.mode,
+      effort: session.effort,
       // Resume the SDK-side conversation if we've seen one before. Null on
       // first ever spawn; set after the SDK's system/init echoes its id back.
       resumeSdkSessionId: session.sdkSessionId ?? undefined,
@@ -1302,6 +1303,23 @@ export class SessionManager {
     const entry = this.runners.get(sessionId);
     if (!entry) return false;
     await entry.runner.setPermissionMode(mode);
+    return true;
+  }
+
+  /**
+   * Propagate an effort-level change to the live runner, if any. The
+   * runner stores the new value and picks it up on the NEXT SDK turn;
+   * in-flight queries keep the budget they were launched with (matches
+   * how model changes propagate). The caller is expected to have already
+   * persisted the new level to the DB.
+   */
+  async applyEffort(
+    sessionId: string,
+    effort: "low" | "medium" | "high" | "xhigh" | "max",
+  ): Promise<boolean> {
+    const entry = this.runners.get(sessionId);
+    if (!entry) return false;
+    await entry.runner.setEffort(effort);
     return true;
   }
 

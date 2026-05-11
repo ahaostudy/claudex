@@ -2,6 +2,7 @@ import type { EventEmitter } from "node:events";
 import type {
   AskUserQuestionAnnotation,
   AskUserQuestionItem,
+  EffortLevel,
   ModelId,
   PermissionMode,
   SubagentEndPayload,
@@ -31,6 +32,9 @@ export interface RunnerInitOptions {
   cwd: string;
   model: ModelId;
   permissionMode: PermissionMode;
+  // Thinking-effort level. Defaults to "medium" in the AgentRunner when
+  // omitted — "medium" preserves the existing adaptive-thinking behavior.
+  effort?: EffortLevel;
   // Persisted SDK session id (for resume across turns). Undefined on first run.
   resumeSdkSessionId?: string;
   // Whether CLAUDE.md / settings files should be loaded. Default true.
@@ -232,6 +236,10 @@ export interface Runner {
   resolvePlanAccept(planId: string, decision: "accept" | "reject"): void;
   interrupt(): Promise<void>;
   setPermissionMode(mode: PermissionMode): Promise<void>;
+  // Hot-swap the thinking-effort level. Stored on the runner; takes effect
+  // on the NEXT SDK turn (the SDK's `thinking` option is start-time only,
+  // so we can't restyle an in-flight query without tearing it down).
+  setEffort(effort: EffortLevel): Promise<void>;
   dispose(): Promise<void>;
   on(listener: RunnerListener): () => void;
   // For tests / diagnostics.

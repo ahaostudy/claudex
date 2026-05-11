@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ChevronRight } from "lucide-react";
+import { ChevronRight, FilePlus, PencilLine } from "lucide-react";
 import { diffForToolCall, type FileDiff } from "@/lib/diff";
 import { cn } from "@/lib/cn";
 
@@ -67,6 +67,26 @@ export function DiffView({
     );
   }
 
+  // Compact header pattern — matches the look of other tool rows
+  // (Read/Bash/Grep/…): [chevron] [kind-icon] LABEL  {file}  +N −N.
+  //
+  //   - Chevron sits at the FAR LEFT so all tool rows line up visually.
+  //   - Icons come from the same set the ToolGroup strip uses
+  //     (lib/tool-summary): PencilLine for Edit, FilePlus for Write —
+  //     whether the Write creates a new file (kind="create") or
+  //     overwrites an existing one (kind="overwrite").
+  //   - LABEL is the action verb uppercase; file is the basename only
+  //     (full path in the title so mobile hover/tap shows it).
+  const label =
+    diff.kind === "create"
+      ? "CREATE"
+      : diff.kind === "overwrite"
+        ? "OVERWRITE"
+        : "EDIT";
+  const KindIcon = diff.kind === "edit" ? PencilLine : FilePlus;
+  const slash = diff.path.lastIndexOf("/");
+  const basename = slash >= 0 ? diff.path.slice(slash + 1) : diff.path;
+
   return (
     <div
       className={cn(
@@ -79,6 +99,7 @@ export function DiffView({
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
         className="flex w-full items-center gap-2 px-3 py-1.5 bg-paper border-b border-line text-left hover:bg-paper/80 max-w-full min-w-0"
+        title={diff.path}
       >
         <ChevronRight
           className={cn(
@@ -86,16 +107,19 @@ export function DiffView({
             open && "rotate-90",
           )}
         />
-        <span className="mono text-[12px] text-ink-soft truncate min-w-0 flex-1">
-          {diff.path}
+        <KindIcon className="w-3.5 h-3.5 text-ink-muted shrink-0" />
+        <span className="mono text-[10px] uppercase tracking-[0.12em] text-ink-muted shrink-0">
+          {label}
+        </span>
+        <span
+          className="mono text-[12px] text-ink-soft truncate min-w-0 flex-1"
+        >
+          {basename}
         </span>
         <span className="text-[11px] mono text-success shrink-0">
           +{diff.addCount}
         </span>
         <span className="text-[11px] mono text-danger shrink-0">−{diff.delCount}</span>
-        <span className="ml-auto text-[10px] uppercase tracking-[0.12em] text-ink-muted shrink-0">
-          {diff.kind}
-        </span>
       </button>
       {open && (
         <div className="w-full overflow-x-auto">

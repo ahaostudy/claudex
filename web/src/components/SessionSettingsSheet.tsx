@@ -6,6 +6,7 @@ import { Markdown } from "@/components/Markdown";
 import { formatBytes, timeAgoLong } from "@/lib/format";
 import { useSessions } from "@/state/sessions";
 import type {
+  EffortLevel,
   MemoryResponse,
   ModelId,
   PermissionMode,
@@ -58,6 +59,7 @@ export function SessionSettingsSheet({
   useFocusReturn(variant !== "rail");
   const [model, setModel] = useState<ModelId>(session.model);
   const [mode, setMode] = useState<PermissionMode>(session.mode);
+  const [effort, setEffort] = useState<EffortLevel>(session.effort);
   const [tags, setTags] = useState<string[]>(session.tags ?? []);
   const [tagDraft, setTagDraft] = useState("");
   const [tagErr, setTagErr] = useState<string | null>(null);
@@ -148,6 +150,7 @@ export function SessionSettingsSheet({
   async function patch(partial: {
     model?: ModelId;
     mode?: PermissionMode;
+    effort?: EffortLevel;
     tags?: string[];
     pinned?: boolean;
   }) {
@@ -351,6 +354,21 @@ export function SessionSettingsSheet({
     plan: "Read-only exploration. Claude won't edit files.",
     auto: "Autonomous mode — falls back to Ask until the server-side classifier ships.",
     bypassPermissions: "No prompts. Only use in sandboxed environments.",
+  };
+
+  const EFFORTS: Array<[EffortLevel, string]> = [
+    ["low", "Low"],
+    ["medium", "Medium"],
+    ["high", "High"],
+    ["xhigh", "X-High"],
+    ["max", "Max"],
+  ];
+  const effortHint: Record<EffortLevel, string> = {
+    low: "Minimal thinking — fastest responses.",
+    medium: "Moderate thinking (claudex default).",
+    high: "Deep reasoning — slower, more thorough.",
+    xhigh: "Deeper than high (Opus 4.7 only; falls back otherwise).",
+    max: "Maximum effort — only supported on Opus 4.6 / 4.7.",
   };
 
   return (
@@ -585,6 +603,86 @@ export function SessionSettingsSheet({
             <div className="hidden md:block text-[12px] text-ink-muted mt-2">
               {modeHint[mode]}
             </div>
+          </div>
+
+          {/* Thinking effort — 5-segment on desktop, stacked rows on mobile.
+              Mirrors the Permission mode block so the two configs read as
+              siblings. Effort takes effect on the NEXT SDK turn — the
+              server emits `effort_change_applies_to_next_turn` when a
+              runner is currently mid-turn and we surface that warning. */}
+          <div>
+            <div className="text-[11px] uppercase tracking-[0.14em] text-ink-muted mb-2">
+              Thinking effort
+            </div>
+            {/* Mobile: stacked list of rows */}
+            <div className="md:hidden rounded-[8px] border border-line bg-canvas overflow-hidden divide-y divide-line">
+              {EFFORTS.map(([id, label]) => {
+                const active = effort === id;
+                return (
+                  <button
+                    key={id}
+                    disabled={archived || saving}
+                    onClick={() => {
+                      setEffort(id);
+                      if (id !== session.effort) patch({ effort: id });
+                    }}
+                    className={`w-full flex items-center gap-3 px-3 py-2.5 text-left disabled:opacity-60 ${
+                      active ? "bg-paper/60" : "hover:bg-paper/40"
+                    }`}
+                  >
+                    <span
+                      className={`shrink-0 h-4 w-4 rounded-full border flex items-center justify-center ${
+                        active
+                          ? "bg-ink border-ink"
+                          : "border-line bg-canvas"
+                      }`}
+                    >
+                      {active && (
+                        <span className="h-1.5 w-1.5 rounded-full bg-canvas" />
+                      )}
+                    </span>
+                    <span className="text-[13px] font-medium w-14 shrink-0">
+                      {label}
+                    </span>
+                    <span className="text-[12px] text-ink-muted flex-1 min-w-0">
+                      {effortHint[id]}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+            {/* Desktop: 5-segment control */}
+            <div className="hidden md:grid grid-cols-5 gap-1.5 p-1 bg-paper border border-line rounded-[8px]">
+              {EFFORTS.map(([id, label]) => {
+                const active = effort === id;
+                return (
+                  <button
+                    key={id}
+                    disabled={archived || saving}
+                    onClick={() => {
+                      setEffort(id);
+                      if (id !== session.effort) patch({ effort: id });
+                    }}
+                    className={`h-9 rounded-[6px] text-[12px] font-medium ${
+                      active
+                        ? "bg-canvas shadow-card border border-line text-ink"
+                        : "text-ink-muted"
+                    }`}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+            <div className="hidden md:block text-[12px] text-ink-muted mt-2">
+              {effortHint[effort]}
+            </div>
+            {warnings.includes("effort_change_applies_to_next_turn") && (
+              <div className="mt-2 text-[12px] text-[#7a4700] bg-warn-wash/60 border border-warn/30 rounded-[6px] px-2.5 py-1.5">
+                Effort change applies to the next turn — the in-flight turn
+                keeps the previous budget.
+              </div>
+            )}
           </div>
 
           {/* Workspace — read-only. Branch + worktree (or project root). */}

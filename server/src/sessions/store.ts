@@ -2,6 +2,7 @@ import type Database from "better-sqlite3";
 import type { Statement } from "better-sqlite3";
 import { nanoid } from "nanoid";
 import type {
+  EffortLevel,
   EventKind,
   ModelId,
   PermissionMode,
@@ -20,6 +21,7 @@ interface SessionRow {
   status: string;
   model: string;
   mode: string;
+  effort: string;
   created_at: string;
   updated_at: string;
   last_message_at: string | null;
@@ -102,6 +104,10 @@ function toSession(row: SessionRow): Session {
     status: row.status as SessionStatus,
     model: row.model as ModelId,
     mode: row.mode as PermissionMode,
+    // `effort` is NOT NULL with DEFAULT 'medium' at the SQL level, but
+    // legacy rows written before migration 23 existed can still surface a
+    // missing value here during the migration window — coerce defensively.
+    effort: ((row.effort as EffortLevel | undefined) ?? "medium") as EffortLevel,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     lastMessageAt: row.last_message_at,
@@ -129,6 +135,7 @@ export interface SessionCreateInput {
   projectId: string;
   model: ModelId;
   mode: PermissionMode;
+  effort?: EffortLevel;
   worktreePath?: string | null;
   branch?: string | null;
   parentSessionId?: string | null;
@@ -157,6 +164,7 @@ export class SessionStore {
     setTitle: Statement | null;
     setModel: Statement | null;
     setMode: Statement | null;
+    setEffort: Statement | null;
     setTags: Statement | null;
     setPinned: Statement | null;
     setSdkSessionId: Statement | null;
@@ -189,6 +197,7 @@ export class SessionStore {
     setTitle: null,
     setModel: null,
     setMode: null,
+    setEffort: null,
     setTags: null,
     setPinned: null,
     setSdkSessionId: null,
@@ -320,6 +329,7 @@ export class SessionStore {
       status: "idle",
       model: input.model,
       mode: input.mode,
+      effort: input.effort ?? "medium",
       created_at: now,
       updated_at: now,
       last_message_at: null,
@@ -341,6 +351,7 @@ export class SessionStore {
       "create",
       `INSERT INTO sessions (
            id, title, project_id, branch, worktree_path, status, model, mode,
+           effort,
            created_at, updated_at, last_message_at, archived_at, sdk_session_id,
            parent_session_id, forked_from_session_id,
            stats_messages, stats_files_changed, stats_lines_added,
@@ -348,6 +359,7 @@ export class SessionStore {
            cli_jsonl_seq, tags, pinned
          ) VALUES (
            @id, @title, @project_id, @branch, @worktree_path, @status, @model, @mode,
+           @effort,
            @created_at, @updated_at, @last_message_at, @archived_at, @sdk_session_id,
            @parent_session_id, @forked_from_session_id,
            @stats_messages, @stats_files_changed, @stats_lines_added,
@@ -386,6 +398,13 @@ export class SessionStore {
       "setMode",
       "UPDATE sessions SET mode = ?, updated_at = ? WHERE id = ?",
     ).run(mode, new Date().toISOString(), id);
+  }
+
+  setEffort(id: string, effort: EffortLevel): void {
+    this.lazyStmt(
+      "setEffort",
+      "UPDATE sessions SET effort = ?, updated_at = ? WHERE id = ?",
+    ).run(effort, new Date().toISOString(), id);
   }
 
   /**

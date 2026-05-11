@@ -652,6 +652,18 @@ const MIGRATIONS: { id: number; name: string; up: string }[] = [
     `,
   },
   {
+    id: 23,
+    name: "session_effort",
+    // Per-session thinking-effort level (low / medium / high / xhigh / max).
+    // Sits alongside model + mode as one of the three most-common knobs the
+    // user adjusts from the Chat header. Default `medium` preserves the
+    // pre-migration adaptive-thinking behavior for every existing row.
+    up: `
+      ALTER TABLE sessions
+        ADD COLUMN effort TEXT NOT NULL DEFAULT 'medium';
+    `,
+  },
+  {
     id: 24,
     name: "app_settings",
     // Global user-preferences KV for claudex itself, backing
@@ -661,11 +673,6 @@ const MIGRATIONS: { id: number; name: string; up: string }[] = [
     // single-row typed table) so future prefs (theme, text size, …) don't
     // need a migration per field; the store's KNOWN_KEYS tuple is the
     // read-side gate against unknown rows leaking into the typed view.
-    //
-    // Id skips 23 on purpose: a sibling branch reserved 23 for a session-
-    // level `effort` column. Migration runner is id-set based so the gap
-    // is benign — whichever branch lands first, the other's id still
-    // applies on next boot.
     up: `
       CREATE TABLE app_settings (
         key TEXT PRIMARY KEY NOT NULL,

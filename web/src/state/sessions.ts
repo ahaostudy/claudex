@@ -41,6 +41,20 @@ import type {
 // ---------------------------------------------------------------------------
 const notifiedStatus = new Map<string, SessionStatus>();
 
+/**
+ * Mirror of the server's `toPreview` helper in `server/src/sessions/store.ts`.
+ * Collapses whitespace and truncates to 200 chars with an ellipsis so the
+ * optimistic Home-row preview we write on a `user_message` frame matches
+ * exactly what a subsequent `GET /api/sessions` would return — no flicker
+ * after the next refresh.
+ */
+function previewUserMessage(raw: string | null | undefined): string | null {
+  if (raw == null) return null;
+  const collapsed = String(raw).replace(/\s+/g, " ").trim();
+  if (collapsed.length === 0) return null;
+  return collapsed.length > 200 ? `${collapsed.slice(0, 200)}…` : collapsed;
+}
+
 function shouldNotifyCompletion(
   prev: SessionStatus | undefined,
   next: SessionStatus,
@@ -251,16 +265,6 @@ export type UIPiece =
   // memory/project_streaming_deferred.md.
   | { kind: "pending"; id: string; startedAt: number; stalled: boolean };
 
-// Transcript view mode — controls how much detail the Chat screen shows.
-// Mirrors mockup s-07:
-//   - normal  (default): user, assistant text, tool_use chips/diffs,
-//                        tool_result. Thinking blocks hidden.
-//   - verbose : everything, including thinking.
-//   - summary : only user messages + the *final* assistant_text of each
-//                assistant turn, plus a Changes card synthesized from
-//                Edit/Write/MultiEdit tool calls.
-export type ViewMode = "normal" | "verbose" | "summary";
-
 /**
  * Per-session pagination bookkeeping for the transcript. Kept in a parallel
  * map so the main `transcripts[id]` UIPiece array stays the same shape.
@@ -302,9 +306,6 @@ interface SessionState {
     string,
     { status: "idle" | "error"; at: string; seen: boolean }
   >;
-  // Current transcript view mode — session-scoped in spirit but not yet
-  // persisted per-session or to localStorage (intentional for first pass).
-  viewMode: ViewMode;
   // The session the user is currently looking at (Chat screen). Set by
   // `subscribeSession` (called from Chat.tsx on mount) and cleared by
   // `clearActiveSession` (called on unmount). Used by the WS `acked`
@@ -343,7 +344,6 @@ interface SessionState {
     planId: string,
     decision: "accept" | "reject",
   ) => void;
-  setViewMode: (mode: ViewMode) => void;
   forgetSession: (id: string) => void;
 }
 
@@ -563,12 +563,26 @@ function isLifecycleStatus(v: unknown): v is SubagentLifecycleStatus {
 }
 
 function frameToPiece(frame: ServerFrame): UIPiece | null {
+  // Live frames don't carry a createdAt (see shared/src/protocol.ts — the
+  // wire schema omits it to keep frames small, since the authoritative
+  // timestamp is the DB row written server-side). But the UI's per-message
+  // timestamp rendering guards on `p.createdAt`, so pieces that land via
+  // WS come in with blank timestamps and only acquire one after a REST
+  // refetch repopulates them from `session_events.createdAt`. Stamp a
+  // client-side arrival time here so live messages render a timestamp
+  // immediately; when the tab later refetches, the server's authoritative
+  // value overwrites this one (eventsToPieces is called fresh on hydration).
+  // The clock skew vs. server emission is sub-millisecond over localhost WS
+  // and bounded by network RTT otherwise — acceptable for a display-only
+  // "time ago" label.
+  const nowIso = new Date().toISOString();
   switch (frame.type) {
     case "assistant_text_delta":
       return {
         kind: "assistant_text",
         id: frame.messageId,
         text: frame.text,
+        createdAt: nowIso,
         ...(frame.parentToolUseId !== undefined
           ? { parentToolUseId: frame.parentToolUseId }
           : {}),
@@ -577,6 +591,7 @@ function frameToPiece(frame: ServerFrame): UIPiece | null {
       return {
         kind: "thinking",
         text: frame.text,
+        createdAt: nowIso,
         ...(frame.parentToolUseId !== undefined
           ? { parentToolUseId: frame.parentToolUseId }
           : {}),
@@ -587,6 +602,7 @@ function frameToPiece(frame: ServerFrame): UIPiece | null {
         id: frame.toolUseId,
         name: frame.name,
         input: frame.input,
+        createdAt: nowIso,
         ...(frame.parentToolUseId !== undefined
           ? { parentToolUseId: frame.parentToolUseId }
           : {}),
@@ -597,6 +613,7 @@ function frameToPiece(frame: ServerFrame): UIPiece | null {
         toolUseId: frame.toolUseId,
         content: frame.content,
         isError: frame.isError,
+        createdAt: nowIso,
         ...(frame.parentToolUseId !== undefined
           ? { parentToolUseId: frame.parentToolUseId }
           : {}),
@@ -608,18 +625,21 @@ function frameToPiece(frame: ServerFrame): UIPiece | null {
         toolName: frame.toolName,
         input: frame.toolInput,
         summary: frame.summary,
+        createdAt: nowIso,
       };
     case "ask_user_question":
       return {
         kind: "ask_user_question",
         askId: frame.askId,
         questions: frame.questions,
+        createdAt: nowIso,
       };
     case "plan_accept_request":
       return {
         kind: "plan_accept_request",
         planId: frame.planId,
         plan: frame.plan,
+        createdAt: nowIso,
       };
     case "subagent_start":
       return {
@@ -836,13 +856,8 @@ export const useSessions = create<SessionState>((set, get) => {
   transcripts: {},
   transcriptMeta: {},
   loadingSessions: false,
-  viewMode: "normal",
   activeSessionId: null,
   completions: {},
-
-  setViewMode(mode) {
-    set({ viewMode: mode });
-  },
 
   init() {
     if (get().ws) return;
@@ -999,10 +1014,22 @@ export const useSessions = create<SessionState>((set, get) => {
         // Server writes `last_message_at = created_at` and bumps
         // `updated_at`, so mirror that exactly (not "now") to stay aligned
         // with the canonical value.
+        //
+        // Also mirror the message text into `lastUserMessage` so the Home
+        // row's "last sent" preview updates live without a `GET /api/sessions`
+        // round-trip. Server-side preview is trimmed/collapsed/truncated in
+        // `toPreview`; we repeat the exact same shape here so reloads don't
+        // shift the characters the user sees.
+        const preview = previewUserMessage(frame.content);
         set((s) => ({
           sessions: s.sessions.map((x) =>
             x.id === sid
-              ? { ...x, updatedAt: frame.createdAt, lastMessageAt: frame.createdAt }
+              ? {
+                  ...x,
+                  updatedAt: frame.createdAt,
+                  lastMessageAt: frame.createdAt,
+                  lastUserMessage: preview,
+                }
               : x,
           ),
         }));

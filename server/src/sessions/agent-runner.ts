@@ -16,6 +16,7 @@ import type {
 import type {
   AskUserQuestionAnnotation,
   AskUserQuestionItem,
+  EffortLevel,
   PermissionMode,
 } from "@claudex/shared";
 
@@ -62,10 +63,12 @@ export class AgentRunner implements Runner {
   private sdkHandle: ReturnType<typeof query> | null = null;
   private disposed = false;
   private permissionMode: PermissionMode;
+  private effort: EffortLevel;
 
   constructor(private readonly opts: RunnerInitOptions) {
     this.sessionId = opts.sessionId;
     this.permissionMode = opts.permissionMode;
+    this.effort = opts.effort ?? "medium";
     this.userMessages = new AsyncPush();
   }
 
@@ -121,11 +124,13 @@ export class AgentRunner implements Runner {
       env: { ...process.env } as Record<string, string>,
       resume: this.opts.resumeSdkSessionId,
       ...(systemPromptOption ? { systemPrompt: systemPromptOption } : {}),
-      // Opus 4.7's default adaptive-thinking display is "omitted" — the model
-      // thinks but the SDK never forwards the text. Explicitly ask for
-      // summarized thinking so the UI's Verbose view-mode has something to
-      // render. Keeps the model in adaptive mode (no fixed budget).
+      // Per-session thinking-effort level. The SDK maps this onto its
+      // adaptive-thinking budget for us; `medium` matches the previous
+      // default the codebase shipped with. We still explicitly ask for
+      // summarized thinking display because Opus 4.7's default is
+      // `"omitted"` — we want the UI to be able to render the summaries.
       thinking: { type: "adaptive", display: "summarized" },
+      effort: this.effort,
       // Live subagents (s-17). Turn on the two SDK knobs that make a
       // Task/Agent/Explore child turn observable from the parent stream:
       //   forwardSubagentText — emit the child's text + thinking blocks as
@@ -561,6 +566,14 @@ export class AgentRunner implements Runner {
     if (this.sdkHandle) {
       await this.sdkHandle.setPermissionMode(mapPermissionMode(mode));
     }
+  }
+
+  async setEffort(effort: EffortLevel): Promise<void> {
+    // The SDK's `thinking` option is start-time only — there's no
+    // equivalent of `setPermissionMode` for it. Store the new level so the
+    // NEXT start() picks it up; an in-flight query keeps the budget it was
+    // launched with. That mirrors how model changes propagate today.
+    this.effort = effort;
   }
 
   async dispose(): Promise<void> {

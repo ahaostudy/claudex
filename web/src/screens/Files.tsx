@@ -24,6 +24,7 @@ import type {
 } from "@claudex/shared";
 import { api, ApiError } from "@/api/client";
 import { AppShell } from "@/components/AppShell";
+import { Markdown } from "@/components/Markdown";
 import { cn } from "@/lib/cn";
 import { timeAgoShort } from "@/lib/format";
 
@@ -60,13 +61,14 @@ function formatSize(bytes: number): string {
 // Anything we don't recognize falls through to "text" — the server will
 // 415 with binary_file if the bytes don't look like text and the UI will
 // show the "no preview" message.
-type PreviewKind = "text" | "image" | "pdf" | "html" | "audio" | "video" | "office";
+type PreviewKind = "text" | "image" | "pdf" | "html" | "markdown" | "audio" | "video" | "office";
 
 function previewKindForPath(absPath: string): PreviewKind {
   const ext = (absPath.split(".").pop() ?? "").toLowerCase();
   if (["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "ico", "avif", "tiff", "tif"].includes(ext)) return "image";
   if (ext === "pdf") return "pdf";
   if (["html", "htm"].includes(ext)) return "html";
+  if (["md", "markdown", "mdown", "mkd", "mkdn"].includes(ext)) return "markdown";
   if (["mp3", "wav", "ogg", "flac", "aac"].includes(ext)) return "audio";
   if (["mp4", "webm", "mov"].includes(ext)) return "video";
   if (["doc", "docx", "xls", "xlsx", "ppt", "pptx", "odt", "ods", "odp"].includes(ext)) return "office";
@@ -295,9 +297,10 @@ export function FilesScreen() {
     // For non-text kinds the <img>/<iframe>/<audio>/<video> tag loads the
     // bytes itself — we don't need to hit /api/browse/read at all, and
     // doing so would just 415 with binary_file for images/pdfs/etc.
-    // html is still fetched as text so the default view is the source;
-    // the MobilePreviewSheet / Desktop preview shows a Render toggle.
-    if (kind !== "text" && kind !== "html") {
+    // html and markdown are still fetched as text so the default view is
+    // the source; the MobilePreviewSheet / Desktop preview shows a Render
+    // toggle that swaps in an iframe (html) or the <Markdown> renderer (md).
+    if (kind !== "text" && kind !== "html" && kind !== "markdown") {
       setFileLoading(false);
       // Persist the selection so the sessionStorage restore still works
       // for binary previews — nothing to validate server-side up front,
@@ -988,6 +991,25 @@ function BinaryPreview({
     );
   }
 
+  if (kind === "markdown" && renderHtml && fileData) {
+    // Rendered markdown view: run the file contents through the same
+    // <Markdown> component used for assistant replies (react-markdown +
+    // remark-gfm, no HTML passthrough). Scroll container mirrors the text
+    // preview so the layout doesn't jump between Source/Render modes.
+    return (
+      <div className="flex-1 min-h-0 overflow-auto bg-canvas">
+        <div className="px-5 py-4 max-w-[72ch] mx-auto">
+          <Markdown source={fileData.content} />
+          {fileData.truncated && (
+            <div className="mono text-[11px] text-ink-faint mt-4">
+              file truncated at 1 MB
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   return null;
 }
 
@@ -1200,9 +1222,10 @@ function MobilePreviewSheet({
   size: number | null;
   onClose: () => void;
 }) {
-  // HTML source / rendered toggle. Reset whenever the selected path
-  // changes so opening a different file doesn't inherit the previous
-  // file's render state.
+  // HTML / markdown source vs rendered toggle. Reset whenever the selected
+  // path changes so opening a different file doesn't inherit the previous
+  // file's render state. (`renderHtml` doubles as "render markdown"; kept
+  // the name to avoid a sweeping rename across two view components.)
   const [renderHtml, setRenderHtml] = useState(false);
   useEffect(() => {
     setRenderHtml(false);
@@ -1211,10 +1234,12 @@ function MobilePreviewSheet({
   const basename = absPath.split("/").pop() ?? absPath;
   const isText = kind === "text";
   const isHtml = kind === "html";
+  const isMarkdown = kind === "markdown";
+  const isRenderable = isHtml || isMarkdown;
   const showDownload = kind === "pdf" || kind === "office" || kind === "audio" || kind === "video";
   // Copy-contents only makes sense when we actually have the text in
   // memory. For binary kinds browseRead was skipped, so disable it.
-  const copyContentsEnabled = isText || isHtml;
+  const copyContentsEnabled = isText || isHtml || isMarkdown;
 
   return (
     <div className="absolute inset-0 z-30 bg-canvas flex flex-col">
@@ -1243,12 +1268,12 @@ function MobilePreviewSheet({
           ) : null}
         </div>
         <div className="flex items-center gap-1.5 shrink-0">
-          {isHtml && (
+          {isRenderable && (
             <button
               type="button"
               onClick={() => setRenderHtml((v) => !v)}
               aria-pressed={renderHtml}
-              title={renderHtml ? "Show source" : "Render HTML"}
+              title={renderHtml ? "Show source" : isMarkdown ? "Render markdown" : "Render HTML"}
               className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-[8px] border border-line bg-canvas text-[12px] shrink-0"
             >
               {renderHtml ? (
@@ -1297,7 +1322,15 @@ function MobilePreviewSheet({
             renderHtml
           />
         )}
-        {!loading && !error && (isText || (isHtml && !renderHtml)) && fileData && (
+        {!loading && !error && isMarkdown && renderHtml && fileData && (
+          <BinaryPreview
+            absPath={absPath}
+            kind="markdown"
+            fileData={fileData}
+            renderHtml
+          />
+        )}
+        {!loading && !error && (isText || (isRenderable && !renderHtml)) && fileData && (
           <div className="mono text-[12.5px] leading-[1.7] px-4 py-3">
             {fileData.content.split("\n").map((line, i) => (
               <div key={i} className="grid grid-cols-[40px_1fr] gap-1">
@@ -1319,7 +1352,7 @@ function MobilePreviewSheet({
             )}
           </div>
         )}
-        {!loading && !error && !isText && !isHtml && (
+        {!loading && !error && !isText && !isRenderable && (
           <BinaryPreview
             absPath={absPath}
             kind={kind}
@@ -1529,8 +1562,10 @@ function DesktopPreviewBody({
 
   const isText = kind === "text";
   const isHtml = kind === "html";
+  const isMarkdown = kind === "markdown";
+  const isRenderable = isHtml || isMarkdown;
   const showDownload = kind === "pdf" || kind === "office" || kind === "audio" || kind === "video";
-  const copyContentsEnabled = isText || isHtml;
+  const copyContentsEnabled = isText || isHtml || isMarkdown;
 
   return (
     <>
@@ -1554,12 +1589,12 @@ function DesktopPreviewBody({
           ) : null}
         </div>
         <div className="flex items-center gap-1.5 shrink-0">
-          {isHtml && (
+          {isRenderable && (
             <button
               type="button"
               onClick={() => setRenderHtml((v) => !v)}
               aria-pressed={renderHtml}
-              title={renderHtml ? "Show source" : "Render HTML"}
+              title={renderHtml ? "Show source" : isMarkdown ? "Render markdown" : "Render HTML"}
               className="inline-flex items-center gap-1.5 h-8 px-3 rounded-[8px] border border-line bg-canvas text-[12px] shrink-0"
             >
               {renderHtml ? (
@@ -1604,9 +1639,16 @@ function DesktopPreviewBody({
           fileData={fileData}
           renderHtml
         />
-      ) : (isText || (isHtml && !renderHtml)) && fileData ? (
+      ) : isMarkdown && renderHtml && fileData ? (
+        <BinaryPreview
+          absPath={absPath}
+          kind="markdown"
+          fileData={fileData}
+          renderHtml
+        />
+      ) : (isText || (isRenderable && !renderHtml)) && fileData ? (
         <PreviewPanel fileData={fileData} loading={false} error={null} />
-      ) : !isText && !isHtml ? (
+      ) : !isText && !isRenderable ? (
         <BinaryPreview
           absPath={absPath}
           kind={kind}

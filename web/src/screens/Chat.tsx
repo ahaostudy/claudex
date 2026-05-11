@@ -17,13 +17,14 @@ import {
   MoreVertical,
   Paperclip,
   Pencil,
+  Plus,
   Send,
   Settings2,
   StopCircle,
   Terminal,
   X,
 } from "lucide-react";
-import { ChatSessionsRail } from "@/components/ChatSessionsRail";
+import { ChatSessionsRail, QuickCreateForm } from "@/components/ChatSessionsRail";
 import { Logo } from "@/components/Logo";
 import { ChatTasksRail } from "@/components/ChatTasksRail";
 import { TasksDrawer } from "@/components/TasksDrawer";
@@ -38,6 +39,7 @@ import { api } from "@/api/client";
 import type {
   AskUserQuestionAnnotation,
   Attachment,
+  EffortLevel,
   ModelId,
   PermissionMode,
   Project,
@@ -55,7 +57,6 @@ import { SideChatDrawer } from "@/components/SideChatDrawer";
 import { SlashCommandSheet, type PickerHandle } from "@/components/SlashCommandSheet";
 import { FileMentionSheet } from "@/components/FileMentionSheet";
 import { TerminalDrawer } from "@/components/TerminalDrawer";
-import { ViewModePicker } from "@/components/ViewModePicker";
 import { ContextRingButton, UsagePanel } from "@/components/UsagePanel";
 import { Markdown } from "@/components/Markdown";
 import { LinkPreview, firstHttpUrl } from "@/components/LinkPreview";
@@ -67,7 +68,7 @@ import { copyText } from "@/lib/clipboard";
 import { summarizeToolCall, toolIcon } from "@/lib/tool-summary";
 import type { SlashCommand } from "@/lib/slash-commands";
 import { BUILTIN_FALLBACK_SLASH_COMMANDS } from "@/lib/slash-commands";
-import type { UIPiece, ViewMode } from "@/state/sessions";
+import type { UIPiece } from "@/state/sessions";
 import { contextWindowTokens } from "@/lib/usage";
 import { MODEL_LABEL } from "@/lib/pricing";
 import { extractImagesFromText, type ImageRef } from "@/lib/images";
@@ -96,21 +97,19 @@ const MODE_IDS: PermissionMode[] = [
   "bypassPermissions",
 ];
 
-const VIEW_LABEL: Record<ViewMode, string> = {
-  normal: "Normal",
-  verbose: "Verbose",
-  summary: "Summary",
+// Effort-level labels for the Chat header pill + composer meta line. Values
+// match `EffortLevel` in shared/src/models.ts; kept here (rather than in a
+// shared web util) because the Chat screen is the only surface that reads
+// them today. Order is low → max so the picker reads left-to-right as
+// "cheaper & faster" → "slower & deeper".
+const EFFORT_LABEL: Record<EffortLevel, string> = {
+  low: "Low",
+  medium: "Medium",
+  high: "High",
+  xhigh: "X-High",
+  max: "Max",
 };
-
-// One-line description per mode, kept in sync with the desktop popover in
-// ViewModePicker.tsx (mockup s-07 lines 1414–1422). Used by the mobile
-// MoreSheet's "Transcript view" group so the picker feels the same shape
-// on both breakpoints.
-const VIEW_DESCRIPTION: Record<ViewMode, string> = {
-  normal: "Tool calls collapsed into summaries, with full text responses.",
-  verbose: "Every tool call, file read, and intermediate step Claude takes.",
-  summary: "Only Claude's final responses and the changes it made.",
-};
+const EFFORT_IDS: EffortLevel[] = ["low", "medium", "high", "xhigh", "max"];
 
 // ---------------------------------------------------------------------------
 // Render-entry types + builder for collapsible tool groups (mockup s-19).
@@ -190,18 +189,7 @@ function pieceKey(p: UIPiece, idx: number): string {
 function buildRenderEntries(
   pieces: UIPiece[],
   absorbed: Set<string>,
-  viewMode: ViewMode,
 ): RenderEntry[] {
-  // Verbose = user opted into the full firehose; don't hide anything.
-  // Summary = tool_use pieces don't reach here anyway, but skip grouping
-  // for belt-and-braces parity with the mode's contract.
-  if (viewMode !== "normal") {
-    return pieces.map((piece, idx) => ({
-      kind: "single" as const,
-      piece,
-      key: pieceKey(piece, idx),
-    }));
-  }
   const out: RenderEntry[] = [];
   let run: ToolUsePiece[] = [];
   let runStartIdx = -1;
@@ -329,6 +317,13 @@ export function ChatScreen() {
   // / terminal) behind a single "⋯" so the header stays breathable on
   // tablet widths where the sessions + tasks rails are both open.
   const [showMore, setShowMore] = useState(false);
+  // Mobile-only quick-create sheet — the desktop rail already has an
+  // inline "+ New session" affordance, but mobile has no sidebar, so
+  // spawning a sibling session in the current project otherwise costs a
+  // round trip to Home. Surfaced via a new ChatMoreSheet action so we
+  // don't steal a header slot. Renders the same QuickCreateForm the
+  // desktop rail uses, just in a bottom-sheet wrapper.
+  const [showQuickCreate, setShowQuickCreate] = useState(false);
   // Desktop tasks rail visibility. Persisted across navigations so users
   // who prefer the condensed layout stay condensed. Mobile ignores this —
   // the rail itself is `hidden md:flex`. Default `false` since the Settings
@@ -426,8 +421,6 @@ export function ChatScreen() {
     resolvePermission,
     resolveAskUserQuestion,
     resolvePlanAccept,
-    viewMode,
-    setViewMode,
   } = useSessions();
 
   // Live status subscription from the global sessions store. Populated by
@@ -492,9 +485,9 @@ export function ChatScreen() {
   const pieces = id ? transcripts[id] ?? [] : [];
   const meta = id ? transcriptMeta[id] : undefined;
 
-  const { visiblePieces, changes } = useMemo(
-    () => applyViewMode(pieces, viewMode),
-    [pieces, viewMode],
+  const visiblePieces = useMemo(
+    () => filterPiecesForView(pieces),
+    [pieces],
   );
 
   // Latest TodoWrite snapshot — drives the sticky PlanStrip, the PlanSheet,
@@ -564,8 +557,8 @@ export function ChatScreen() {
   // and Summary mode (tool_use pieces don't reach the render loop anyway).
   // -------------------------------------------------------------------------
   const renderEntries = useMemo(
-    () => buildRenderEntries(visiblePieces, matchedToolUseIds, viewMode),
-    [visiblePieces, matchedToolUseIds, viewMode],
+    () => buildRenderEntries(visiblePieces, matchedToolUseIds),
+    [visiblePieces, matchedToolUseIds],
   );
 
   // Any still-pending permission request for a diff-producing tool
@@ -797,6 +790,7 @@ export function ChatScreen() {
   async function patchSession(partial: {
     model?: ModelId;
     mode?: PermissionMode;
+    effort?: EffortLevel;
   }) {
     if (!id || !session) return;
     try {
@@ -964,7 +958,6 @@ export function ChatScreen() {
               Review diff
             </Link>
           )}
-          <ViewModePicker mode={viewMode} onChange={setViewMode} />
           <PillPicker
             label={session ? MODEL_LABEL[session.model] ?? session.model : "—"}
             disabled={!session}
@@ -984,6 +977,16 @@ export function ChatScreen() {
               active: session?.mode === m,
             }))}
             onPick={(m) => patchSession({ mode: m as PermissionMode })}
+          />
+          <PillPicker
+            label={session ? EFFORT_LABEL[session.effort] ?? session.effort : "—"}
+            disabled={!session}
+            items={EFFORT_IDS.map((e) => ({
+              id: e,
+              label: EFFORT_LABEL[e],
+              active: session?.effort === e,
+            }))}
+            onPick={(e) => patchSession({ effort: e as EffortLevel })}
           />
           <ContextRingButton
             pct={headerContext.pct}
@@ -1100,13 +1103,11 @@ export function ChatScreen() {
             </div>
           </div>
         )}
-        {!meta?.initialLoading &&
-          visiblePieces.length === 0 &&
-          viewMode !== "summary" && (
-            <div className="text-[13px] text-ink-muted text-center py-8">
-              Send your first message to wake claude up.
-            </div>
-          )}
+        {!meta?.initialLoading && visiblePieces.length === 0 && (
+          <div className="text-[13px] text-ink-muted text-center py-8">
+            Send your first message to wake claude up.
+          </div>
+        )}
         {(() => {
           // Shared piece renderer — used both for top-level `single` entries
           // and for each child inside a `group` entry. Keeps prop plumbing
@@ -1115,7 +1116,6 @@ export function ChatScreen() {
           const renderPiece = (p: UIPiece, i: number) => (
             <Piece
               p={p}
-              viewMode={viewMode}
               session={session}
               project={project}
               isLastUserMessage={
@@ -1195,9 +1195,6 @@ export function ChatScreen() {
             RunningDots here in that case produces the double-dots bug. */}
         {session?.status === "running" &&
           !pieces.some((p) => p.kind === "pending") && <RunningDots />}
-        {viewMode === "summary" && (
-          <SummaryCards session={session} changes={changes} />
-        )}
       </div>
 
       <Composer
@@ -1261,11 +1258,6 @@ export function ChatScreen() {
 
       {showMore && session && (
         <ChatMoreSheet
-          viewMode={viewMode}
-          onPickViewMode={(m) => {
-            setViewMode(m);
-            setShowMore(false);
-          }}
           onOpenTasks={() => {
             setShowMore(false);
             setShowTasksDrawer(true);
@@ -1282,7 +1274,21 @@ export function ChatScreen() {
             setShowMore(false);
             navigate(`/session/${id}/session-diff`);
           }}
+          onOpenQuickCreate={() => {
+            setShowMore(false);
+            setShowQuickCreate(true);
+          }}
           onClose={() => setShowMore(false)}
+        />
+      )}
+      {showQuickCreate && session && (
+        <MobileQuickCreateSheet
+          current={session}
+          onClose={() => setShowQuickCreate(false)}
+          onCreated={(newId) => {
+            setShowQuickCreate(false);
+            navigate(`/session/${newId}`);
+          }}
         />
       )}
       {showSettings && session && (
@@ -1631,72 +1637,42 @@ function MenuRow({
 
 // ---------------------------------------------------------------------------
 // Mobile "more" bottom sheet — houses the buttons evicted from the mobile
-// header (view mode, session settings, terminal, /btw side chat). Desktop
-// uses the compact DesktopMoreMenu popover above instead, because a full
-// bottom sheet is overkill when the overflow is only four items.
+// header (session settings, terminal, /btw side chat). Desktop uses the
+// compact DesktopMoreMenu popover above instead, because a full bottom
+// sheet is overkill when the overflow is only four items.
 // ---------------------------------------------------------------------------
 function ChatMoreSheet({
-  viewMode,
-  onPickViewMode,
   onOpenTasks,
   onOpenSideChat,
   onOpenTerminal,
   onOpenSessionDiff,
+  onOpenQuickCreate,
   onClose,
 }: {
-  viewMode: ViewMode;
-  onPickViewMode: (m: ViewMode) => void;
   onOpenTasks: () => void;
   onOpenSideChat: () => void;
   onOpenTerminal: () => void;
   onOpenSessionDiff: () => void;
+  onOpenQuickCreate: () => void;
   onClose: () => void;
 }) {
-  const viewModes: ViewMode[] = ["normal", "verbose", "summary"];
   return (
     <div className="fixed inset-0 z-40 bg-ink/30 flex items-end justify-center">
       <div role="dialog" aria-modal="true" aria-label="More actions" className="w-full bg-canvas border-t border-line rounded-t-[20px] shadow-lift p-4">
         <div className="flex justify-center mb-3">
           <span className="h-1 w-12 bg-line-strong rounded-full" />
         </div>
-        <div className="caps text-ink-muted mb-2">Transcript view</div>
-        <div className="space-y-2 mb-4">
-          {viewModes.map((m) => {
-            const active = viewMode === m;
-            return (
-              <button
-                key={m}
-                type="button"
-                onClick={() => onPickViewMode(m)}
-                className={cn(
-                  "w-full flex items-start gap-3 p-3 rounded-[8px] border text-left",
-                  active
-                    ? "border-klein bg-klein-wash/40"
-                    : "border-line bg-canvas hover:bg-paper/40",
-                )}
-                aria-pressed={active}
-              >
-                {active ? (
-                  <span className="h-4 w-4 mt-1 rounded-full border-2 border-klein bg-klein shrink-0">
-                    <span className="block h-full w-full rounded-full border-2 border-canvas" />
-                  </span>
-                ) : (
-                  <span className="h-4 w-4 mt-1 rounded-full border-2 border-line-strong bg-canvas shrink-0" />
-                )}
-                <div className="min-w-0">
-                  <div className="text-[14px] font-medium">
-                    {VIEW_LABEL[m]}
-                  </div>
-                  <div className="text-[12px] text-ink-muted mt-0.5">
-                    {VIEW_DESCRIPTION[m]}
-                  </div>
-                </div>
-              </button>
-            );
-          })}
-        </div>
         <div className="caps text-ink-muted mb-2">Actions</div>
         <div className="space-y-1">
+          {/* Quick-create sits at the top because it's the most frequent
+              mobile action — the desktop rail has an always-visible
+              "+ New session" affordance, but mobile had no equivalent
+              short-cut into a sibling session in the same project. */}
+          <SheetAction
+            icon={<Plus className="w-4 h-4 text-klein" />}
+            label="New session here"
+            onClick={onOpenQuickCreate}
+          />
           <SheetAction
             icon={<MessageCircle className="w-4 h-4 text-klein" />}
             label="Side chat (/btw)"
@@ -1729,6 +1705,62 @@ function ChatMoreSheet({
   );
 }
 
+// Mobile-only bottom sheet hosting the same QuickCreateForm the desktop
+// rail uses inline. Rendered only from Chat when `showQuickCreate` flips
+// true; closes on backdrop tap, Escape, the form's Cancel button, or a
+// successful create (the caller navigates to the new session in the
+// `onCreated` callback). Defined here rather than in ChatSessionsRail so
+// the rail file stays single-responsibility (desktop rail UI).
+function MobileQuickCreateSheet({
+  current,
+  onClose,
+  onCreated,
+}: {
+  current: Session;
+  onClose: () => void;
+  onCreated: (id: string) => void;
+}) {
+  useEffect(() => {
+    const onKey = (ev: KeyboardEvent) => {
+      if (ev.key === "Escape") {
+        ev.stopPropagation();
+        onClose();
+      }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
+  return (
+    <div
+      className="fixed inset-0 z-40 bg-ink/30 flex items-end justify-center"
+      onClick={onClose}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="New session in this project"
+        className="w-full bg-canvas border-t border-line rounded-t-[20px] shadow-lift p-4 space-y-3"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex justify-center">
+          <span className="h-1 w-12 bg-line-strong rounded-full" />
+        </div>
+        <div>
+          <div className="display text-[16px] leading-tight">New session</div>
+          <div className="text-[12px] text-ink-muted mt-0.5 truncate">
+            in this project
+          </div>
+        </div>
+        <QuickCreateForm
+          current={current}
+          onCancel={onClose}
+          onCreated={onCreated}
+        />
+      </div>
+    </div>
+  );
+}
+
 function SheetAction({
   icon,
   label,
@@ -1752,7 +1784,6 @@ function SheetAction({
 
 function Piece({
   p,
-  viewMode,
   session,
   project,
   onDecide,
@@ -1771,7 +1802,6 @@ function Piece({
   isAbsorbedResult,
 }: {
   p: UIPiece;
-  viewMode: ViewMode;
   session: Session | null;
   project: Project | null;
   onDecide: (
@@ -1822,11 +1852,9 @@ function Piece({
    * duplicate bubble. */
   isAbsorbedResult?: boolean;
 }) {
-  // Verbose = everything expanded, no truncation. Normal = compact by default,
-  // user can click to expand individual tool_use chips and tool_result blocks.
-  // Summary mode never reaches this component for tool_use/tool_result, so we
-  // only have to distinguish normal vs verbose here.
-  const verbose = viewMode === "verbose";
+  // Normal mode: tool_use chips + tool_result blocks start compact and
+  // expand on click. There is no verbose/summary alternative anymore.
+  const verbose = false;
   switch (p.kind) {
     case "user": {
       // User messages are rendered verbatim — never markdown-processed. If the
@@ -1956,14 +1984,6 @@ function Piece({
                 </span>
               </div>
             )}
-            {p.createdAt && (
-              <div
-                className="mono text-[10px] text-ink-faint mt-1"
-                title={new Date(p.createdAt).toLocaleString()}
-              >
-                {timeAgoShort(p.createdAt)}
-              </div>
-            )}
           </div>
         );
       }
@@ -2003,14 +2023,6 @@ function Piece({
               </span>
               <span className="mono text-[11px] text-ink-muted">→ view</span>
             </button>
-            {p.createdAt && (
-              <div
-                className="mono text-[10px] text-ink-faint mt-1"
-                title={new Date(p.createdAt).toLocaleString()}
-              >
-                {timeAgoShort(p.createdAt)}
-              </div>
-            )}
           </div>
         );
       }
@@ -2100,14 +2112,6 @@ function Piece({
                 → view
               </span>
             </button>
-            {p.createdAt && (
-              <div
-                className="mono text-[10px] text-ink-faint mt-1"
-                title={new Date(p.createdAt).toLocaleString()}
-              >
-                {timeAgoShort(p.createdAt)}
-              </div>
-            )}
           </div>
         );
       }
@@ -2137,14 +2141,6 @@ function Piece({
             verbose={verbose}
             onOpenLightbox={onOpenLightbox}
           />
-          {p.createdAt && (
-            <div
-              className="mono text-[10px] text-ink-faint mt-1"
-              title={new Date(p.createdAt).toLocaleString()}
-            >
-              {timeAgoShort(p.createdAt)}
-            </div>
-          )}
         </div>
       );
     }
@@ -4948,6 +4944,7 @@ function Composer({
                 <>
                   {MODEL_LABEL[session.model] ?? session.model} ·{" "}
                   {MODE_LABEL[session.mode] ?? session.mode} ·{" "}
+                  {EFFORT_LABEL[session.effort] ?? session.effort} ·{" "}
                   <span className="mono">
                     {(() => {
                       // Context window size formatter. Below 1M tokens we keep
@@ -5303,41 +5300,14 @@ function safeStringify(input: Record<string, unknown>): string {
 }
 
 // ---------------------------------------------------------------------------
-// View-mode filtering + summary card synthesis.
+// Transcript filtering — drops subagent-lifecycle events and subagent-owned
+// children out of the main thread (they live in the Subagents rail/sheet
+// instead), and hides thinking blocks from the chat. The old verbose /
+// summary view modes are gone — the transcript always renders in the
+// previous "Normal" shape.
 // ---------------------------------------------------------------------------
-
-interface ChangeEntry {
-  path: string;
-  addCount: number;
-  delCount: number;
-  /** seq of the first tool_use piece that touched this path — used by the
-   * Summary-mode Changes card to scroll into view on click. null when we
-   * never saw a seq (in-flight turns etc). */
-  firstSeq: number | null;
-}
-
-/**
- * Reduce the raw transcript to what the current mode should display, and
- * (in summary mode) pre-compute the list of file changes for the Changes
- * card.
- *
- * - `normal`: strip thinking blocks. Everything else stays.
- * - `verbose`: no filtering.
- * - `summary`: keep user messages + the **last** assistant_text of each
- *   assistant "turn" (the run of non-user pieces between two user messages).
- *   Drop tool_use, tool_result, thinking, and permission_request. The
- *   Changes card below the transcript replaces what those pieces showed.
- */
-function applyViewMode(
-  pieces: UIPiece[],
-  mode: ViewMode,
-): { visiblePieces: UIPiece[]; changes: ChangeEntry[] } {
-  // Drop pieces that came from inside a subagent (parentToolUseId set)
-  // and drop the subagent lifecycle pieces themselves — both are
-  // surfaced in the SubagentsStrip / SubagentsPanel instead of inlined
-  // in the main thread. Keeping them here would duplicate content + the
-  // rail's live-stream rows. See s-17 plan.
-  const topLevel = pieces.filter((p) => {
+function filterPiecesForView(pieces: UIPiece[]): UIPiece[] {
+  return pieces.filter((p) => {
     if (
       p.kind === "subagent_start" ||
       p.kind === "subagent_progress" ||
@@ -5357,181 +5327,7 @@ function applyViewMode(
     ) {
       return false;
     }
+    if (p.kind === "thinking") return false;
     return true;
   });
-  if (mode === "verbose") {
-    return { visiblePieces: topLevel, changes: [] };
-  }
-  if (mode === "normal") {
-    return {
-      visiblePieces: topLevel.filter((p) => p.kind !== "thinking"),
-      changes: [],
-    };
-  }
-  // summary — walk the list, collect user pieces verbatim, and for every
-  // run of assistant activity keep only the final assistant_text.
-  const out: UIPiece[] = [];
-  let pendingTextIdx = -1; // index into `out` of the last assistant_text
-  for (const p of topLevel) {
-    if (p.kind === "user") {
-      out.push(p);
-      pendingTextIdx = -1;
-      continue;
-    }
-    if (p.kind === "assistant_text") {
-      if (pendingTextIdx !== -1) {
-        // Replace the previous assistant_text in this turn — we only want
-        // the last one.
-        out[pendingTextIdx] = p;
-      } else {
-        out.push(p);
-        pendingTextIdx = out.length - 1;
-      }
-      continue;
-    }
-    // tool_use / tool_result / thinking / permission_request /
-    // ask_user_question are all suppressed in summary mode.
-  }
-  // Aggregate Edit/Write/MultiEdit tool_use pieces into a de-duplicated
-  // changes list. Adds/dels are summed across calls touching the same path;
-  // paths with zero net change (e.g. an edit that added 3 lines and a later
-  // edit that removed those same 3) are dropped — per mockup s-07 the
-  // Changes card is a scan-mode signal, not an audit log.
-  const changesMap = new Map<string, ChangeEntry>();
-  for (const p of topLevel) {
-    if (p.kind !== "tool_use") continue;
-    const d = diffForToolCall(p.name, p.input);
-    if (!d) continue;
-    const existing = changesMap.get(d.path);
-    if (existing) {
-      existing.addCount += d.addCount;
-      existing.delCount += d.delCount;
-    } else {
-      changesMap.set(d.path, {
-        path: d.path,
-        addCount: d.addCount,
-        delCount: d.delCount,
-        firstSeq: p.seq ?? null,
-      });
-    }
-  }
-  const changes = Array.from(changesMap.values()).filter(
-    (c) => c.addCount > 0 || c.delCount > 0,
-  );
-  return { visiblePieces: out, changes };
-}
-
-// ---------------------------------------------------------------------------
-// Summary cards — Outcome + Changes (mockup s-07 right column).
-// PR card is planned but not yet wired (no git integration yet).
-// ---------------------------------------------------------------------------
-
-function SummaryCards({
-  session,
-  changes,
-}: {
-  session: Session | null;
-  changes: ChangeEntry[];
-}) {
-  const outcome = outcomeFor(session);
-  // Clicking a change row scrolls to the first tool_use event for that
-  // path. In summary mode those pieces are hidden from the transcript, so
-  // we hop to the underlying DOM node by seq — the hash listener in the
-  // scroller effect picks up the change. Best-effort: if the seq was
-  // never set (unseq'd optimistic piece) we log-and-no-op.
-  const handleJump = (c: ChangeEntry) => {
-    if (c.firstSeq == null) {
-      // eslint-disable-next-line no-console
-      console.debug("[summary] no seq for path", c.path);
-      return;
-    }
-    const hash = `#seq-${c.firstSeq}`;
-    if (window.location.hash !== hash) {
-      window.location.hash = hash;
-    }
-    const el = document.querySelector(
-      `[data-event-seq="${c.firstSeq}"]`,
-    ) as HTMLElement | null;
-    el?.scrollIntoView({ behavior: "smooth", block: "center" });
-  };
-  return (
-    <div className="space-y-3 max-w-[72ch]">
-      <div className="rounded-[8px] border border-line bg-paper/50 p-3">
-        <div className="text-[11px] uppercase tracking-[0.14em] text-ink-muted">
-          Outcome
-        </div>
-        <div className="mt-1 text-[13.5px] font-medium leading-snug">
-          {outcome}
-        </div>
-      </div>
-      <div className="rounded-[8px] border border-line bg-canvas p-3">
-        <div className="text-[11px] uppercase tracking-[0.14em] text-ink-muted">
-          Changes
-        </div>
-        {changes.length === 0 ? (
-          <div className="mt-1 text-[12.5px] text-ink-muted">
-            No file changes yet.
-          </div>
-        ) : (
-          <div className="mt-1">
-            {changes.map((c) => {
-              const clickable = c.firstSeq != null;
-              return (
-                <button
-                  key={c.path}
-                  type="button"
-                  onClick={() => handleJump(c)}
-                  disabled={!clickable}
-                  title={
-                    clickable
-                      ? "Jump to this change in the transcript"
-                      : undefined
-                  }
-                  className={cn(
-                    "w-full flex items-center gap-2 mono text-[12px] text-ink-soft text-left py-0.5 px-1 -mx-1 rounded-[4px]",
-                    clickable
-                      ? "hover:bg-paper/60 cursor-pointer"
-                      : "cursor-default",
-                  )}
-                >
-                  <span className="truncate min-w-0 flex-1">{c.path}</span>
-                  <span className="shrink-0 text-ink-muted">·</span>
-                  {c.addCount > 0 && (
-                    <span className="text-success shrink-0">
-                      +{c.addCount}
-                    </span>
-                  )}
-                  {c.delCount > 0 && (
-                    <span className="text-danger shrink-0">
-                      −{c.delCount}
-                    </span>
-                  )}
-                </button>
-              );
-            })}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function outcomeFor(session: Session | null): string {
-  if (!session) return "Session loading…";
-  switch (session.status) {
-    case "running":
-      return "Session in progress.";
-    case "cli_running":
-      return "External `claude` CLI is running for this session.";
-    case "awaiting":
-      return "Waiting on you — permission or reply required.";
-    case "idle":
-      return "Session idle — ready for the next turn.";
-    case "archived":
-      return "Session archived.";
-    case "error":
-      return "Session hit a terminal error.";
-    default:
-      return "Session in progress.";
-  }
 }

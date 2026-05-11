@@ -240,6 +240,7 @@ export function importBackupBundle(
     const insertSession = db.prepare(
       `INSERT INTO sessions (
          id, title, project_id, branch, worktree_path, status, model, mode,
+         effort,
          created_at, updated_at, last_message_at, archived_at, sdk_session_id,
          parent_session_id, forked_from_session_id,
          stats_messages, stats_files_changed, stats_lines_added,
@@ -247,6 +248,7 @@ export function importBackupBundle(
          cli_jsonl_seq, tags
        ) VALUES (
          @id, @title, @project_id, @branch, @worktree_path, @status, @model, @mode,
+         @effort,
          @created_at, @updated_at, @last_message_at, @archived_at, @sdk_session_id,
          @parent_session_id, @forked_from_session_id,
          @stats_messages, @stats_files_changed, @stats_lines_added,
@@ -284,6 +286,11 @@ export function importBackupBundle(
         status: s.status === "archived" ? "archived" : "idle", // never resurrect running/awaiting
         model: s.model,
         mode: s.mode,
+        // `effort` was added by migration 23. Legacy bundles (pre-migration)
+        // don't carry it; the column is NOT NULL with DEFAULT 'medium' at
+        // the SQL layer, but we still pass an explicit value so the named
+        // parameter binding is complete.
+        effort: s.effort ?? "medium",
         created_at: s.createdAt,
         updated_at: s.updatedAt,
         last_message_at: s.lastMessageAt,

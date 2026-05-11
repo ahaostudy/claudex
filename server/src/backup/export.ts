@@ -101,6 +101,7 @@ function selectSessions(db: Database.Database): Session[] {
     status: string;
     model: string;
     mode: string;
+    effort: string | null;
     created_at: string;
     updated_at: string;
     last_message_at: string | null;
@@ -126,6 +127,9 @@ function selectSessions(db: Database.Database): Session[] {
     status: r.status as SessionStatus,
     model: r.model as ModelId,
     mode: r.mode as PermissionMode,
+    // Pre-migration rows may predate the column; fall back to "medium"
+    // (the SQL default) so older archives still deserialize.
+    effort: (r.effort ?? "medium") as Session["effort"],
     createdAt: r.created_at,
     updatedAt: r.updated_at,
     lastMessageAt: r.last_message_at,
@@ -136,6 +140,12 @@ function selectSessions(db: Database.Database): Session[] {
     cliJsonlSeq: r.cli_jsonl_seq ?? 0,
     tags: parseTagsBlob(r.tags),
     pinned: r.pinned === 1,
+    // Backups mirror persisted columns only. `lastUserMessage` is a
+    // query-time projection computed from `session_events`, so on
+    // restore the importing side will re-derive it the first time the
+    // row is read through SessionStore. Emit null here to satisfy the
+    // DTO schema without baking a stale preview into the archive.
+    lastUserMessage: null,
     stats: {
       messages: r.stats_messages,
       filesChanged: r.stats_files_changed,

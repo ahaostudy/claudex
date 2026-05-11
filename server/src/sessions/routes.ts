@@ -397,6 +397,7 @@ export async function registerSessionRoutes(
         projectId: parsed.data.projectId,
         model: parsed.data.model,
         mode: parsed.data.mode,
+        effort: parsed.data.effort,
         worktreePath,
         branch,
       });
@@ -586,7 +587,7 @@ export async function registerSessionRoutes(
       }
 
       const warnings: string[] = [];
-      const { title, model, mode, tags, pinned } = parsed.data;
+      const { title, model, mode, effort, tags, pinned } = parsed.data;
 
       if (title !== undefined) sessions.setTitle(id, title);
       if (model !== undefined && model !== existing.model) {
@@ -608,6 +609,23 @@ export async function registerSessionRoutes(
           req.log.warn(
             { err, sessionId: id, mode },
             "failed to propagate permission mode to runner",
+          );
+        }
+      }
+      if (effort !== undefined && effort !== existing.effort) {
+        sessions.setEffort(id, effort);
+        // Runner stores the new value for the NEXT SDK turn — same warning
+        // as model swap so the UI can tell the user the change is deferred
+        // if Claude is currently mid-turn.
+        if (existing.status === "running" || deps.manager.hasRunner(id)) {
+          warnings.push("effort_change_applies_to_next_turn");
+        }
+        try {
+          await deps.manager.applyEffort(id, effort);
+        } catch (err) {
+          req.log.warn(
+            { err, sessionId: id, effort },
+            "failed to propagate effort level to runner",
           );
         }
       }

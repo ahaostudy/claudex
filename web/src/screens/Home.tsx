@@ -4,7 +4,7 @@ import { Plus, GitBranch, Pencil, Pin, Trash2, FolderOpen, Settings2, X, Downloa
 import { useAuth } from "@/state/auth";
 import { useSessions } from "@/state/sessions";
 import { api, ApiError } from "@/api/client";
-import type { Project, Session, ModelId, PermissionMode } from "@claudex/shared";
+import type { Project, Session, EffortLevel, ModelId, PermissionMode } from "@claudex/shared";
 import { FolderPicker } from "@/components/FolderPicker";
 import { AppShell } from "@/components/AppShell";
 import { ImportSessionsSheet } from "@/components/ImportSessionsSheet";
@@ -1494,6 +1494,7 @@ function NewSessionSheet({
   const [title, setTitle] = useState("");
   const [model, setModel] = useState<ModelId>("claude-opus-4-7");
   const [mode, setMode] = useState<PermissionMode>("default");
+  const [effort, setEffort] = useState<EffortLevel>("medium");
   const [projectName, setProjectName] = useState("");
   const [projectPath, setProjectPath] = useState("");
   const [busy, setBusy] = useState(false);
@@ -1577,6 +1578,7 @@ function NewSessionSheet({
       title: title || "Untitled",
       model,
       mode,
+      effort,
       worktree: false,
     });
     onCreated(res.session.id);
@@ -1790,6 +1792,35 @@ function NewSessionSheet({
                   onClick={() => setMode(id)}
                   className={`h-9 rounded-[6px] text-[12px] font-medium ${
                     mode === id
+                      ? "bg-canvas shadow-card border border-line text-ink"
+                      : "text-ink-muted"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <div className="text-[12px] uppercase tracking-[0.14em] text-ink-muted mb-2">
+              Thinking effort
+            </div>
+            <div className="grid grid-cols-5 gap-1 p-1 bg-paper border border-line rounded-[8px]">
+              {(
+                [
+                  ["low", "Low"],
+                  ["medium", "Medium"],
+                  ["high", "High"],
+                  ["xhigh", "X-High"],
+                  ["max", "Max"],
+                ] as Array<[EffortLevel, string]>
+              ).map(([id, label]) => (
+                <button
+                  key={id}
+                  onClick={() => setEffort(id)}
+                  className={`h-9 rounded-[6px] text-[12px] font-medium ${
+                    effort === id
                       ? "bg-canvas shadow-card border border-line text-ink"
                       : "text-ink-muted"
                   }`}

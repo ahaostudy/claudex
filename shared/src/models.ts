@@ -20,6 +20,29 @@ export const ModelId = z.enum([
 ]);
 export type ModelId = z.infer<typeof ModelId>;
 
+// Thinking-effort level for a session's Claude runner. Selected in the Chat
+// header like model and permission mode, and persisted on the session row
+// so it survives restart / resume. Server-side the runner maps each level
+// to a specific `thinking` option on the Agent SDK:
+//
+//   low     → thinking disabled (fastest turn, no budget)
+//   medium  → adaptive thinking (current default; SDK picks the budget)
+//   high    → enabled, 16000-token budget
+//   xhigh   → enabled, 32000-token budget
+//   max     → enabled, 63999-token budget (just under the documented ceiling)
+//
+// The mapping itself lives in `server/src/sessions/agent-runner.ts`.
+// `medium` stays the default so sessions created before migration 23
+// behave exactly like they did before the column existed.
+export const EffortLevel = z.enum([
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+]);
+export type EffortLevel = z.infer<typeof EffortLevel>;
+
 export const SessionStatus = z.enum([
   "idle", // no turn in progress
   "running", // claude is working (driven by claudex's SDK runner)
@@ -60,6 +83,10 @@ export const Session = z.object({
   status: SessionStatus,
   model: ModelId,
   mode: PermissionMode,
+  // Thinking-effort level for the Agent SDK runner. Default `medium` keeps
+  // the existing adaptive-thinking behavior; other levels switch to a fixed
+  // thinking budget. See `EffortLevel` above.
+  effort: EffortLevel.default("medium"),
   createdAt: z.string(),
   updatedAt: z.string(),
   lastMessageAt: z.string().nullable(),
@@ -99,6 +126,17 @@ export const Session = z.object({
   // `PATCH /api/sessions/:id` with `{pinned: boolean}`. Defaults to false so
   // rows created before the column existed round-trip cleanly.
   pinned: z.boolean().default(false),
+  // Single-line preview of the most recent `user_message` event's text,
+  // used by the Home session list to show "what the user last said here"
+  // under the title. Computed server-side via a correlated subquery on
+  // `session_events` (no DB column — stays cheap thanks to
+  // `idx_events_session_seq`). Truncated to 200 chars with ellipsis so we
+  // never ship multi-KB prompts down to the list view. Null when the
+  // session has no user message yet (fresh row, or CLI import that hasn't
+  // seeded one). Web clients keep it fresh on the fly by mirroring the
+  // incoming `user_message` WS frame into this field (see
+  // `web/src/state/sessions.ts`).
+  lastUserMessage: z.string().nullable().default(null),
   // aggregate counters, cheap to read
   stats: z.object({
     messages: z.number().int().nonnegative(),
@@ -471,6 +509,8 @@ export const CreateSessionRequest = z.object({
   title: z.string().optional(),
   model: ModelId,
   mode: PermissionMode,
+  // Optional — defaults to `medium` server-side.
+  effort: EffortLevel.optional(),
   worktree: z.boolean().default(true),
   initialPrompt: z.string().optional(),
 });
@@ -511,6 +551,10 @@ export const UpdateSessionRequest = z
     title: z.string().min(1).optional(),
     model: ModelId.optional(),
     mode: PermissionMode.optional(),
+    // Hot-swap the thinking-effort level. The runner picks up the new value
+    // on the NEXT SDK turn; an in-flight turn keeps the budget it started
+    // with (matches how `model` changes propagate).
+    effort: EffortLevel.optional(),
     // Max 8 tags per session. Each tag is validated by `SessionTag`. Passing
     // an explicit empty array clears all tags.
     tags: z.array(SessionTag).max(8).optional(),
@@ -523,9 +567,13 @@ export const UpdateSessionRequest = z
       v.title !== undefined ||
       v.model !== undefined ||
       v.mode !== undefined ||
+      v.effort !== undefined ||
       v.tags !== undefined ||
       v.pinned !== undefined,
-    { message: "at least one of title, model, mode, tags, or pinned is required" },
+    {
+      message:
+        "at least one of title, model, mode, effort, tags, or pinned is required",
+    },
   );
 export type UpdateSessionRequest = z.infer<typeof UpdateSessionRequest>;
 
