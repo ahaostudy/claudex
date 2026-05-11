@@ -112,6 +112,118 @@ const VIEW_DESCRIPTION: Record<ViewMode, string> = {
   summary: "Only Claude's final responses and the changes it made.",
 };
 
+// ---------------------------------------------------------------------------
+// Render-entry types + builder for collapsible tool groups (mockup s-19).
+//
+// The chat render loop iterates `RenderEntry[]` instead of `UIPiece[]`:
+// `single` entries render via `<Piece>` unchanged, `group` entries render
+// via `<ToolGroup>` which owns collapse/expand state and wraps a run of
+// consecutive "plain" tool_use pieces behind a summary pill.
+// ---------------------------------------------------------------------------
+
+type ToolUsePiece = Extract<UIPiece, { kind: "tool_use" }>;
+
+type RenderEntry =
+  | { kind: "single"; piece: UIPiece; key: string }
+  | { kind: "group"; pieces: ToolUsePiece[]; key: string };
+
+/** True when a tool_use renders as a plain ToolCallBlock — the only kind of
+ * tool_use we fold into groups. Diff-producing edits (Edit/Write/MultiEdit),
+ * the TodoWrite plan pointer, and the Task/Agent/Explore indigo pointers
+ * all have rich inline UIs that would be hidden by a summary pill, so they
+ * stay inline and break the surrounding group. */
+function isGroupableToolUse(p: UIPiece): p is ToolUsePiece {
+  if (p.kind !== "tool_use") return false;
+  // parentToolUseId-scoped tool uses are already stripped by applyViewMode,
+  // but guard defensively so a regression there can't double-count a
+  // subagent's tools in the main thread.
+  if (p.parentToolUseId) return false;
+  if (p.name === "TodoWrite") return false;
+  if (p.name === "Task" || p.name === "Agent" || p.name === "Explore")
+    return false;
+  if (toolCallToDiff(p.name, p.input)) return false;
+  return true;
+}
+
+function pieceKey(p: UIPiece, idx: number): string {
+  switch (p.kind) {
+    case "tool_use":
+      return `tu:${p.id}`;
+    case "tool_result":
+      return `tr:${p.toolUseId}:${p.seq ?? idx}`;
+    case "permission_request":
+      return `pr:${p.approvalId}`;
+    case "ask_user_question":
+      return `auq:${p.askId}`;
+    case "plan_accept_request":
+      return `pa:${p.planId}`;
+    case "pending":
+      return `pd:${p.id}`;
+    default:
+      return `p:${p.kind}:${p.seq ?? idx}`;
+  }
+}
+
+/** Walks `pieces` and folds consecutive groupable tool_use runs of length ≥ 2
+ * into a `group` entry. A `tool_result` whose toolUseId is in `absorbed`
+ * belongs to its matching tool_use block and is transparent to grouping —
+ * it neither starts nor breaks a group, and renders nothing itself (its
+ * matching tool_use already shows the result). */
+function buildRenderEntries(
+  pieces: UIPiece[],
+  absorbed: Set<string>,
+  viewMode: ViewMode,
+): RenderEntry[] {
+  // Verbose = user opted into the full firehose; don't hide anything.
+  // Summary = tool_use pieces don't reach here anyway, but skip grouping
+  // for belt-and-braces parity with the mode's contract.
+  if (viewMode !== "normal") {
+    return pieces.map((piece, idx) => ({
+      kind: "single" as const,
+      piece,
+      key: pieceKey(piece, idx),
+    }));
+  }
+  const out: RenderEntry[] = [];
+  let run: ToolUsePiece[] = [];
+  let runStartIdx = -1;
+  const flush = () => {
+    if (run.length === 0) return;
+    if (run.length >= 2) {
+      out.push({
+        kind: "group",
+        pieces: run,
+        key: `group:${run[0].id}`,
+      });
+    } else {
+      out.push({
+        kind: "single",
+        piece: run[0],
+        key: pieceKey(run[0], runStartIdx),
+      });
+    }
+    run = [];
+    runStartIdx = -1;
+  };
+  for (let i = 0; i < pieces.length; i++) {
+    const p = pieces[i];
+    if (isGroupableToolUse(p)) {
+      if (run.length === 0) runStartIdx = i;
+      run.push(p);
+      continue;
+    }
+    // Absorbed tool_result: transparent — it belongs to the preceding
+    // tool_use and renders nothing on its own. Don't break the run.
+    if (p.kind === "tool_result" && absorbed.has(p.toolUseId)) {
+      continue;
+    }
+    flush();
+    out.push({ kind: "single", piece: p, key: pieceKey(p, i) });
+  }
+  flush();
+  return out;
+}
+
 export function ChatScreen() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -330,7 +442,10 @@ export function ChatScreen() {
   // avoid a duplicate bubble. Orphan tool_results (no preceding tool_use)
   // continue to render on their own.
   const { matchedResultByToolUseId, matchedToolUseIds } = useMemo(() => {
-    const byId = new Map<string, { content: string; isError: boolean }>();
+    const byId = new Map<
+      string,
+      { content: string; isError: boolean; createdAt?: string }
+    >();
     const absorbed = new Set<string>();
     const seenToolUse = new Set<string>();
     for (const p of visiblePieces) {
@@ -338,13 +453,33 @@ export function ChatScreen() {
         seenToolUse.add(p.id);
       } else if (p.kind === "tool_result" && p.toolUseId) {
         if (seenToolUse.has(p.toolUseId) && !byId.has(p.toolUseId)) {
-          byId.set(p.toolUseId, { content: p.content, isError: p.isError });
+          byId.set(p.toolUseId, {
+            content: p.content,
+            isError: p.isError,
+            createdAt: p.createdAt,
+          });
           absorbed.add(p.toolUseId);
         }
       }
     }
     return { matchedResultByToolUseId: byId, matchedToolUseIds: absorbed };
   }, [visiblePieces]);
+
+  // -------------------------------------------------------------------------
+  // Collapsible tool groups (mockup s-19). A run of 2+ consecutive "plain"
+  // tool_use pieces (Bash/Read/Grep/Glob/WebFetch/…) inside one claude turn
+  // collapses into a single summary pill. Any other piece kind — text chunk,
+  // user message, permission prompt, ask_user_question, plan accept, pending
+  // placeholder, orphan tool_result, or a subagent/diff/plan-pointer tool —
+  // terminates the current run. Absorbed tool_results (already folded into
+  // their matching tool_use block) are transparent to grouping: they don't
+  // break the run. Disabled in Verbose mode (user wants every call laid out)
+  // and Summary mode (tool_use pieces don't reach the render loop anyway).
+  // -------------------------------------------------------------------------
+  const renderEntries = useMemo(
+    () => buildRenderEntries(visiblePieces, matchedToolUseIds, viewMode),
+    [visiblePieces, matchedToolUseIds, viewMode],
+  );
 
   // Any still-pending permission request for a diff-producing tool
   // (Edit / Write / MultiEdit) surfaces a "Review diff" klein chip in the
@@ -885,60 +1020,82 @@ export function ChatScreen() {
               Send your first message to wake claude up.
             </div>
           )}
-        {visiblePieces.map((p, i) => (
-          <Piece
-            key={i}
-            p={p}
-            viewMode={viewMode}
-            session={session}
-            project={project}
-            // The "edit last user message" pencil is only offered on the
-            // newest user bubble — and only when the session is idle (a
-            // running turn would race the server-side truncation). We
-            // compute the flag inline so Piece doesn't have to know about
-            // the whole transcript.
-            isLastUserMessage={
-              p.kind === "user" && lastUserVisibleIndex === i
+        {(() => {
+          // Shared piece renderer — used both for top-level `single` entries
+          // and for each child inside a `group` entry. Keeps prop plumbing
+          // in one place so the ToolGroup body looks identical to an inline
+          // rendering.
+          const renderPiece = (p: UIPiece, i: number) => (
+            <Piece
+              p={p}
+              viewMode={viewMode}
+              session={session}
+              project={project}
+              isLastUserMessage={
+                p.kind === "user" && lastUserVisibleIndex === i
+              }
+              canEdit={session?.status === "idle"}
+              onEditLastUserMessage={
+                id
+                  ? async (text) => {
+                      await api.editLastUserMessage(id, text);
+                    }
+                  : undefined
+              }
+              onDecide={(approvalId, decision) =>
+                id && resolvePermission(id, approvalId, decision)
+              }
+              onAnswerAskUserQuestion={(askId, answers, annotations) => {
+                if (id)
+                  resolveAskUserQuestion(id, askId, answers, annotations);
+              }}
+              onDecidePlan={(planId, decision) => {
+                if (id) resolvePlanAccept(id, planId, decision);
+              }}
+              onOpenLightbox={(images, index) =>
+                setLightbox({ images, index })
+              }
+              onOpenPlan={() => setShowPlanSheet(true)}
+              onOpenSubagents={() => setShowSubagentsSheet(true)}
+              revealedSeq={revealedSeq}
+              onToggleReveal={(seq) =>
+                setRevealedSeq((current) => (current === seq ? null : seq))
+              }
+              onClearReveal={() => setRevealedSeq(null)}
+              matchedResult={
+                p.kind === "tool_use"
+                  ? matchedResultByToolUseId.get(p.id) ?? null
+                  : null
+              }
+              isAbsorbedResult={
+                p.kind === "tool_result" &&
+                matchedToolUseIds.has(p.toolUseId)
+              }
+            />
+          );
+          return renderEntries.map((e) => {
+            if (e.kind === "single") {
+              // Find the original index in visiblePieces — needed by
+              // isLastUserMessage. O(N·G) lookup but the render loop
+              // already costs O(N) and groups are typically tiny, so
+              // staying explicit is fine.
+              const idx = visiblePieces.indexOf(e.piece);
+              return (
+                <div key={e.key}>{renderPiece(e.piece, idx)}</div>
+              );
             }
-            canEdit={session?.status === "idle"}
-            onEditLastUserMessage={
-              id
-                ? async (text) => {
-                    // Server truncates events + broadcasts a refresh so
-                    // the transcript reloads on its own via the WS +
-                    // events refetch path. Propagate errors so the
-                    // bubble-level editor can show a hint.
-                    await api.editLastUserMessage(id, text);
-                  }
-                : undefined
-            }
-            onDecide={(approvalId, decision) =>
-              id && resolvePermission(id, approvalId, decision)
-            }
-            onAnswerAskUserQuestion={(askId, answers, annotations) => {
-              if (id) resolveAskUserQuestion(id, askId, answers, annotations);
-            }}
-            onDecidePlan={(planId, decision) => {
-              if (id) resolvePlanAccept(id, planId, decision);
-            }}
-            onOpenLightbox={(images, index) => setLightbox({ images, index })}
-            onOpenPlan={() => setShowPlanSheet(true)}
-            onOpenSubagents={() => setShowSubagentsSheet(true)}
-            revealedSeq={revealedSeq}
-            onToggleReveal={(seq) =>
-              setRevealedSeq((current) => (current === seq ? null : seq))
-            }
-            onClearReveal={() => setRevealedSeq(null)}
-            matchedResult={
-              p.kind === "tool_use"
-                ? matchedResultByToolUseId.get(p.id) ?? null
-                : null
-            }
-            isAbsorbedResult={
-              p.kind === "tool_result" && matchedToolUseIds.has(p.toolUseId)
-            }
-          />
-        ))}
+            return (
+              <ToolGroup
+                key={e.key}
+                pieces={e.pieces}
+                matchedResultByToolUseId={matchedResultByToolUseId}
+                renderPiece={(child) =>
+                  renderPiece(child, visiblePieces.indexOf(child))
+                }
+              />
+            );
+          });
+        })()}
         {/* Tail indicator — as long as the session is running, show three
             bouncing dots at the bottom so the user knows claude is working.
             A `pending` UIPiece already renders its own dots; only show this
@@ -1560,7 +1717,11 @@ function Piece({
   /** For tool_use pieces: the tool_result content matched by toolUseId, if
    * present in the same visible list. Triggers the merged input+result
    * rendering. */
-  matchedResult?: { content: string; isError: boolean } | null;
+  matchedResult?: {
+    content: string;
+    isError: boolean;
+    createdAt?: string;
+  } | null;
   /** For tool_result pieces: true when this result was absorbed into the
    * preceding tool_use's merged block — render nothing here to avoid a
    * duplicate bubble. */
@@ -2087,6 +2248,368 @@ function ToolPayloadPane({
       <pre className="mono text-[12px] leading-[1.55] text-ink-soft px-3 pb-3 pt-0.5 max-h-[320px] overflow-auto whitespace-pre-wrap [overflow-wrap:anywhere] break-words">
         {text}
       </pre>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Tool group (mockup s-19). A run of 2+ consecutive "plain" tool_use pieces
+// folds into one summary pill with four horizontal bands:
+//   [chevron] [tool chips] [count · summary] [status ✓/… · time]
+// Each band carries its own background tint so the eye can resolve
+// "count — which tools — outcome — how long" in a single glance.
+//
+// State machine for open/closed:
+//   default = anyRunning || anyError           // expanded
+//   actual  = manualOverride ?? default
+// Tapping the header flips manualOverride to the opposite of `actual`.
+// Verbose mode is pre-filtered upstream (no groups are built), so this
+// component never sees a verbose render — it assumes Normal view.
+//
+// When expanded, each child tool_use is rendered via the `renderPiece`
+// callback (same path the ChatScreen render loop uses for inline pieces),
+// so the collapsible frame is pure chrome: the body reuses the existing
+// ToolCallBlock / DiffView / etc. inline rendering unchanged.
+// ---------------------------------------------------------------------------
+function ToolGroup({
+  pieces,
+  matchedResultByToolUseId,
+  renderPiece,
+}: {
+  pieces: ToolUsePiece[];
+  matchedResultByToolUseId: Map<
+    string,
+    { content: string; isError: boolean; createdAt?: string }
+  >;
+  renderPiece: (p: ToolUsePiece) => React.ReactNode;
+}) {
+  const meta = useMemo(() => {
+    let anyRunning = false;
+    let anyError = false;
+    let startMs: number | null = null;
+    let endMs: number | null = null;
+    const names: string[] = [];
+    for (const p of pieces) {
+      const r = matchedResultByToolUseId.get(p.id);
+      if (r == null) {
+        anyRunning = true;
+      } else if (r.isError) {
+        anyError = true;
+      }
+      names.push(p.name);
+      if (p.createdAt) {
+        const t = Date.parse(p.createdAt);
+        if (Number.isFinite(t)) {
+          if (startMs == null || t < startMs) startMs = t;
+        }
+      }
+      if (r?.createdAt) {
+        const t = Date.parse(r.createdAt);
+        if (Number.isFinite(t)) {
+          if (endMs == null || t > endMs) endMs = t;
+        }
+      }
+    }
+    return { anyRunning, anyError, names, startMs, endMs };
+  }, [pieces, matchedResultByToolUseId]);
+
+  const [manualState, setManualState] = useState<"open" | "closed" | null>(
+    null,
+  );
+  // Default: expanded while anything is live or a failure lingers; collapsed
+  // once every child has landed green. User clicks flip the override.
+  const defaultOpen = meta.anyRunning || meta.anyError;
+  const open = manualState === "open" || (manualState === null && defaultOpen);
+  const toggle = () => setManualState(open ? "closed" : "open");
+
+  // Accent color key: danger > klein (running) > neutral (done).
+  const tone: "danger" | "klein" | "neutral" = meta.anyError
+    ? "danger"
+    : meta.anyRunning
+      ? "klein"
+      : "neutral";
+  const gutterClass =
+    tone === "danger"
+      ? "bg-danger"
+      : tone === "klein"
+        ? "bg-klein"
+        : "bg-line-strong";
+  const frameClass =
+    tone === "danger"
+      ? "border-danger/35 bg-danger-wash/10"
+      : tone === "klein"
+        ? "border-klein/40 bg-klein-wash/10"
+        : "border-line bg-paper";
+  const headerBg =
+    tone === "danger"
+      ? "bg-danger-wash/70"
+      : tone === "klein"
+        ? "bg-klein-wash/55"
+        : "bg-paper";
+  const chipBg =
+    tone === "danger"
+      ? "bg-danger-wash"
+      : tone === "klein"
+        ? "bg-klein-wash/80"
+        : "bg-canvas";
+  const borderX =
+    tone === "danger"
+      ? "border-danger/30"
+      : tone === "klein"
+        ? "border-klein/30"
+        : "border-line";
+  const statusBandClass =
+    tone === "danger"
+      ? "bg-danger-wash border-l border-danger/30"
+      : tone === "klein"
+        ? "bg-klein-wash border-l border-klein/30"
+        : "bg-success-wash border-l border-success/30";
+
+  // Summary text: consecutive-collapsed tool names joined by " · ".
+  const summaryText = useMemo(() => {
+    const dedup: string[] = [];
+    for (const n of meta.names) {
+      if (dedup[dedup.length - 1] !== n) dedup.push(n);
+    }
+    const displayed = dedup.slice(0, 4);
+    const joined = displayed.map((n) => n.toLowerCase()).join(" · ");
+    if (dedup.length > displayed.length) {
+      return `${joined} · +${dedup.length - displayed.length} more`;
+    }
+    return joined;
+  }, [meta.names]);
+
+  // Tool-chip strip — up to 4 unique icons, with a "+N" bucket for the rest.
+  const iconStrip = useMemo(() => {
+    const unique: string[] = [];
+    for (const n of meta.names) {
+      if (!unique.includes(n)) unique.push(n);
+    }
+    const shown = unique.slice(0, 4);
+    const overflow = unique.length - shown.length;
+    return { shown, overflow };
+  }, [meta.names]);
+
+  // Re-render every second while running so the live elapsed counter ticks.
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    if (!meta.anyRunning) return;
+    const i = window.setInterval(() => setTick((x) => x + 1), 1000);
+    return () => window.clearInterval(i);
+  }, [meta.anyRunning]);
+
+  const elapsedText = useMemo(() => {
+    if (meta.startMs == null) return null;
+    const end =
+      !meta.anyRunning && meta.endMs != null ? meta.endMs : Date.now();
+    const ms = Math.max(0, end - meta.startMs);
+    if (ms < 1000) return `${ms}ms`;
+    const sec = ms / 1000;
+    if (sec < 60) return `${sec < 10 ? sec.toFixed(1) : Math.round(sec)}s`;
+    const m = Math.floor(sec / 60);
+    const s = Math.round(sec - m * 60);
+    return `${m}m ${s}s`;
+  }, [meta.startMs, meta.endMs, meta.anyRunning]);
+
+  const countSuffix = meta.anyError
+    ? meta.anyRunning
+      ? "running · errored"
+      : "errored"
+    : meta.anyRunning
+      ? "running"
+      : null;
+
+  return (
+    <div className="relative pl-4 my-2">
+      <span
+        className={cn(
+          "absolute left-[3px] top-3 bottom-3 w-px",
+          gutterClass,
+        )}
+      />
+      <div
+        className={cn(
+          "rounded-[10px] overflow-hidden border shadow-card",
+          frameClass,
+        )}
+      >
+        <button
+          type="button"
+          onClick={toggle}
+          aria-expanded={open}
+          className="w-full group flex items-stretch text-left focus:outline-none"
+        >
+          {/* chevron band */}
+          <span
+            className={cn("flex items-center px-2 border-r", chipBg, borderX)}
+          >
+            {open ? (
+              <ChevronDown
+                className={cn(
+                  "w-3 h-3",
+                  tone === "klein"
+                    ? "text-klein-ink"
+                    : tone === "danger"
+                      ? "text-danger"
+                      : "text-ink-muted",
+                )}
+              />
+            ) : (
+              <ChevronRight
+                className={cn(
+                  "w-3 h-3 group-hover:text-ink-soft",
+                  tone === "klein"
+                    ? "text-klein-ink"
+                    : tone === "danger"
+                      ? "text-danger"
+                      : "text-ink-muted",
+                )}
+              />
+            )}
+          </span>
+          {/* tool chip strip */}
+          <span
+            className={cn(
+              "flex items-center gap-1 px-2 py-1.5 border-r shrink-0",
+              chipBg,
+              borderX,
+            )}
+          >
+            {iconStrip.shown.map((name, i) => {
+              const Icon = toolIcon(name);
+              const chipBorder =
+                tone === "klein"
+                  ? "border-klein/30"
+                  : tone === "danger"
+                    ? "border-danger/30"
+                    : "border-line";
+              const chipTone =
+                tone === "klein"
+                  ? "text-klein-ink"
+                  : tone === "danger"
+                    ? "text-danger"
+                    : "text-ink-soft";
+              return (
+                <span
+                  key={`${name}-${i}`}
+                  className={cn(
+                    "h-5 w-5 rounded-[4px] border flex items-center justify-center",
+                    tone === "neutral" ? "bg-paper" : "bg-canvas",
+                    chipBorder,
+                  )}
+                  title={name}
+                >
+                  <Icon className={cn("w-3 h-3", chipTone)} />
+                </span>
+              );
+            })}
+            {iconStrip.overflow > 0 && (
+              <span
+                className={cn(
+                  "h-5 min-w-[20px] px-1 rounded-[4px] border flex items-center justify-center mono text-[9.5px]",
+                  tone === "klein"
+                    ? "bg-canvas border-klein/30 text-klein-ink"
+                    : tone === "danger"
+                      ? "bg-canvas border-danger/30 text-danger"
+                      : "bg-paper border-line text-ink-muted",
+                )}
+              >
+                +{iconStrip.overflow}
+              </span>
+            )}
+          </span>
+          {/* summary band */}
+          <span
+            className={cn(
+              "flex items-baseline gap-1.5 pl-3 pr-2 py-1.5 flex-1 min-w-0",
+              headerBg,
+            )}
+          >
+            <span
+              className={cn(
+                "mono text-[12px] font-semibold tabular-nums",
+                tone === "klein"
+                  ? "text-klein-ink"
+                  : tone === "danger"
+                    ? "text-danger"
+                    : "text-ink",
+              )}
+            >
+              {pieces.length}
+            </span>
+            <span
+              className={cn(
+                "text-[10px] uppercase tracking-[0.12em]",
+                tone === "klein"
+                  ? "text-klein-ink"
+                  : tone === "danger"
+                    ? "text-danger"
+                    : "text-ink-muted",
+              )}
+            >
+              {countSuffix ? `steps · ${countSuffix}` : "steps"}
+            </span>
+            <span className="mono text-[11px] text-ink-muted truncate flex-1 text-left ml-1">
+              {summaryText}
+            </span>
+          </span>
+          {/* status pill */}
+          <span
+            className={cn(
+              "flex items-center gap-1.5 px-2.5 shrink-0",
+              statusBandClass,
+            )}
+          >
+            {tone === "klein" ? (
+              <Loader2
+                className="w-3.5 h-3.5 text-klein animate-spin"
+                aria-label="running"
+              />
+            ) : tone === "danger" ? (
+              <X
+                className="w-3.5 h-3.5 text-danger"
+                strokeWidth={2.2}
+                aria-label="errored"
+              />
+            ) : (
+              <Check
+                className="w-3.5 h-3.5 text-success"
+                strokeWidth={2.5}
+                aria-label="done"
+              />
+            )}
+            {elapsedText && (
+              <span
+                className={cn(
+                  "mono text-[10.5px] tabular-nums font-semibold",
+                  tone === "klein"
+                    ? "text-klein-ink"
+                    : tone === "danger"
+                      ? "text-danger"
+                      : "text-success",
+                )}
+              >
+                {elapsedText}
+              </span>
+            )}
+          </span>
+        </button>
+        {open && (
+          <div
+            className={cn(
+              "px-3 py-2.5 space-y-2 border-t",
+              borderX,
+              tone === "neutral" ? "bg-canvas" : "bg-canvas/60",
+            )}
+          >
+            {pieces.map((p) => (
+              <div key={p.id} data-tool-group-child>
+                {renderPiece(p)}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -2799,7 +3322,7 @@ function ImageAttachmentCapsules({
   return (
     <div
       className={cn(
-        "flex flex-col items-end gap-1.5 max-w-[88%] md:max-w-[75%]",
+        "flex flex-col items-end gap-1 max-w-[88%] md:max-w-[75%]",
         topMargin ? "mt-1.5" : "",
       )}
     >
@@ -2814,23 +3337,27 @@ function ImageAttachmentCapsules({
             key={i}
             type="button"
             onClick={() => onOpen(i)}
-            className="flex items-center gap-2 p-1 pr-2.5 rounded-[10px] border border-line bg-paper shadow-card hover:shadow-lift transition-shadow cursor-zoom-in max-w-full"
+            // Fully round both ends (rounded-full) — a small pill.
+            // Height h-7 = 28px, single line, round 20×20 thumb on the
+            // left, filename + size inline on the right. Matches the
+            // "两头是圆的，小小的" shape the user referenced.
+            className="flex items-center gap-1.5 h-7 pl-1 pr-2.5 rounded-full border border-line bg-paper shadow-card hover:shadow-lift transition-shadow cursor-zoom-in max-w-full"
             aria-label={`Open ${name}`}
           >
             <img
               src={item.src}
               alt={item.alt}
-              className="h-10 w-10 rounded-[6px] object-cover shrink-0 bg-canvas"
+              className="h-5 w-5 rounded-full object-cover shrink-0 bg-canvas"
               loading="lazy"
             />
-            <div className="min-w-0 flex flex-col items-start leading-tight">
-              <span className="text-[12.5px] text-ink truncate max-w-[180px] md:max-w-[240px]">
-                {name}
+            <span className="text-[11.5px] text-ink truncate max-w-[140px] md:max-w-[200px]">
+              {name}
+            </span>
+            {kb != null && (
+              <span className="mono text-[10px] text-ink-faint shrink-0">
+                {kb}kb
               </span>
-              <span className="mono text-[10.5px] text-ink-faint">
-                {kb != null ? `${kb}kb` : "image"}
-              </span>
-            </div>
+            )}
           </button>
         );
       })}
