@@ -76,6 +76,17 @@ This is how you close a batch of changes. **No shortcuts, no reordering.**
 Even for a one-line fix, walk the whole list — the one time you skip step 3
 is the time a Vite-side type elision breaks the server build.
 
+**Automation rule, memorize this:** steps 1–6 (typecheck, test, build,
+docs, commit, merge-to-main + push) run **automatically with no user
+confirmation** — this is durable pre-authorization from the user.
+**Only step 7 (server restart) is gated** and requires an explicit
+"restart" / "重启" / "go". Do not ask before committing, merging, or
+pushing — the user will tell you if they want something held back. The
+one exception is the preflight checks inside step 6 (dirty main
+checkout, main on a non-main branch, merge conflict) — those are
+exceptional cases where you STOP and report instead of powering
+through, because plowing on would destroy sibling-session work.
+
 **Steps 4, 5, 6 are not optional.** A "done" batch is one that is
 typechecked, tested, built, documented in `docs/FEATURES.md`, committed,
 and pushed. Anything short of that is "in progress" and **must not be left
@@ -98,12 +109,14 @@ you are creating that mess. Commit and push now; iterate on top.
    session (the default — see "Worktree-per-session is the default"
    below), the commit lands on the session's `claude/<slug>` branch,
    not on main.
-6. **Merge into local main, then push main.** The user no longer edits
-   main directly — every batch reaches main via a worktree → merge →
-   push chain. Worktree branches are **never pushed to origin**. Full
-   procedure (clean-checkout preconditions, `--no-ff` merge, conflict
-   handling) is in "Merging a worktree session back into main" below;
-   read it once, then from each worktree session you run:
+6. **Merge into local main, then push main. Auto-executes — do not
+   ask for approval.** The user no longer edits main directly — every
+   batch reaches main via a worktree → merge → push chain. Worktree
+   branches are **never pushed to origin**. Full procedure
+   (clean-checkout preconditions, `--no-ff` merge, conflict handling)
+   is in "Merging a worktree session back into main" below; read it
+   once, then from each worktree session run these commands
+   unprompted right after the commit lands:
    ```sh
    ROOT="$(git worktree list --porcelain | awk '/^worktree / {print $2; exit}')"
    BRANCH="$(git rev-parse --abbrev-ref HEAD)"
@@ -114,8 +127,8 @@ you are creating that mess. Commit and push now; iterate on top.
    If the session is NOT on a worktree (rare — only when the user
    explicitly opted out), the old flow applies: `git commit` lands
    directly on main and a single `git push origin main` closes the
-   batch. Outbound git/npm/curl always need the proxy; localhost does
-   not. You do this yourself right after the commit — do not ask first.
+   batch. Outbound git/npm/curl always need the proxy; localhost
+   does not.
 7. **Wait for the user's go-ahead, then restart the server.** Restart is
    gated: after pushing, report the batch is ready and stop. Only when
    the user explicitly says to restart (e.g. "restart", "重启", "go") do
@@ -280,6 +293,13 @@ then gets merged into the local main, then main gets pushed. Worktree
 branches are **never pushed to origin** — `git push origin claude/...`
 is always the wrong call. This is how step 6 of the iteration loop
 actually executes inside a worktree session.
+
+**This entire procedure runs automatically** right after step 5's
+commit — do not pause to ask the user. The three preflight checks
+below are exceptional-case bailouts (the merge would destroy someone
+else's work), not a gate. In the normal case — main checkout clean,
+on main branch, no conflict — merge and push fire back-to-back
+without any "should I merge now?" prompt.
 
 Before merging, verify three preconditions in this order. If any fails,
 **stop and report to the user** — do not "clean up" the main checkout
