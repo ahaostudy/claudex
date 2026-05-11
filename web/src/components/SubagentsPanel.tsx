@@ -149,7 +149,7 @@ function RunCard({
   return (
     <div
       className={cn(
-        "mx-2.5 mb-2 rounded-[10px] border overflow-hidden relative",
+        "mx-2.5 mb-2 rounded-[10px] border overflow-clip relative",
         tint.border,
         tint.bg,
       )}
@@ -161,7 +161,7 @@ function RunCard({
       <div
         className={cn(
           "w-full pl-3 pr-2 py-2 flex items-center gap-2 text-left",
-          expanded && "border-b",
+          expanded && "border-b sticky top-0 z-10 bg-paper",
           expanded && tint.headerBorder,
           "hover:bg-paper/40",
         )}
@@ -256,7 +256,10 @@ function InputPreview({ prompt }: { prompt: string | null }) {
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="w-full flex items-center gap-2 text-left"
+        className={cn(
+          "w-full flex items-center gap-2 text-left",
+          open && "sticky top-0 z-10 bg-paper py-1 -mx-3 px-3",
+        )}
         aria-expanded={open}
       >
         <ChevronRight

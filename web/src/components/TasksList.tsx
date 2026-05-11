@@ -359,6 +359,7 @@ function TaskGroupView({
           // Subtle bottom border when collapsed — visually terminates the
           // group without the row list to do it for us.
           !expanded && "border-b border-line/40",
+          expanded && "sticky top-0 z-10 bg-canvas border-b border-line/40",
         )}
       >
         <ChevronRight
