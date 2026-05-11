@@ -680,6 +680,38 @@ const MIGRATIONS: { id: number; name: string; up: string }[] = [
       );
     `,
   },
+  {
+    id: 25,
+    name: "reset_adopted_session_events",
+    // Cleanup migration for the CLI-JSONL import path. Historical imports
+    // (a) folded sidechain/subagent assistant records into the main session's
+    // turn_end stream — inflating `lastTurnInput` to the child agent's
+    // context and sometimes pushing the ring past 100% — and (b) wrote
+    // `stopReason="end_turn"` for every intermediate tool-use chunk, which
+    // caused `scanTurnEnds` to triple-count the same warm cache block per
+    // turn and pushed UsagePanel's "Input" stat into tens of millions on
+    // long sessions. Both bugs are fixed in the import path; this migration
+    // clears the already-poisoned rows so next time the user opens such a
+    // session the resync-on-open path re-imports the JSONL with the new
+    // semantics.
+    //
+    // Scope: sessions that were ever resynced from a CLI JSONL (non-zero
+    // cli_jsonl_seq). We deliberately do NOT touch native live sessions
+    // (cli_jsonl_seq = 0), whose turn_end events come from agent-runner's
+    // SDK `result` messages and are already semantically correct.
+    //
+    // `cli_jsonl_seq = 0` resets the resync watermark so
+    // `resyncCliSession` (server/src/sessions/cli-resync.ts) re-streams the
+    // entire JSONL under the new importer. Original JSONL files live in
+    // `~/.claude/projects/` and are untouched, so the rebuild is lossless.
+    up: `
+      DELETE FROM session_events
+        WHERE session_id IN (
+          SELECT id FROM sessions WHERE cli_jsonl_seq > 0
+        );
+      UPDATE sessions SET cli_jsonl_seq = 0 WHERE cli_jsonl_seq > 0;
+    `,
+  },
 ];
 
 export function openDb(config: Config, log: Logger): ClaudexDb {

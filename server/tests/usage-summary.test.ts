@@ -10,6 +10,7 @@ function makeTurnEnd(
     cacheReadInputTokens?: number;
     cacheCreationInputTokens?: number;
   } | null,
+  stopReason: string = "end_turn",
 ): SessionEvent {
   return {
     id: `ev-${seq}`,
@@ -17,7 +18,7 @@ function makeTurnEnd(
     kind: "turn_end",
     seq,
     createdAt: new Date().toISOString(),
-    payload: { stopReason: "end_turn", usage },
+    payload: { stopReason, usage },
   };
 }
 
@@ -100,5 +101,80 @@ describe("computeUsageSummary", () => {
     const out = computeUsageSummary(events, "claude-opus-4-7");
     expect(out.turnCount).toBe(1);
     expect(out.lastTurnInput).toBe(1050);
+  });
+
+  it("does not accumulate intermediate tool_use chunks into totalInput", () => {
+    // Regression test for Bug A (plans/abstract-strolling-music.md): the CLI
+    // JSONL importer emits one turn_end per assistant record, including
+    // intermediate tool-use chunks that share the same warm cache block.
+    // `scanTurnEnds` must only accumulate on FINAL stop reasons, otherwise
+    // a 10-tool-call turn triple-counts ~200K cache read tokens into
+    // `totalInput`.
+    const cacheRead = 200_000;
+    const events: SessionEvent[] = [];
+    for (let i = 0; i < 10; i++) {
+      events.push(
+        makeTurnEnd(
+          i,
+          { inputTokens: 10, outputTokens: 50, cacheReadInputTokens: cacheRead },
+          "tool_use",
+        ),
+      );
+    }
+    events.push(
+      makeTurnEnd(
+        10,
+        {
+          inputTokens: 15,
+          outputTokens: 80,
+          cacheReadInputTokens: cacheRead + 500,
+          cacheCreationInputTokens: 200,
+        },
+        "end_turn",
+      ),
+    );
+
+    const out = computeUsageSummary(events, "claude-opus-4-7");
+    // One real turn, only the `end_turn` chunk contributes to the rollup.
+    expect(out.turnCount).toBe(1);
+    expect(out.totalInput).toBe(15 + (cacheRead + 500) + 200);
+    expect(out.totalOutput).toBe(80);
+    // But `lastTurnInput` still follows the most recent chunk — in this case
+    // the end_turn chunk is last, so it also matches the final total.
+    expect(out.lastTurnInput).toBe(15 + (cacheRead + 500) + 200);
+  });
+
+  it("lastTurnInput follows mid-turn tool_use chunks even though they don't accumulate", () => {
+    // The context ring reads `lastTurnInput` so it reflects the model's
+    // current context body, including mid-turn. If the session is observed
+    // between tool calls, the most recent turn_end has
+    // stopReason="tool_use" — `lastTurnInput` must still follow it.
+    const events: SessionEvent[] = [
+      makeTurnEnd(
+        0,
+        {
+          inputTokens: 20,
+          outputTokens: 100,
+          cacheReadInputTokens: 50_000,
+        },
+        "end_turn",
+      ),
+      makeTurnEnd(
+        1,
+        {
+          inputTokens: 15,
+          outputTokens: 30,
+          cacheReadInputTokens: 80_000,
+        },
+        "tool_use",
+      ),
+    ];
+
+    const out = computeUsageSummary(events, "claude-opus-4-7");
+    // Only the end_turn chunk counts toward totalInput.
+    expect(out.turnCount).toBe(1);
+    expect(out.totalInput).toBe(20 + 50_000);
+    // But lastTurnInput reflects the most recent (tool_use) chunk.
+    expect(out.lastTurnInput).toBe(15 + 80_000);
   });
 });
