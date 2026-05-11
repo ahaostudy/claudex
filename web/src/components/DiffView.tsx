@@ -90,7 +90,7 @@ export function DiffView({
   return (
     <div
       className={cn(
-        "rounded-[10px] border border-line bg-canvas overflow-hidden",
+        "rounded-[10px] border border-line bg-canvas overflow-clip",
         open ? "w-full" : "w-fit max-w-full",
       )}
     >
@@ -98,7 +98,10 @@ export function DiffView({
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
-        className="flex w-full items-center gap-2 px-3 py-1.5 bg-paper border-b border-line text-left hover:bg-paper/80 max-w-full min-w-0"
+        className={cn(
+          "flex w-full items-center gap-2 px-3 py-1.5 bg-paper border-b border-line text-left hover:bg-paper/80 max-w-full min-w-0",
+          open && "sticky top-0 z-10",
+        )}
         title={diff.path}
       >
         <ChevronRight

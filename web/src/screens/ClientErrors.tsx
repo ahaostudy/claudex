@@ -268,7 +268,10 @@ export function ClientErrorsScreen() {
                   <button
                     type="button"
                     onClick={() => toggle(e.id)}
-                    className="w-full text-left px-3 py-2.5 flex items-start gap-2"
+                    className={cn(
+                      "w-full text-left px-3 py-2.5 flex items-start gap-2",
+                      open && "sticky top-0 z-10 bg-paper rounded-t-[8px]",
+                    )}
                   >
                     <span className="mt-0.5 text-ink-muted">
                       {open ? (

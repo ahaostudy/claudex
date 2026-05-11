@@ -482,7 +482,7 @@ function ToolCallCard({
   return (
     <div
       className={cn(
-        "rounded-[10px] border overflow-hidden",
+        "rounded-[10px] border overflow-clip",
         inFlight
           ? "border-klein/30 bg-klein-wash/40"
           : failed
@@ -494,7 +494,16 @@ function ToolCallCard({
         type="button"
         onClick={() => setExpanded((v) => !v)}
         aria-expanded={expanded}
-        className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-paper/60"
+        className={cn(
+          "w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-paper/60",
+          expanded && "sticky top-0 z-10",
+          expanded &&
+            (inFlight
+              ? "bg-klein-wash/40"
+              : failed
+                ? "bg-danger-wash/30"
+                : "bg-paper"),
+        )}
       >
         <Icon
           className={cn(
