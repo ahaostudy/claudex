@@ -39,14 +39,22 @@ async function render(size, out) {
 
 // Maskable icon: Android crops icons to various shapes (circle, squircle)
 // and only guarantees the inner ~80% is safe. We inflate the background
-// and shrink the triangle to fit that safe zone.
+// and shrink the pebble to fit that safe zone (content in inner 60%,
+// matching the old triangle icon's 20%-on-each-side padding convention).
 async function renderMaskable(size, out) {
   const maskableSvg = `
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
-      <rect width="100" height="100" fill="#faf9f5" />
-      <g transform="translate(20 20) scale(1.875)">
-        <path d="M9 22 L16 8 L23 22 Z" fill="#cc785c" />
-        <circle cx="16" cy="18" r="2.2" fill="#faf9f5" />
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+      <defs>
+        <linearGradient id="g" x1="0.1" y1="0.1" x2="0.9" y2="0.9">
+          <stop offset="0%" stop-color="#1A1410" />
+          <stop offset="100%" stop-color="#CC785C" />
+        </linearGradient>
+      </defs>
+      <rect width="1024" height="1024" fill="#faf9f5" />
+      <g transform="translate(205 205) scale(0.6)">
+        <path d="M 512 200 C 300 210, 200 380, 220 560 C 240 740, 460 830, 660 770 C 840 710, 880 480, 780 320 C 700 210, 620 200, 512 200 Z"
+              fill="none" stroke="url(#g)" stroke-width="167"
+              stroke-linecap="round" stroke-linejoin="round" />
       </g>
     </svg>
   `;
