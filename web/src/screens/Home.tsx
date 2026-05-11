@@ -450,37 +450,34 @@ export function HomeScreen() {
           >
             <Settings2 className="w-4 h-4 text-ink-soft" />
           </button>
-          {/* Overflow menu. On mobile it collapses Import / Stats / Projects
-              so the primary "New" button always fits a 390px viewport; on
-              every viewport it exposes the two admin actions (Restart
-              server, Force reload) that are otherwise buried under Settings
-              → Advanced. These two are the most-used admin buttons in
-              day-to-day ops, so surfacing them one tap from Home is worth
-              the header-real-estate trade. */}
-          <HeaderOverflowMenu
-            onImport={() => setShowImport(true)}
-            onStats={() => setShowStats(true)}
-            onProjects={() => setShowProjects(true)}
-            onRestart={() => {
-              if (restartState === "running") return;
-              if (!window.confirm("Restart server? Active sessions survive but in-flight tool calls will be interrupted.")) return;
-              setRestartState("running");
-              setRestartError(null);
-              restartServer().catch((e) => {
-                setRestartState("failed");
-                setRestartError(
-                  e instanceof Error
-                    ? e.message
-                    : "Timed out waiting for the server to come back up.",
-                );
-              });
-            }}
-            onForceReload={() => {
+          {/* Force reload lives directly in the header (not inside the
+              overflow menu) — it's the most-tapped admin action after a
+              server update and the user wanted it one tap away. Restart
+              server has moved to the WebSocket-diagnostics panel so it
+              sits next to the connection state it actually affects. */}
+          <button
+            type="button"
+            onClick={() => {
               // Fire-and-forget: the helper navigates the page away. No
               // state juggling needed on our side because this component
               // unmounts with the window.
               void forceReload();
             }}
+            title="Force reload (clear cache)"
+            aria-label="Force reload"
+            className="h-9 w-9 rounded-[8px] border border-line bg-canvas flex items-center justify-center hover:bg-paper shrink-0"
+          >
+            <RefreshCw className="w-4 h-4 text-ink-soft" />
+          </button>
+          {/* Overflow menu. Mobile-only: collapses Import / Stats / Projects
+              so the primary "New" button always fits a 390px viewport.
+              Desktop has direct buttons for those three, so the menu would
+              be empty there — we hide the trigger entirely via `md:hidden`
+              on the component root. */}
+          <HeaderOverflowMenu
+            onImport={() => setShowImport(true)}
+            onStats={() => setShowStats(true)}
+            onProjects={() => setShowProjects(true)}
           />
           <button
             onClick={() => setShowNew(true)}
@@ -611,7 +608,24 @@ export function HomeScreen() {
         />
       )}
       {showWsDiag && (
-        <WsDiagPanel diag={wsDiag} onClose={() => setShowWsDiag(false)} />
+        <WsDiagPanel
+          diag={wsDiag}
+          onClose={() => setShowWsDiag(false)}
+          restartDisabled={restartState === "running"}
+          onRestart={() => {
+            setShowWsDiag(false);
+            setRestartState("running");
+            setRestartError(null);
+            restartServer().catch((e) => {
+              setRestartState("failed");
+              setRestartError(
+                e instanceof Error
+                  ? e.message
+                  : "Timed out waiting for the server to come back up.",
+              );
+            });
+          }}
+        />
       )}
       {showSearchSheet && (
         <GlobalSearchSheet
@@ -693,29 +707,19 @@ function RestartOverlay({
   );
 }
 
-// Home-header overflow menu. Two jobs:
-//   1. On mobile (<md), it collapses Import / Stats / Projects — which sit
-//      inline in the desktop header — so the primary "New" button always
-//      fits on a 390px viewport.
-//   2. On every viewport, it hosts the two admin actions (Restart server,
-//      Force reload / clear cache). Those were only in Settings → Advanced
-//      before; surfacing them on Home is ~2 fewer taps for the two
-//      buttons the user hits most often when an update lands.
-// Mobile-only items are hidden from the desktop menu via `md:hidden`, which
-// also collapses the separator so desktop users see a clean two-item list
-// without a leading divider.
+// Header overflow menu. Mobile-only — on desktop every action here has a
+// direct icon button in the header, so we hide the trigger via `md:hidden`
+// on the component root rather than rendering an empty popover. Keeps the
+// mobile-only items (Import / Stats / Manage projects) one tap away from a
+// 390px header that can't fit all three as icons.
 function HeaderOverflowMenu({
   onImport,
   onStats,
   onProjects,
-  onRestart,
-  onForceReload,
 }: {
   onImport: () => void;
   onStats: () => void;
   onProjects: () => void;
-  onRestart: () => void;
-  onForceReload: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -741,7 +745,7 @@ function HeaderOverflowMenu({
     fn();
   };
   return (
-    <div ref={ref} className="relative shrink-0">
+    <div ref={ref} className="relative shrink-0 md:hidden">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
@@ -761,7 +765,7 @@ function HeaderOverflowMenu({
           <button
             role="menuitem"
             onClick={() => pick(onImport)}
-            className="md:hidden w-full flex items-center gap-2 px-2 py-1.5 rounded-[6px] text-left text-[13px] text-ink-soft hover:bg-paper/60"
+            className="w-full flex items-center gap-2 px-2 py-1.5 rounded-[6px] text-left text-[13px] text-ink-soft hover:bg-paper/60"
           >
             <Download className="w-3.5 h-3.5 text-ink-soft" />
             Import sessions
@@ -769,7 +773,7 @@ function HeaderOverflowMenu({
           <button
             role="menuitem"
             onClick={() => pick(onStats)}
-            className="md:hidden w-full flex items-center gap-2 px-2 py-1.5 rounded-[6px] text-left text-[13px] text-ink-soft hover:bg-paper/60"
+            className="w-full flex items-center gap-2 px-2 py-1.5 rounded-[6px] text-left text-[13px] text-ink-soft hover:bg-paper/60"
           >
             <BarChart3 className="w-3.5 h-3.5 text-ink-soft" />
             Statistics
@@ -777,29 +781,10 @@ function HeaderOverflowMenu({
           <button
             role="menuitem"
             onClick={() => pick(onProjects)}
-            className="md:hidden w-full flex items-center gap-2 px-2 py-1.5 rounded-[6px] text-left text-[13px] text-ink-soft hover:bg-paper/60"
+            className="w-full flex items-center gap-2 px-2 py-1.5 rounded-[6px] text-left text-[13px] text-ink-soft hover:bg-paper/60"
           >
             <Settings2 className="w-3.5 h-3.5 text-ink-soft" />
             Manage projects
-          </button>
-          {/* Separator between the mobile-nav items and the admin items.
-              Hidden on desktop so the two admin rows render flush. */}
-          <div className="md:hidden my-1 h-px bg-line/60" aria-hidden />
-          <button
-            role="menuitem"
-            onClick={() => pick(onRestart)}
-            className="w-full flex items-center gap-2 px-2 py-1.5 rounded-[6px] text-left text-[13px] text-ink-soft hover:bg-paper/60"
-          >
-            <RotateCcw className="w-3.5 h-3.5 text-ink-soft" />
-            Restart server
-          </button>
-          <button
-            role="menuitem"
-            onClick={() => pick(onForceReload)}
-            className="w-full flex items-center gap-2 px-2 py-1.5 rounded-[6px] text-left text-[13px] text-ink-soft hover:bg-paper/60"
-          >
-            <RefreshCw className="w-3.5 h-3.5 text-ink-soft" />
-            Force reload
           </button>
         </div>
       )}
@@ -1995,11 +1980,22 @@ function formatRel(iso: string): string {
 function WsDiagPanel({
   diag,
   onClose,
+  onRestart,
+  restartDisabled,
 }: {
   diag: import("@/api/ws").WsDiagnostics;
   onClose: () => void;
+  onRestart: () => void;
+  restartDisabled: boolean;
 }) {
   useFocusReturn();
+  // Two-step confirmation rendered inline, not via window.confirm: the
+  // native dialog is ugly on mobile Safari, blocks the whole page, and
+  // looks out of place next to claudex's own UI. State is local to the
+  // panel — once the user picks "Yes, restart now" we hand off to the
+  // parent's onRestart (which kicks off restartServer + shows the
+  // full-screen RestartOverlay) and this panel unmounts with us.
+  const [confirming, setConfirming] = useState(false);
   const rows: Array<[string, string]> = [
     ["phase", diag.phase],
     ["attempts", String(diag.attempts)],
@@ -2051,6 +2047,46 @@ function WsDiagPanel({
             </div>
           ))}
         </dl>
+        <div className="mt-4 pt-3 border-t border-line">
+          <div className="text-[11px] uppercase tracking-[0.14em] text-ink-muted mb-2">
+            Admin
+          </div>
+          {confirming ? (
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setConfirming(false);
+                  onRestart();
+                }}
+                className="h-9 px-3.5 rounded-[8px] bg-danger text-canvas text-[13px] font-medium hover:opacity-90"
+              >
+                Yes, restart now
+              </button>
+              <button
+                type="button"
+                onClick={() => setConfirming(false)}
+                className="h-9 px-3.5 rounded-[8px] border border-line bg-canvas hover:bg-paper text-[13px] text-ink"
+              >
+                Cancel
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setConfirming(true)}
+              disabled={restartDisabled}
+              className="inline-flex items-center gap-2 h-9 px-3.5 rounded-[8px] border border-line bg-canvas hover:bg-paper text-[13px] font-medium text-ink disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+              <RotateCcw className="w-3.5 h-3.5 text-ink-soft" />
+              Restart server
+            </button>
+          )}
+          <div className="mt-2 text-[12px] text-ink-muted">
+            Active sessions survive — transcripts are on disk — but any
+            in-flight tool call shows as interrupted.
+          </div>
+        </div>
       </div>
     </div>
   );
