@@ -173,16 +173,14 @@ export function ChatScreen() {
   const [showMore, setShowMore] = useState(false);
   // Desktop tasks rail visibility. Persisted across navigations so users
   // who prefer the condensed layout stay condensed. Mobile ignores this —
-  // the rail itself is `hidden md:flex`.
+  // the rail itself is `hidden md:flex`. Default `false` since the Settings
+  // rail (below) is the desktop default now — Tasks is on-demand.
   const [showTasks, setShowTasks] = useState<boolean>(() => {
-    if (typeof window === "undefined") return true;
+    if (typeof window === "undefined") return false;
     const stored = window.localStorage.getItem("claudex.chat.tasksRail");
     if (stored === "0") return false;
     if (stored === "1") return true;
-    // Default: open at md+ (desktop), closed at narrower viewports. We
-    // sample `matchMedia` once at mount; the rail component itself is
-    // still hidden under md via Tailwind so this is just for desktop.
-    return window.matchMedia("(min-width: 768px)").matches;
+    return false;
   });
   useEffect(() => {
     try {
@@ -194,6 +192,29 @@ export function ChatScreen() {
       /* private browsing etc. — ignore */
     }
   }, [showTasks]);
+  // Desktop settings rail visibility — the new default persistent right
+  // rail (mockup s-10). Mirrors the `showTasks` persistence so either rail
+  // remembers the user's preference independently.
+  const [showSettingsRail, setShowSettingsRail] = useState<boolean>(() => {
+    if (typeof window === "undefined") return true;
+    const stored = window.localStorage.getItem("claudex.chat.settingsRail");
+    if (stored === "0") return false;
+    if (stored === "1") return true;
+    // Default: open at md+ (desktop), closed at narrower viewports. We
+    // sample `matchMedia` once at mount; the rail component itself is
+    // still hidden under md via Tailwind so this is just for desktop.
+    return window.matchMedia("(min-width: 768px)").matches;
+  });
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(
+        "claudex.chat.settingsRail",
+        showSettingsRail ? "1" : "0",
+      );
+    } catch {
+      /* private browsing etc. — ignore */
+    }
+  }, [showSettingsRail]);
   const {
     transcripts,
     transcriptMeta,
@@ -764,7 +785,7 @@ export function ChatScreen() {
               session ? navigate(`/session/${id}/session-diff`) : undefined
             }
             onOpenSideChat={() => setShowSideChat(true)}
-            onOpenSettings={() => setShowSettings(true)}
+            onOpenSettings={() => setShowSettingsRail(true)}
             onOpenTerminal={() => setShowTerminal(true)}
           />
           {subagentRuns.length > 0 && (
@@ -802,6 +823,22 @@ export function ChatScreen() {
             className={cn(
               "h-8 w-8 rounded-[8px] border flex items-center justify-center hover:bg-paper shrink-0",
               showTasks
+                ? "border-klein/30 bg-klein-wash/40 text-klein-ink"
+                : "border-line bg-canvas text-ink-soft",
+            )}
+          >
+            <Wrench className="w-4 h-4" />
+          </button>
+          <button
+            onClick={() => setShowSettingsRail((v) => !v)}
+            title={
+              showSettingsRail ? "Hide settings rail" : "Show settings rail"
+            }
+            aria-label="Toggle settings rail"
+            aria-pressed={showSettingsRail}
+            className={cn(
+              "h-8 w-8 rounded-[8px] border flex items-center justify-center hover:bg-paper shrink-0",
+              showSettingsRail
                 ? "border-klein/30 bg-klein-wash/40 text-klein-ink"
                 : "border-line bg-canvas text-ink-soft",
             )}
@@ -1039,6 +1076,15 @@ export function ChatScreen() {
         <UsagePanel session={session} onClose={() => setShowUsage(false)} />
       )}
       </main>
+      {showSettingsRail && session && (
+        <SessionSettingsSheet
+          variant="rail"
+          session={session}
+          project={project}
+          onClose={() => setShowSettingsRail(false)}
+          onUpdated={(next) => setSession(next)}
+        />
+      )}
       {showTasks && (
         <ChatTasksRail
           session={session}
@@ -1991,7 +2037,7 @@ function ToolPayloadPane({
   return (
     <div
       className={cn(
-        "w-full max-w-[min(80ch,100%)] rounded-[10px] border bg-paper/70",
+        "w-full max-w-[min(80ch,100%)] rounded-[10px] border bg-white",
         isError ? "border-danger/40" : "border-line",
       )}
     >
@@ -4073,27 +4119,59 @@ function Composer({
               )}
             </div>
             {isLocked ? null : busy ? (
-              <>
-                <button
-                  type="button"
-                  onClick={onStop}
-                  title="Stop claude"
-                  aria-label="Stop claude"
-                  className="md:hidden h-8 w-8 rounded-full bg-danger text-canvas flex items-center justify-center shadow-card"
-                >
-                  <StopCircle className="w-4 h-4" />
-                </button>
-                <button
-                  type="button"
-                  onClick={onStop}
-                  title="Stop claude"
-                  aria-label="Stop claude"
-                  className="hidden md:inline-flex h-8 px-3 rounded-[8px] bg-danger text-canvas text-[13px] font-medium items-center gap-1.5 shadow-card"
-                >
-                  <StopCircle className="w-4 h-4" />
-                  Stop
-                </button>
-              </>
+              text.trim() || attachments.length > 0 ? (
+                // While claude is working, if the user has typed something
+                // the right-side button flips from Stop to Queue — tapping
+                // it sends the draft, which the server queues behind the
+                // in-flight turn. Matches the "Type while claude thinks —
+                // will queue…" placeholder so the action lines up with the
+                // hint. Hitting Stop in this state would throw the draft
+                // away, which is the opposite of what a user who just
+                // typed wants.
+                <>
+                  <button
+                    type="button"
+                    onClick={send}
+                    title="Queue message"
+                    aria-label="Queue message"
+                    className="md:hidden h-8 w-8 rounded-full bg-klein text-canvas flex items-center justify-center shadow-card"
+                  >
+                    <Send className="w-4 h-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={send}
+                    title="Queue message"
+                    aria-label="Queue message"
+                    className="hidden md:inline-flex h-8 px-3 rounded-[8px] bg-klein text-canvas text-[13px] font-medium items-center gap-1.5 shadow-card"
+                  >
+                    Queue
+                    <Send className="w-4 h-4" />
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    onClick={onStop}
+                    title="Stop claude"
+                    aria-label="Stop claude"
+                    className="md:hidden h-8 w-8 rounded-full bg-danger text-canvas flex items-center justify-center shadow-card"
+                  >
+                    <StopCircle className="w-4 h-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={onStop}
+                    title="Stop claude"
+                    aria-label="Stop claude"
+                    className="hidden md:inline-flex h-8 px-3 rounded-[8px] bg-danger text-canvas text-[13px] font-medium items-center gap-1.5 shadow-card"
+                  >
+                    <StopCircle className="w-4 h-4" />
+                    Stop
+                  </button>
+                </>
+              )
             ) : (
               <>
                 <button

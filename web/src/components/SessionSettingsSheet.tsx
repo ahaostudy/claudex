@@ -36,13 +36,26 @@ export function SessionSettingsSheet({
   project,
   onClose,
   onUpdated,
+  variant = "overlay",
 }: {
   session: Session;
   project?: Project | null;
   onClose: () => void;
   onUpdated: (next: Session) => void;
+  /**
+   * `"overlay"` (default): fixed inset-0 scrim + right-aligned dialog.
+   * Used as an on-demand slide-over — e.g. opened from the mobile More
+   * sheet or the desktop ⋯ menu.
+   *
+   * `"rail"`: renders as a flex-sibling `<aside>` so the sheet can live
+   * permanently in the chat right column (mockup s-10). Hidden below
+   * `md:` since mobile has no persistent rail. The dismiss button still
+   * calls `onClose`, but the parent decides what that means (hide the
+   * rail, flip a pref, etc.). No backdrop, no `fixed` positioning.
+   */
+  variant?: "overlay" | "rail";
 }) {
-  useFocusReturn();
+  useFocusReturn(variant !== "rail");
   const [model, setModel] = useState<ModelId>(session.model);
   const [mode, setMode] = useState<PermissionMode>(session.mode);
   const [tags, setTags] = useState<string[]>(session.tags ?? []);
@@ -82,14 +95,17 @@ export function SessionSettingsSheet({
     setTagErr(null);
   }, [session.id, session.model, session.mode, session.tags]);
 
-  // Escape closes the sheet.
+  // Escape closes the sheet — but only when it's an overlay. In rail
+  // mode it's a permanent sibling of the chat column; Esc would yank it
+  // shut behind the user's back while they're typing.
   useEffect(() => {
+    if (variant === "rail") return;
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") onClose();
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  }, [onClose, variant]);
 
   async function loadGrants() {
     setGrantsErr(null);
@@ -339,12 +355,31 @@ export function SessionSettingsSheet({
 
   return (
     <div
-      className="fixed inset-0 z-40 bg-ink/30 flex justify-end"
-      onMouseDown={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
+      className={
+        variant === "rail"
+          ? // Rail mode — inline flex sibling to <main>. `hidden md:flex`
+            // keeps mobile on the overlay-only path.
+            "hidden md:flex shrink-0 border-l border-line bg-canvas"
+          : "fixed inset-0 z-40 bg-ink/30 flex justify-end"
+      }
+      onMouseDown={
+        variant === "rail"
+          ? undefined
+          : (e) => {
+              if (e.target === e.currentTarget) onClose();
+            }
+      }
     >
-      <div role="dialog" aria-modal="true" aria-label="Session settings" className="w-full md:w-[380px] bg-canvas md:border-l border-line shadow-lift flex flex-col max-h-screen h-full">
+      <div
+        role={variant === "rail" ? undefined : "dialog"}
+        aria-modal={variant === "rail" ? undefined : true}
+        aria-label="Session settings"
+        className={
+          variant === "rail"
+            ? "w-[380px] bg-canvas flex flex-col min-h-0 h-full"
+            : "w-full md:w-[380px] bg-canvas md:border-l border-line shadow-lift flex flex-col max-h-screen h-full"
+        }
+      >
         {/* Mobile header: X on the left, caps+display stacked. */}
         <div className="md:hidden px-4 py-2.5 border-b border-line flex items-center gap-2">
           <button
