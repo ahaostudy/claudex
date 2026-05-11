@@ -2,10 +2,13 @@ import type { ModelId, SessionEvent } from "@claudex/shared";
 import { scanTurnEnds } from "@claudex/shared";
 import { estimateCostUsd } from "./pricing";
 
-// Re-exported for components that imported the threshold from this module
-// before it moved to `@claudex/shared`. New code should import directly
-// from the shared package.
-export { HISTORICAL_TURN_THRESHOLD } from "@claudex/shared";
+// Re-exported for components that imported these from this module before
+// they moved to `@claudex/shared`. New code should import directly from
+// the shared package.
+export {
+  HISTORICAL_TURN_THRESHOLD,
+  contextWindowTokens,
+} from "@claudex/shared";
 
 /**
  * Per-model usage breakdown. Tokens are cumulative across every `turn_end`
@@ -58,43 +61,6 @@ export interface SessionUsage {
    * breakdown).
    */
   lastTurnContextKnown: boolean;
-}
-
-/**
- * Known context window sizes (in tokens) per model id. Used by the Usage
- * panel to render the "context %" ring as `lastTurnInput / contextWindow`.
- *
- * These numbers come from Anthropic's published model specs. If you add a
- * new model here, double-check the window size rather than guessing — a
- * wrong value will silently mislead the ring. When the shipped model list
- * changes, update `shared/src/models.ts` first, then mirror it here.
- */
-const CONTEXT_WINDOW_TOKENS: Record<ModelId, number> = {
-  // Claude 4.x Opus + Sonnet both ship with 1M context windows
-  // (user-confirmed 2026-05-09). Haiku stays at 200k — the family's
-  // cheaper tier keeps the smaller window.
-  "claude-opus-4-7": 1_000_000,
-  "claude-sonnet-4-6": 1_000_000,
-  "claude-haiku-4-5": 200_000,
-};
-
-/** Default window used when the model id is unknown to this table.
- * 1M is the current flagship default; for genuinely unknown models we
- * still lean generous — the fallback exists so the ring doesn't render
- * "100%" on an unmapped SKU. */
-const CONTEXT_WINDOW_FALLBACK = 1_000_000;
-
-/**
- * Context window size (tokens) for a given model id. Returns
- * `CONTEXT_WINDOW_FALLBACK` (200k) for unknown models — every currently
- * shipping Claude 4.x model is a 200k window, so this is a safe default
- * rather than a guess. Revisit if Anthropic ships a non-200k model.
- */
-export function contextWindowTokens(model: ModelId | string): number {
-  return (
-    (CONTEXT_WINDOW_TOKENS as Record<string, number>)[String(model)] ??
-    CONTEXT_WINDOW_FALLBACK
-  );
 }
 
 /**

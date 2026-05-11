@@ -16,6 +16,7 @@ import type {
   AskUserQuestionAnnotation,
   SessionStatus,
 } from "@claudex/shared";
+import { HISTORICAL_TURN_THRESHOLD, contextWindowTokens } from "@claudex/shared";
 
 type Broadcaster = (sessionId: string, event: RunnerEvent) => void;
 
@@ -876,7 +877,7 @@ export class SessionManager {
           this.deps.broadcast(sessionId, event);
           return;
         }
-        case "turn_end":
+        case "turn_end": {
           this.deps.sessions.appendEvent({
             sessionId,
             kind: "turn_end",
@@ -885,13 +886,34 @@ export class SessionManager {
               usage: event.usage ?? null,
             },
           });
-          this.deps.sessions.bumpStats(sessionId, { messages: 1 });
+          // Compute context-window fill % for the session list ring.
+          // Skip when usage is missing or below the historical threshold
+          // (e.g. cache fields absent) — leaving stats_context_pct at its
+          // previous value rather than stamping a misleading ~0%.
+          const u = event.usage;
+          let contextPct: number | undefined;
+          if (u) {
+            const inp = Number(u.inputTokens ?? 0) | 0;
+            const cacheRead = Number(u.cacheReadInputTokens ?? 0) | 0;
+            const cacheCreate = Number(u.cacheCreationInputTokens ?? 0) | 0;
+            const body = inp + cacheRead + cacheCreate;
+            if (body >= HISTORICAL_TURN_THRESHOLD) {
+              const session = this.deps.sessions.findById(sessionId);
+              const window = contextWindowTokens(session?.model ?? "");
+              contextPct = Math.max(0, Math.min(1, body / window));
+            }
+          }
+          this.deps.sessions.bumpStats(sessionId, {
+            messages: 1,
+            ...(contextPct !== undefined ? { contextPct } : {}),
+          });
           this.deps.sessions.touchLastMessage(sessionId);
           this.transitionStatus(sessionId, "idle", "turn_end");
           // Turn wrapped cleanly — cancel the silence watchdog. If a follow-up
           // turn starts, sendUserMessage / status=running will re-arm it.
           this.clearWatchdog(sessionId);
           break;
+        }
         case "status":
           if (event.status === "running") {
             this.transitionStatus(sessionId, "running", "runner_status_running");

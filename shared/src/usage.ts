@@ -15,6 +15,35 @@ import type { ModelId, SessionEvent } from "./models.js";
  */
 export const HISTORICAL_TURN_THRESHOLD = 500;
 
+/**
+ * Known context window sizes (in tokens) per model id. Used to render the
+ * "context %" ring on the session list and the chat header as
+ * `lastTurnInput / contextWindow`.
+ *
+ * Claude 4.x Opus + Sonnet ship with 1M windows; Haiku stays at 200k.
+ */
+const CONTEXT_WINDOW_TOKENS: Record<ModelId, number> = {
+  "claude-opus-4-7": 1_000_000,
+  "claude-sonnet-4-6": 1_000_000,
+  "claude-haiku-4-5": 200_000,
+};
+
+/** Fallback for unknown model ids. 1M matches the current flagship default so
+ * an unmapped SKU doesn't immediately render as "100% full". */
+const CONTEXT_WINDOW_FALLBACK = 1_000_000;
+
+/**
+ * Context window size (tokens) for a given model id. Defined in shared so
+ * both the server (persisting `stats_context_pct` at `turn_end`) and the web
+ * bundle (computing the ring live from events) agree on the denominator.
+ */
+export function contextWindowTokens(model: ModelId | string): number {
+  return (
+    (CONTEXT_WINDOW_TOKENS as Record<string, number>)[String(model)] ??
+    CONTEXT_WINDOW_FALLBACK
+  );
+}
+
 /** Raw per-turn totals extracted from a single `turn_end` event's usage payload. */
 export interface PerTurnTotals {
   inputTokens: number;
