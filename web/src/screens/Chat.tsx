@@ -2109,6 +2109,22 @@ function Piece({
           </div>
         );
       }
+      // AskUserQuestion — the dedicated `ask_user_question` piece renders
+      // the full multiple-choice card below; the bare tool_use chip is
+      // duplicative noise (it just shows a truncated JSON preview of the
+      // same `questions` payload). Emit an invisible anchor so any
+      // data-tool-use-id lookup still resolves, and absorb the matching
+      // tool_result via the existing `isAbsorbedResult` path.
+      if (p.name === "AskUserQuestion") {
+        return (
+          <div
+            data-tool-use-id={p.id}
+            data-event-seq={p.seq}
+            className="hidden"
+            aria-hidden
+          />
+        );
+      }
       return (
         <div data-tool-use-id={p.id} data-event-seq={p.seq}>
           <ToolCallBlock
@@ -3115,6 +3131,7 @@ function UserBubble({
           src: `/api/attachments/${encodeURIComponent(a.id)}/raw`,
           alt: a.filename || a.mime,
           filename: a.filename,
+          mime: a.mime,
           size: a.size,
         });
       } else {
@@ -3435,6 +3452,7 @@ interface ImageCapsuleItem {
   src: string;
   alt: string;
   filename?: string;
+  mime?: string;
   size?: number;
 }
 
@@ -3455,22 +3473,40 @@ function ImageAttachmentCapsules({
       )}
     >
       {items.map((item, i) => {
-        const name = item.filename || item.alt || "image";
+        // Derive a short type label: prefer the mime subtype ("image/png"
+        // → "PNG"), fall back to the filename extension, then to "IMG".
+        // Matches the user's ask to drop the filename and just show type
+        // + size in the pill.
+        const type = (() => {
+          if (item.mime) {
+            const sub = item.mime.split("/")[1] ?? "";
+            if (sub) return sub.toUpperCase();
+          }
+          if (item.filename) {
+            const dot = item.filename.lastIndexOf(".");
+            if (dot >= 0 && dot < item.filename.length - 1) {
+              return item.filename.slice(dot + 1).toUpperCase();
+            }
+          }
+          return "IMG";
+        })();
         const kb =
           typeof item.size === "number"
             ? Math.max(1, Math.round(item.size / 1024))
             : null;
+        const label = kb != null ? `${type} · ${kb}kb` : type;
         return (
           <button
             key={i}
             type="button"
             onClick={() => onOpen(i)}
             // Fully round both ends (rounded-full) — a small pill.
-            // Height h-7 = 28px, single line, round 20×20 thumb on the
-            // left, filename + size inline on the right. Matches the
-            // "两头是圆的，小小的" shape the user referenced.
-            className="flex items-center gap-1.5 h-7 pl-1 pr-2.5 rounded-full border border-line bg-paper shadow-card hover:shadow-lift transition-shadow cursor-zoom-in max-w-full"
-            aria-label={`Open ${name}`}
+            // Height h-7 = 28px, single line: type + size only (no
+            // filename, per user request). 20×20 round thumb on left,
+            // text centered vertically on the right.
+            className="flex items-center gap-1.5 h-7 pl-1 pr-2.5 rounded-full border border-line bg-paper shadow-card hover:shadow-lift transition-shadow cursor-zoom-in"
+            aria-label={`Open ${item.filename || item.alt || "image"}`}
+            title={item.filename || item.alt || undefined}
           >
             <img
               src={item.src}
@@ -3478,14 +3514,9 @@ function ImageAttachmentCapsules({
               className="h-5 w-5 rounded-full object-cover shrink-0 bg-canvas"
               loading="lazy"
             />
-            <span className="text-[11.5px] text-ink truncate max-w-[140px] md:max-w-[200px]">
-              {name}
+            <span className="mono text-[10.5px] text-ink-muted shrink-0 tracking-wide">
+              {label}
             </span>
-            {kb != null && (
-              <span className="mono text-[10px] text-ink-faint shrink-0">
-                {kb}kb
-              </span>
-            )}
           </button>
         );
       })}

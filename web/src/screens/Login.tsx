@@ -120,7 +120,9 @@ export function LoginScreen() {
           <div className="relative z-10 w-full p-10 flex flex-col">
             <div className="flex items-center gap-2">
               <Logo className="w-6 h-6" />
-              <span className="mono text-[13px]">Claudex</span>
+              <span className="mono text-[13px] uppercase tracking-[0.18em]">
+                Claudex
+              </span>
               <span className="ml-2 inline-flex items-center gap-1.5 px-2 py-0.5 rounded-[6px] border border-klein/30 bg-klein-wash text-klein-ink text-[10px] font-medium uppercase tracking-[0.12em]">
                 <span className="h-1.5 w-1.5 rounded-full bg-klein" />
                 self-hosted
@@ -147,7 +149,9 @@ export function LoginScreen() {
             {/* Compact mobile wordmark — desktop gets it in the left panel */}
             <div className="flex items-center gap-2 mb-8 md:hidden">
               <Logo className="w-6 h-6" />
-              <span className="mono text-[13px]">Claudex</span>
+              <span className="mono text-[13px] uppercase tracking-[0.18em]">
+                Claudex
+              </span>
             </div>
 
             <Stepper current={step === "credentials" ? 0 : 1} />
