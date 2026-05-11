@@ -128,12 +128,18 @@ export function createAlertHook(deps: AlertHookDeps) {
         if (n > 0) mutated = true;
       }
 
-      // A turn just finished (running → idle). Always emit a
-      // session_completed alert. The alerts screen filters by
-      // seen/resolved so stale rows are visually demoted rather than
-      // skipped at write time — that matches "state transitions, not
-      // deletion" design.
+      // A turn just finished (running → idle). Dedupe per session: every
+      // session has at most ONE session_completed alert at any time,
+      // representing the latest completion. If we inserted on every turn
+      // without cleanup a long-running session would stack 10+ near-
+      // identical rows and completely clog the user's alerts list — which
+      // is exactly what drove the "red dot, empty screen" bug. So: delete
+      // prior session_completed rows for this session before inserting
+      // the fresh one. The new row carries a fresh id + createdAt +
+      // unseen/unresolved bits, which drives the badge back up so the
+      // user sees the new completion land.
       if (from === "running" && to === "idle") {
+        deps.alerts.deleteBySessionKind(sessionId, "session_completed");
         deps.alerts.insert({
           kind: "session_completed",
           sessionId,

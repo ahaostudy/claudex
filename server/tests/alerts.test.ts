@@ -368,4 +368,72 @@ describe("alerts hook — status transitions", () => {
     // Previously-resolved permission_pending + new session_completed.
     expect(list.some((a) => a.kind === "session_completed")).toBe(true);
   });
+
+  it("createAlertHook: session_completed is deduped per session — only one latest row", async () => {
+    const ctx = await bootstrapAuthedApp();
+    disposers.push(ctx.cleanup);
+
+    // Create a project + session to transition.
+    const proj = await ctx.app.inject({
+      method: "POST",
+      url: "/api/projects",
+      headers: { cookie: ctx.cookie },
+      payload: { name: "dedup-proj", path: ctx.tmpDir },
+    });
+    expect(proj.statusCode).toBe(200);
+    const projectId = (proj.json() as { project: { id: string } }).project.id;
+    trustProject(ctx.dbh, projectId);
+
+    const sess = await ctx.app.inject({
+      method: "POST",
+      url: "/api/sessions",
+      headers: { cookie: ctx.cookie },
+      payload: {
+        projectId,
+        title: "session-completed-dedup",
+        model: "claude-sonnet-4-6",
+        mode: "default",
+        worktree: false,
+      },
+    });
+    expect(sess.statusCode).toBe(200);
+    const sessionId = (sess.json() as { session: { id: string } }).session.id;
+
+    const { createAlertHook } = await import("../src/alerts/events.js");
+    const { AlertStore } = await import("../src/alerts/store.js");
+    const { SessionStore } = await import("../src/sessions/store.js");
+    const store = new AlertStore(ctx.dbh.db);
+    const sessions = new SessionStore(ctx.dbh.db);
+    const hook = createAlertHook({
+      alerts: store,
+      sessions,
+      notifyUpdate: () => {},
+    });
+
+    // First turn completes: one session_completed row.
+    hook(sessionId, "running", "idle");
+    let list = store
+      .listAll()
+      .filter((a) => a.sessionId === sessionId && a.kind === "session_completed");
+    expect(list).toHaveLength(1);
+    const firstId = list[0].id;
+    const firstCreated = list[0].createdAt;
+
+    // Give the clock a tick so createdAt can differ. Sleep a couple ms —
+    // this is cheap and avoids a flaky same-millisecond string compare.
+    await new Promise((r) => setTimeout(r, 5));
+
+    // Second turn completes. We should still have exactly one
+    // session_completed row, but it's the NEW one (different id, fresher
+    // createdAt, unseen again) — not the old one sitting around.
+    hook(sessionId, "running", "idle");
+    list = store
+      .listAll()
+      .filter((a) => a.sessionId === sessionId && a.kind === "session_completed");
+    expect(list).toHaveLength(1);
+    expect(list[0].id).not.toBe(firstId);
+    expect(list[0].createdAt >= firstCreated).toBe(true);
+    expect(list[0].seenAt).toBeNull();
+    expect(list[0].resolvedAt).toBeNull();
+  });
 });

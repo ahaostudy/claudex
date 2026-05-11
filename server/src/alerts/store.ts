@@ -76,6 +76,7 @@ export class AlertStore {
     markSeenAll: Statement | null;
     markResolved: Statement | null;
     resolveBySessionKind: Statement | null;
+    deleteBySessionKind: Statement | null;
     countUnseen: Statement | null;
     prune: Statement | null;
   } = {
@@ -88,6 +89,7 @@ export class AlertStore {
     markSeenAll: null,
     markResolved: null,
     resolveBySessionKind: null,
+    deleteBySessionKind: null,
     countUnseen: null,
     prune: null,
   };
@@ -217,6 +219,20 @@ export class AlertStore {
          SET resolved_at = ?
          WHERE session_id = ? AND kind = ? AND resolved_at IS NULL`,
     ).run(now, sessionId, kind);
+    return res.changes ?? 0;
+  }
+
+  /** Hard-delete every alert of a given kind for a session. Used by the
+   *  event hook for `session_completed`: each time a session finishes a
+   *  turn we want *exactly one* latest-completion row, not a pile of 10.
+   *  Deleting (rather than resolving) keeps the table bounded and means
+   *  the new insert carries a fresh id + createdAt + unseen state, which
+   *  is what drives the badge back up for the new completion. */
+  deleteBySessionKind(sessionId: string, kind: AlertKind): number {
+    const res = this.prep(
+      "deleteBySessionKind",
+      `DELETE FROM alerts WHERE session_id = ? AND kind = ?`,
+    ).run(sessionId, kind);
     return res.changes ?? 0;
   }
 

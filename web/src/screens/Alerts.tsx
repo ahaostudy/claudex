@@ -9,7 +9,7 @@ import {
   X,
 } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
-import { useAlerts } from "@/state/alerts";
+import { useAlerts, dedupBySession } from "@/state/alerts";
 import { api } from "@/api/client";
 import type { Alert as AlertRow, Project } from "@claudex/shared";
 import { cn } from "@/lib/cn";
@@ -19,20 +19,26 @@ import { cn } from "@/lib/cn";
 // server/src/alerts/*).
 //
 // Three filter tabs:
-//   • Unread — seenAt IS NULL (the badge count; what the user hasn't
-//     looked at yet)
-//   • Active — resolvedAt IS NULL (the underlying condition is still
-//     happening — permission still pending, session still errored)
-//   • All    — everything, seen or resolved or both. Archival view.
+//   • All    — default landing tab; every deduped alert regardless of
+//              seen/resolved state. Keeps the user from landing on a blank
+//              screen when the badge says there's something to see.
+//   • Unread — seenAt IS NULL (matches the badge count, but no longer
+//              auto-clears on mount — the user has to either click a row
+//              or hit "Mark all seen" to acknowledge).
+//   • Read   — seenAt IS NOT NULL. Archival view of things the user has
+//              already looked at.
+//
+// Per-session dedup: the list groups by sessionId and keeps only the
+// latest alert per session (see dedupBySession in state/alerts). This
+// avoids a chat that completes 10 turns spawning 10 separate "session
+// completed" rows — the user sees one "latest" row per session, and the
+// badge count tracks the same deduped view.
 //
 // The list is populated on mount via fetchAlerts; the useAlerts store is
 // kept fresh by the `alerts_update` WS frame handler in state/sessions.
-// We also auto-mark-all-seen on mount so the badge drops to zero the
-// moment the user opens this screen — matches the user's mental model
-// of "I looked at the inbox".
 // ---------------------------------------------------------------------------
 
-type FilterMode = "unread" | "active" | "all";
+type FilterMode = "all" | "unread" | "read";
 
 const KIND_ICON: Record<string, typeof AlertTriangle> = {
   permission_pending: AlertTriangle,
@@ -61,10 +67,11 @@ export function AlertsScreen() {
   const alerts = useAlerts((s) => s.alerts);
   const fetchAlerts = useAlerts((s) => s.fetchAlerts);
   const markAllSeen = useAlerts((s) => s.markAllSeen);
+  const markSeen = useAlerts((s) => s.markSeen);
   const dismiss = useAlerts((s) => s.dismiss);
 
   const [projects, setProjects] = useState<Project[]>([]);
-  const [mode, setMode] = useState<FilterMode>("unread");
+  const [mode, setMode] = useState<FilterMode>("all");
 
   useEffect(() => {
     // First paint: make sure we have the latest list. The AppShell
@@ -73,17 +80,12 @@ export function AlertsScreen() {
     void fetchAlerts();
   }, [fetchAlerts]);
 
-  // On mount, clear the badge by marking all currently-unseen alerts as
-  // seen. This runs once per Alerts-screen visit — new alerts that arrive
-  // while the user is on the screen will flip the badge back up, which
-  // is the right UX (user is still looking, but there's a fresh thing).
-  useEffect(() => {
-    const hasUnseen = alerts.some((a) => a.seenAt === null);
-    if (hasUnseen) void markAllSeen();
-    // intentionally one-shot per mount: no dep on `alerts`, otherwise we
-    // re-fire on every list change.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  // NOTE: we intentionally do NOT auto-mark-all-seen on mount anymore.
+  // The old behavior cleared the badge the instant the user opened this
+  // screen, which combined with a default-to-Unread filter meant the
+  // user saw "red dot → open → empty list". The badge now persists until
+  // the user either taps a row (markSeen on navigate) or hits the
+  // explicit "Mark all seen" button.
 
   useEffect(() => {
     let cancelled = false;
@@ -105,21 +107,25 @@ export function AlertsScreen() {
     [projects],
   );
 
+  // Dedup once up front — the Alerts list, the tab counts, and the filter
+  // slice all operate on the same deduped view so numbers match visually.
+  const deduped = useMemo(() => dedupBySession(alerts), [alerts]);
+
   const counts = useMemo(() => {
     let unread = 0;
-    let active = 0;
-    for (const a of alerts) {
+    let read = 0;
+    for (const a of deduped) {
       if (a.seenAt === null) unread++;
-      if (a.resolvedAt === null) active++;
+      else read++;
     }
-    return { unread, active, all: alerts.length };
-  }, [alerts]);
+    return { all: deduped.length, unread, read };
+  }, [deduped]);
 
   const filtered = useMemo(() => {
-    if (mode === "unread") return alerts.filter((a) => a.seenAt === null);
-    if (mode === "active") return alerts.filter((a) => a.resolvedAt === null);
-    return alerts;
-  }, [alerts, mode]);
+    if (mode === "unread") return deduped.filter((a) => a.seenAt === null);
+    if (mode === "read") return deduped.filter((a) => a.seenAt !== null);
+    return deduped;
+  }, [deduped, mode]);
 
   return (
     <AppShell tab="alerts">
@@ -131,12 +137,18 @@ export function AlertsScreen() {
           </h1>
         </div>
         <span className="ml-auto mono text-[11px] text-ink-muted">
-          {alerts.length === 0 ? "none" : `${alerts.length} total`}
+          {deduped.length === 0 ? "none" : `${deduped.length} total`}
         </span>
       </header>
 
-      {/* Filter tabs — three buckets, counts shown inline */}
+      {/* Filter tabs — All / Unread / Read */}
       <div className="shrink-0 flex items-center gap-1 px-4 py-2 border-b border-line bg-paper/30 overflow-x-auto no-scrollbar">
+        <FilterChip
+          label="All"
+          count={counts.all}
+          active={mode === "all"}
+          onClick={() => setMode("all")}
+        />
         <FilterChip
           label="Unread"
           count={counts.unread}
@@ -144,16 +156,10 @@ export function AlertsScreen() {
           onClick={() => setMode("unread")}
         />
         <FilterChip
-          label="Active"
-          count={counts.active}
-          active={mode === "active"}
-          onClick={() => setMode("active")}
-        />
-        <FilterChip
-          label="All"
-          count={counts.all}
-          active={mode === "all"}
-          onClick={() => setMode("all")}
+          label="Read"
+          count={counts.read}
+          active={mode === "read"}
+          onClick={() => setMode("read")}
         />
         {counts.unread > 0 && (
           <button
@@ -177,8 +183,8 @@ export function AlertsScreen() {
             <div className="display text-[1.25rem] mb-1">
               {mode === "unread"
                 ? "No unread alerts."
-                : mode === "active"
-                  ? "Nothing active."
+                : mode === "read"
+                  ? "Nothing read yet."
                   : "No alerts yet."}
             </div>
             <p className="text-[13px] text-ink-muted leading-relaxed">
@@ -199,6 +205,7 @@ export function AlertsScreen() {
                       ? projectLookup.get(alert.projectId) ?? null
                       : null
                   }
+                  onSeen={() => void markSeen(alert.id)}
                   onDismiss={() => void dismiss(alert.id)}
                 />
               </li>
@@ -243,10 +250,12 @@ function FilterChip({
 function AlertRowView({
   alert,
   project,
+  onSeen,
   onDismiss,
 }: {
   alert: AlertRow;
   project: Project | null;
+  onSeen: () => void;
   onDismiss: () => void;
 }) {
   const Icon = KIND_ICON[alert.kind] ?? Bell;
@@ -275,7 +284,18 @@ function AlertRowView({
         resolved && "opacity-75",
       )}
     >
-      <Link to={href} className="flex items-center gap-3 min-w-0 flex-1">
+      <Link
+        to={href}
+        onClick={() => {
+          // Tap-to-navigate also acknowledges the alert. This is how the
+          // badge drains as the user works through the list — clicking a
+          // row flips it to "seen" server-side and decrements the badge
+          // by one. Much better than the old "auto mark all seen on
+          // mount" which hid the content before the user could read it.
+          if (!seen) onSeen();
+        }}
+        className="flex items-center gap-3 min-w-0 flex-1"
+      >
         <span
           className={cn(
             "h-2 w-2 rounded-full shrink-0",
