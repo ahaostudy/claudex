@@ -1,4 +1,4 @@
-import { ChevronDown } from "lucide-react";
+import { Bot, ChevronDown } from "lucide-react";
 import { cn } from "@/lib/cn";
 import type { SubagentRun } from "@/state/sessions";
 
@@ -37,6 +37,7 @@ export function SubagentsStrip({
   // bottom chronologically; flip here for "what's happening right now".
   const reversed = [...runs].reverse();
   const live = reversed.filter((r) => r.status === "running");
+  const done = reversed.filter((r) => r.status === "completed").length;
   const active = live[0] ?? reversed[0];
 
   const label = activeLabel(active);
@@ -49,15 +50,12 @@ export function SubagentsStrip({
       className="w-full px-4 md:px-5 py-2 bg-paper/70 border-b border-line flex items-center gap-2 md:gap-3 shrink-0 hover:bg-paper active:bg-paper/90 transition-colors text-left"
     >
       <span className="inline-flex items-center gap-1 px-1.5 h-5 rounded-[4px] border border-indigo/30 bg-indigo-wash text-indigo mono text-[10px] font-medium uppercase tracking-[0.08em] shrink-0">
+        <Bot className="w-2.5 h-2.5" aria-hidden />
         Agents
       </span>
       <StatusDots runs={reversed} />
       <span className="mono text-[11px] text-ink-muted shrink-0">
-        {live.length > 0 ? `${live.length} live` : "idle"}
-        <span className="hidden md:inline">
-          {" · "}
-          {runs.length} total
-        </span>
+        {done}/{runs.length}
       </span>
       <span className="hidden md:inline-block shrink-0 text-ink-faint mono text-[10px]">
         ›
