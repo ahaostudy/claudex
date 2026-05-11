@@ -203,9 +203,7 @@ export function ChatSessionsRail({ currentId }: { currentId: string }) {
           className="flex items-center gap-2 flex-1 min-w-0 -mx-1 px-1 py-0.5 rounded-[6px] hover:bg-canvas/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-klein/40"
         >
           <Logo className="w-5 h-5 shrink-0" />
-          <span className="font-sans font-black text-[15px] tracking-[-0.01em] truncate">
-            Claudex
-          </span>
+          <span className="mono text-[13px] font-bold truncate">Claudex</span>
         </Link>
         <span className="ml-auto text-[11px] mono text-ink-muted">
           {visible.length}
@@ -325,7 +323,7 @@ export function ChatSessionsRail({ currentId }: { currentId: string }) {
   );
 }
 
-function QuickCreateForm({
+export function QuickCreateForm({
   current,
   onCancel,
   onCreated,
@@ -513,6 +511,22 @@ function SessionRow({
           {title}
         </span>
       </div>
+      {/* Last sent user message preview — one line, ellipsis-truncated.
+          Same data source as the Home row (server seeds via
+          SESSION_SELECT_COLS; web store mirrors on `user_message` WS
+          frames). Rail is narrow, so this sits at 11px to stay visually
+          subordinate to the title. Rendered only when a prior user
+          message exists. */}
+      {session.lastUserMessage && (
+        <div
+          className={cn(
+            "text-[11px] truncate mt-0.5",
+            active ? "text-ink-soft" : "text-ink-muted",
+          )}
+        >
+          {session.lastUserMessage}
+        </div>
+      )}
       <div
         className="mono text-[10px] text-ink-muted mt-0.5 truncate"
         title={activityTitle}
