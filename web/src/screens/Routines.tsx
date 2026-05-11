@@ -17,6 +17,7 @@ import type {
 } from "@claudex/shared";
 import { api, ApiError } from "@/api/client";
 import { AppShell } from "@/components/AppShell";
+import { timeAgoOrInShort } from "@/lib/format";
 
 // Inlined version of RoutinesSheet contents as a full-page screen. The old
 // sheet is kept around for the "Run now → navigate into session" flow but
@@ -40,18 +41,7 @@ function humanCron(expr: string): string {
 }
 
 function formatRel(iso: string | null): string {
-  if (!iso) return "—";
-  const now = Date.now();
-  const then = new Date(iso).getTime();
-  const diff = then - now;
-  const abs = Math.abs(diff);
-  const mins = Math.round(abs / 60_000);
-  if (mins < 1) return diff >= 0 ? "soon" : "just now";
-  if (mins < 60) return diff >= 0 ? `in ${mins}m` : `${mins}m ago`;
-  const hrs = Math.round(mins / 60);
-  if (hrs < 48) return diff >= 0 ? `in ${hrs}h` : `${hrs}h ago`;
-  const days = Math.round(hrs / 24);
-  return diff >= 0 ? `in ${days}d` : `${days}d ago`;
+  return timeAgoOrInShort(iso);
 }
 
 export function RoutinesScreen() {

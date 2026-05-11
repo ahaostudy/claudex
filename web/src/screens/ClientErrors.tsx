@@ -5,6 +5,7 @@ import { AppShell } from "@/components/AppShell";
 import { api, ApiError } from "@/api/client";
 import type { ClientError, ClientErrorKind } from "@claudex/shared";
 import { cn } from "@/lib/cn";
+import { timeAgoShort } from "@/lib/format";
 
 // ---------------------------------------------------------------------------
 // ClientErrors screen (/errors)
@@ -34,20 +35,6 @@ function kindBadge(kind: ClientErrorKind): { label: string; cls: string } {
     case "console-error":
       return { label: "console", cls: "bg-paper border-line text-ink-muted" };
   }
-}
-
-function relTime(iso: string): string {
-  const d = new Date(iso);
-  const now = Date.now();
-  const diff = Math.max(0, now - d.getTime());
-  const s = Math.floor(diff / 1000);
-  if (s < 60) return `${s}s ago`;
-  const m = Math.floor(s / 60);
-  if (m < 60) return `${m}m ago`;
-  const h = Math.floor(m / 60);
-  if (h < 24) return `${h}h ago`;
-  const day = Math.floor(h / 24);
-  return `${day}d ago`;
 }
 
 export function ClientErrorsScreen() {
@@ -312,7 +299,7 @@ export function ClientErrorsScreen() {
                           </span>
                         )}
                         <span className="ml-auto mono text-[10px] text-ink-muted">
-                          {relTime(e.lastSeenAt)}
+                          {timeAgoShort(e.lastSeenAt)}
                         </span>
                       </span>
                       <span className="block mt-1 text-[13px] text-ink break-words">

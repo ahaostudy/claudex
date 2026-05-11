@@ -21,6 +21,7 @@ import type {
 import { api, ApiError } from "@/api/client";
 import { AppShell } from "@/components/AppShell";
 import { cn } from "@/lib/cn";
+import { timeAgoShort } from "@/lib/format";
 
 // ---------------------------------------------------------------------------
 // Files browser (mockup s-14). Read-only, general-purpose host filesystem
@@ -49,18 +50,6 @@ function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} kB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-function formatRelTime(mtimeMs: number): string {
-  const diffMs = Date.now() - mtimeMs;
-  const secs = Math.floor(diffMs / 1000);
-  if (secs < 60) return "just now";
-  const mins = Math.floor(secs / 60);
-  if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  const days = Math.floor(hrs / 24);
-  return `${days}d ago`;
 }
 
 /** Copy text to the clipboard with an HTTP (non-secure-context) fallback.
@@ -1010,7 +999,7 @@ function DesktopFilesView(p: FilesViewProps) {
                   <div className="mono text-[11px] text-ink-muted truncate">
                     {p.fileData.lines} lines · {formatSize(p.fileData.sizeBytes)}
                     {p.fileData.mtimeMs
-                      ? ` · modified ${formatRelTime(p.fileData.mtimeMs)}`
+                      ? ` · modified ${timeAgoShort(p.fileData.mtimeMs)}`
                       : ""}
                   </div>
                 )}
@@ -1058,7 +1047,7 @@ function DesktopFilesView(p: FilesViewProps) {
             </div>
             <div className="flex items-center justify-between">
               <span className="text-ink-muted">Modified</span>
-              <span className="mono">{formatRelTime(p.fileData.mtimeMs)}</span>
+              <span className="mono">{timeAgoShort(p.fileData.mtimeMs)}</span>
             </div>
             <div className="flex items-center justify-between">
               <span className="text-ink-muted">Mode</span>

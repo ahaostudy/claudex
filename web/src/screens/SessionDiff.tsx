@@ -18,6 +18,7 @@ import { useSessions } from "@/state/sessions";
 import { DiffView } from "@/components/DiffView";
 import type { FileDiff } from "@/lib/diff";
 import { cn } from "@/lib/cn";
+import { timeAgoShort } from "@/lib/format";
 
 // ---------------------------------------------------------------------------
 // Session diff summary screen (mockup s-15).
@@ -61,17 +62,6 @@ const TIMELINE_DOT: Record<SessionDiffApproval, string> = {
 
 function approvalLabel(a: SessionDiffApproval): string {
   return a === "pending" ? "awaiting" : a;
-}
-
-function formatRelTime(iso: string): string {
-  const now = Date.now();
-  const then = Date.parse(iso);
-  if (Number.isNaN(then)) return "";
-  const diff = Math.max(0, Math.round((now - then) / 1000));
-  if (diff < 60) return `${diff}s ago`;
-  if (diff < 3600) return `${Math.round(diff / 60)}m ago`;
-  if (diff < 86400) return `${Math.round(diff / 3600)}h ago`;
-  return `${Math.round(diff / 86400)}d ago`;
 }
 
 /** Convert a SessionDiffFile to the FileDiff shape DiffView expects. The
@@ -540,7 +530,7 @@ function TimelineList({
             {e.addCount > 0 && e.delCount > 0 && " "}
             {e.delCount > 0 && <span className="text-danger">−{e.delCount}</span>}
             {(e.addCount > 0 || e.delCount > 0) && " · "}
-            {formatRelTime(e.createdAt)}
+            {timeAgoShort(e.createdAt)}
             {" · "}
             {approvalLabel(e.approval)}
           </div>

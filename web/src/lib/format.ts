@@ -8,46 +8,91 @@
 // that the UI output was subtly inconsistent. This module picks one clean
 // variant of each and every caller now uses it.
 
-/** "3s ago" / "2m ago" / "5h ago" / "3d ago" — short form.
- *  Sub-minute precision so fast events (a Bash call that just finished,
- *  a session that just flipped to idle) don't all collapse into the
- *  vague "just now" bucket. `<3s` still shows "now" since second-level
- *  ticking at that granularity reads as jitter, not freshness. */
-export function timeAgoShort(iso: string | Date | null | undefined): string {
-  if (!iso) return "—";
-  const t = typeof iso === "string" ? Date.parse(iso) : iso.getTime();
+type TimeInput = string | Date | number | null | undefined;
+
+/** Normalize {string, Date, number} → epoch ms. Returns NaN on failure so
+ *  callers can bail with the placeholder. */
+function toMs(input: TimeInput): number {
+  if (input == null) return NaN;
+  if (typeof input === "number") return input;
+  if (typeof input === "string") return Date.parse(input);
+  return input.getTime();
+}
+
+/** "05-10 14:23" for current-year timestamps, "2024-11-30 14:23" for
+ *  earlier years. Compact but still carries the time of day, which is the
+ *  whole point of switching to absolute format in the first place. Uses
+ *  local time — callers want human-readable wall-clock, not UTC. */
+function formatAbsolute(t: number): string {
+  const d = new Date(t);
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mi = String(d.getMinutes()).padStart(2, "0");
+  const sameYear = yyyy === new Date().getFullYear();
+  return sameYear ? `${mm}-${dd} ${hh}:${mi}` : `${yyyy}-${mm}-${dd} ${hh}:${mi}`;
+}
+
+/** Threshold — anything past this falls out of relative-time land and we
+ *  show an absolute clock value instead. Relative times become genuinely
+ *  confusing around the day mark ("3d ago" → which day exactly?), and
+ *  "2w ago" / "2025-05-01" are both harder to read at a glance than
+ *  "05-01 14:23". */
+const ABSOLUTE_THRESHOLD_MS = 24 * 60 * 60 * 1000;
+
+/** "3s ago" / "2m ago" / "5h ago" — short form for the past 24h, then
+ *  flips to absolute "MM-DD HH:mm" (or "YYYY-MM-DD HH:mm" for older
+ *  years). Sub-minute precision so fast events (a Bash call that just
+ *  finished, a session that just flipped to idle) don't all collapse into
+ *  the vague "just now" bucket. `<3s` still shows "now" since second-
+ *  level ticking at that granularity reads as jitter, not freshness. */
+export function timeAgoShort(input: TimeInput): string {
+  const t = toMs(input);
+  if (!Number.isFinite(t)) return "—";
   const delta = Math.max(0, Date.now() - t);
+  if (delta >= ABSOLUTE_THRESHOLD_MS) return formatAbsolute(t);
   const s = Math.floor(delta / 1000);
   if (s < 3) return "now";
   if (s < 60) return `${s}s ago`;
   const m = Math.floor(s / 60);
   if (m < 60) return `${m}m ago`;
-  const h = Math.floor(m / 60);
-  if (h < 24) return `${h}h ago`;
-  const d = Math.floor(h / 24);
-  if (d < 7) return `${d}d ago`;
-  const w = Math.floor(d / 7);
-  if (w < 5) return `${w}w ago`;
-  // fall back to YYYY-MM-DD for old items
-  return new Date(t).toISOString().slice(0, 10);
+  const h = Math.floor(s / 3600);
+  return `${h}h ago`;
 }
 
 /** "3 seconds ago" / "2 minutes ago" etc — long form, for audit rows
- *  and similar. Same sub-minute precision story as `timeAgoShort`. */
-export function timeAgoLong(iso: string | Date | null | undefined): string {
-  if (!iso) return "—";
-  const t = typeof iso === "string" ? Date.parse(iso) : iso.getTime();
+ *  and similar. Same 24h → absolute handoff as `timeAgoShort`. */
+export function timeAgoLong(input: TimeInput): string {
+  const t = toMs(input);
+  if (!Number.isFinite(t)) return "—";
   const delta = Math.max(0, Date.now() - t);
+  if (delta >= ABSOLUTE_THRESHOLD_MS) return formatAbsolute(t);
   const s = Math.floor(delta / 1000);
   if (s < 3) return "just now";
   if (s < 60) return `${s} second${s === 1 ? "" : "s"} ago`;
   const m = Math.floor(s / 60);
   if (m < 60) return `${m} minute${m === 1 ? "" : "s"} ago`;
-  const h = Math.floor(m / 60);
-  if (h < 24) return `${h} hour${h === 1 ? "" : "s"} ago`;
-  const d = Math.floor(h / 24);
-  if (d < 7) return `${d} day${d === 1 ? "" : "s"} ago`;
-  return new Date(t).toLocaleDateString();
+  const h = Math.floor(s / 3600);
+  return `${h} hour${h === 1 ? "" : "s"} ago`;
+}
+
+/** Bidirectional — "in 5m" / "5m ago" / "in 2h" / "2h ago" within 24h
+ *  of now in either direction, then flips to absolute "MM-DD HH:mm".
+ *  Used by Routines for the last/next-run columns where the value can
+ *  sit on either side of now. */
+export function timeAgoOrInShort(input: TimeInput): string {
+  const t = toMs(input);
+  if (!Number.isFinite(t)) return "—";
+  const diff = t - Date.now();
+  const abs = Math.abs(diff);
+  if (abs >= ABSOLUTE_THRESHOLD_MS) return formatAbsolute(t);
+  const future = diff > 0;
+  const mins = Math.round(abs / 60_000);
+  if (mins < 1) return future ? "soon" : "just now";
+  if (mins < 60) return future ? `in ${mins}m` : `${mins}m ago`;
+  const hrs = Math.round(mins / 60);
+  return future ? `in ${hrs}h` : `${hrs}h ago`;
 }
 
 /** Bytes → short human-readable ("4.2 KB"). */

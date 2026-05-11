@@ -1,5 +1,6 @@
 import { Check, ListChecks } from "lucide-react";
 import { cn } from "@/lib/cn";
+import { timeAgoShort } from "@/lib/format";
 import type { PlanSnapshot, TodoItem } from "@/lib/todos";
 
 /**
@@ -111,7 +112,7 @@ export function PlanPanel({
                   dateTime={updatedAt}
                   title={new Date(updatedAt).toLocaleString()}
                 >
-                  {timeAgo(updatedAt)}
+                  {timeAgoShort(updatedAt)}
                 </time>
               </>
             ) : (
@@ -215,23 +216,4 @@ function NextRow({ item }: { item: TodoItem }) {
       </span>
     </li>
   );
-}
-
-/**
- * Tiny relative-time formatter — intentionally inlined here so PlanPanel
- * doesn't pull in the full Chat.tsx `timeAgoShort` graph. Only precise to
- * the minute, which is more than enough for a "plan updated" footer.
- */
-function timeAgo(iso: string): string {
-  const then = Date.parse(iso);
-  if (Number.isNaN(then)) return iso;
-  const secs = Math.floor((Date.now() - then) / 1000);
-  if (secs < 5) return "just now";
-  if (secs < 60) return `${secs}s ago`;
-  const mins = Math.floor(secs / 60);
-  if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  const days = Math.floor(hrs / 24);
-  return `${days}d ago`;
 }
