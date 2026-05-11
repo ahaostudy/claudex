@@ -50,11 +50,16 @@ export function AskUserQuestionCard({
   >({});
   const [otherText, setOtherText] = useState<Record<string, string>>({});
 
-  // Readiness: every question has a non-empty answer (for "Other" the
-  // free-text box must be filled).
-  const ready = useMemo(() => {
-    if (isAnswered) return false;
-    for (const q of questions) {
+  // Which question is currently being shown. Multi-question asks now render
+  // one-at-a-time with a tab strip on top; single-question cards hide the
+  // strip entirely and look identical to the old layout.
+  const [activeIdx, setActiveIdx] = useState(0);
+  const safeIdx = Math.min(activeIdx, Math.max(0, questions.length - 1));
+
+  // Per-question readiness — used both for the global submit gate and for
+  // the "done" dots on each tab.
+  const perQuestionReady = useMemo(() => {
+    return questions.map((q) => {
       const sel = selections[q.question];
       if (q.multiSelect) {
         const arr = (sel as string[] | undefined) ?? [];
@@ -62,14 +67,25 @@ export function AskUserQuestionCard({
         if (arr.includes(OTHER_LABEL) && !otherText[q.question]?.trim()) {
           return false;
         }
-      } else {
-        const v = typeof sel === "string" ? sel : "";
-        if (!v) return false;
-        if (v === OTHER_LABEL && !otherText[q.question]?.trim()) return false;
+        return true;
       }
-    }
-    return true;
-  }, [isAnswered, questions, selections, otherText]);
+      const v = typeof sel === "string" ? sel : "";
+      if (!v) return false;
+      if (v === OTHER_LABEL && !otherText[q.question]?.trim()) return false;
+      return true;
+    });
+  }, [questions, selections, otherText]);
+
+  // Readiness: every question has a non-empty answer (for "Other" the
+  // free-text box must be filled).
+  const ready = useMemo(() => {
+    if (isAnswered) return false;
+    return perQuestionReady.every(Boolean);
+  }, [isAnswered, perQuestionReady]);
+
+  // After submit, mark every tab done so the read-only view shows all dots lit.
+  const tabDone = (idx: number) =>
+    isAnswered ? true : perQuestionReady[idx] === true;
 
   function handleSubmit() {
     if (!ready) return;
@@ -108,8 +124,45 @@ export function AskUserQuestionCard({
         </span>
       </div>
 
-      <div className="space-y-4">
-        {questions.map((q) => {
+      {questions.length > 1 ? (
+        <div className="flex items-center gap-1 mb-3 overflow-x-auto -mx-1 px-1 pb-1">
+          {questions.map((q, idx) => {
+            const active = idx === safeIdx;
+            const done = tabDone(idx);
+            return (
+              <button
+                key={q.question}
+                type="button"
+                onClick={() => setActiveIdx(idx)}
+                className={cn(
+                  "inline-flex items-center gap-1.5 h-7 px-2.5 rounded-[6px] mono text-[10px] uppercase tracking-[0.1em] transition-colors shrink-0",
+                  active
+                    ? "bg-klein text-canvas border border-klein"
+                    : "border border-line bg-canvas/60 text-ink-muted hover:border-klein/40 hover:text-ink",
+                )}
+                aria-pressed={active}
+              >
+                <span>{`Q${idx + 1}`}</span>
+                <span className="opacity-70">/</span>
+                <span>{questions.length}</span>
+                {done ? (
+                  <span
+                    className={cn(
+                      "inline-block h-1.5 w-1.5 rounded-full",
+                      active ? "bg-canvas" : "bg-klein",
+                    )}
+                  />
+                ) : null}
+              </button>
+            );
+          })}
+        </div>
+      ) : null}
+
+      <div>
+        {(() => {
+          const q = questions[safeIdx];
+          if (!q) return null;
           const optionsWithOther = [
             ...q.options,
             { label: OTHER_LABEL, description: "Something else — type below." },
@@ -201,6 +254,32 @@ export function AskUserQuestionCard({
                                 ...prev,
                                 [q.question]: opt.label,
                               }));
+                              // Auto-advance to the next unanswered tab when
+                              // the user picks a concrete option. Skip for
+                              // "Other" because they still need to fill the
+                              // free-text box on this tab.
+                              if (
+                                opt.label !== OTHER_LABEL &&
+                                questions.length > 1
+                              ) {
+                                const currentIdx = safeIdx;
+                                const nextIdx = (() => {
+                                  for (
+                                    let step = 1;
+                                    step < questions.length;
+                                    step++
+                                  ) {
+                                    const cand =
+                                      (currentIdx + step) % questions.length;
+                                    if (!perQuestionReady[cand]) return cand;
+                                  }
+                                  return currentIdx;
+                                })();
+                                if (nextIdx !== currentIdx) {
+                                  // Defer so the selection commit lands first.
+                                  queueMicrotask(() => setActiveIdx(nextIdx));
+                                }
+                              }
                             }
                           }}
                           className="mt-0.5 accent-klein shrink-0"
@@ -263,7 +342,7 @@ export function AskUserQuestionCard({
               ) : null}
             </div>
           );
-        })}
+        })()}
       </div>
 
       {isAnswered ? (
