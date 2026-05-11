@@ -4,6 +4,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   Bell,
   BellOff,
+  Bot,
   Bug,
   Check,
   ChevronDown,
@@ -14,6 +15,7 @@ import {
   Info,
   KeyRound,
   Palette,
+  Pencil,
   Plug,
   RefreshCw,
   ScrollText,
@@ -27,7 +29,10 @@ import {
 } from "lucide-react";
 import { useAuth } from "@/state/auth";
 import { api, ApiError, type WorktreeSummary } from "@/api/client";
-import type { Project, PushDevice, UserEnvResponse, AuditEvent, ToolGrant, ImportAllResponse, SupportedLanguage } from "@claudex/shared";
+import type {
+  Project, PushDevice, UserEnvResponse, AuditEvent,
+  ToolGrant, ImportAllResponse, SupportedLanguage, CustomModel,
+} from "@claudex/shared";
 import { SUPPORTED_LANGUAGES } from "@claudex/shared";
 import { Logo } from "@/components/Logo";
 import { cn } from "@/lib/cn";
@@ -46,6 +51,7 @@ import {
   unsubscribeFromPush,
 } from "@/lib/push";
 import { useFocusReturn } from "@/hooks/useFocusReturn";
+import { useAppSettings, useCustomModels } from "@/state/app-settings";
 
 // ---------------------------------------------------------------------------
 // Settings — mockup s-12 structure.
@@ -72,6 +78,7 @@ type Tab =
   | "security"
   | "notifications"
   | "appearance"
+  | "models"
   | "mcp"
   | "plugins"
   | "environment"
@@ -121,6 +128,14 @@ const TABS: TabSpec[] = [
     caps: "appearance",
     title: "Light theme today.",
     lede: "Dark and text-size live here later. For now claudex ships with a single calm-paper theme.",
+  },
+  {
+    id: "models",
+    label: "Models",
+    icon: Bot,
+    caps: "models",
+    title: "Custom models for your proxy.",
+    lede: "Add model IDs from your self-hosted API proxy (OneAPI, New API, etc.) alongside the built-in Claude models.",
   },
   {
     id: "mcp",
@@ -334,6 +349,7 @@ export function SettingsScreen() {
                 {tab === "security" && <SecurityPanel />}
                 {tab === "notifications" && <NotificationsPanel />}
                 {tab === "appearance" && <AppearancePanel />}
+                {tab === "models" && <ModelsPanel />}
                 {tab === "mcp" && <McpPanel onPlugins={() => setTab("plugins")} />}
                 {tab === "plugins" && <PluginsPanel />}
                 {tab === "environment" && <EnvironmentPanel />}
@@ -2203,6 +2219,206 @@ function EnvironmentPanel() {
 // render with a red dot and a Remove button. A bulk "Prune N orphans" action
 // sits at the bottom when any orphans exist.
 // ----------------------------------------------------------------------------
+
+// Built-in Claude model info (read-only display in the Models panel).
+const BUILTIN_MODEL_INFO = [
+  { id: "claude-opus-4-7", label: "Opus 4.7", context: "1M tokens" },
+  { id: "claude-sonnet-4-6", label: "Sonnet 4.6", context: "1M tokens" },
+  { id: "claude-haiku-4-5", label: "Haiku 4.5", context: "200k tokens" },
+];
+
+function ModelsPanel() {
+  const loadSettings = useAppSettings((s) => s.load);
+  const patch = useAppSettings((s) => s.patch);
+  const customModels = useCustomModels();
+  useEffect(() => { loadSettings(); }, [loadSettings]);
+
+  const [adding, setAdding] = useState(false);
+  const [editId, setEditId] = useState<string | null>(null);
+  const [draft, setDraft] = useState({ id: "", label: "", contextWindow: "" });
+  const [err, setErr] = useState<string | null>(null);
+
+  function startAdd() {
+    setDraft({ id: "", label: "", contextWindow: "" });
+    setErr(null);
+    setAdding(true);
+    setEditId(null);
+  }
+
+  function startEdit(m: CustomModel) {
+    setDraft({
+      id: m.id,
+      label: m.label,
+      contextWindow: m.contextWindow ? String(m.contextWindow) : "",
+    });
+    setErr(null);
+    setEditId(m.id);
+    setAdding(false);
+  }
+
+  function cancelForm() {
+    setAdding(false);
+    setEditId(null);
+    setErr(null);
+  }
+
+  function save() {
+    const id = draft.id.trim();
+    const label = draft.label.trim();
+    if (!id) return setErr("Model ID is required.");
+    if (!label) return setErr("Label is required.");
+    // Check for duplicate id (excluding the entry being edited)
+    const others = customModels.filter((m) => m.id !== editId);
+    if (others.some((m) => m.id === id)) {
+      return setErr("A model with this ID already exists.");
+    }
+    const ctx = draft.contextWindow.trim();
+    const entry: CustomModel = {
+      id,
+      label,
+      ...(ctx ? { contextWindow: parseInt(ctx, 10) } : {}),
+    };
+    const next = editId
+      ? others.concat(entry)
+      : [...customModels, entry];
+    patch({ customModels: next });
+    setAdding(false);
+    setEditId(null);
+  }
+
+  function remove(id: string) {
+    patch({ customModels: customModels.filter((m) => m.id !== id) });
+  }
+
+  const showForm = adding || editId !== null;
+
+  return (
+    <div className="space-y-5">
+      {/* Built-in models */}
+      <div className="rounded-[12px] border border-line bg-paper/30 overflow-hidden">
+        <div className="px-5 py-3 border-b border-line">
+          <div className="display text-[16px] leading-tight">Built-in models</div>
+          <div className="text-[13px] text-ink-muted mt-1">Shipped with claudex. Always available.</div>
+        </div>
+        <div className="divide-y divide-line">
+          {BUILTIN_MODEL_INFO.map((m) => (
+            <div key={m.id} className="flex items-center justify-between px-5 py-3">
+              <div>
+                <div className="text-[14px] font-medium">{m.label}</div>
+                <div className="text-[12px] text-ink-muted font-mono">{m.id} · {m.context}</div>
+              </div>
+              <span className="text-[11px] font-medium uppercase tracking-[0.1em] text-ink-muted px-2 py-0.5 rounded-[4px] bg-paper border border-line">built-in</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Custom models */}
+      <div className="rounded-[12px] border border-line bg-paper/30 overflow-hidden">
+        <div className="flex items-center justify-between px-5 py-3 border-b border-line">
+          <div>
+            <div className="display text-[16px] leading-tight">Custom models</div>
+            <div className="text-[13px] text-ink-muted mt-1">Models from your self-hosted API proxy.</div>
+          </div>
+          <button
+            onClick={startAdd}
+            className="h-8 px-3 rounded-[6px] bg-ink text-canvas text-[12px] font-medium flex items-center gap-1.5 shrink-0"
+          >
+            + Add
+          </button>
+        </div>
+
+        {customModels.length === 0 && !showForm && (
+          <div className="px-5 py-6 text-[13px] text-ink-muted text-center">
+            No custom models yet. Add one to use models from your proxy.
+          </div>
+        )}
+
+        {customModels.length > 0 && (
+          <div className="divide-y divide-line">
+            {customModels.map((m) => (
+              <div key={m.id} className="flex items-center justify-between px-5 py-3">
+                <div className="min-w-0">
+                  <div className="text-[14px] font-medium">{m.label}</div>
+                  <div className="text-[12px] text-ink-muted font-mono truncate">
+                    {m.id}{m.contextWindow ? ` · ${(m.contextWindow / 1000).toLocaleString()}k tokens` : ""}
+                  </div>
+                </div>
+                <div className="flex items-center gap-1 shrink-0 ml-2">
+                  <button
+                    onClick={() => startEdit(m)}
+                    className="h-7 w-7 flex items-center justify-center rounded-[4px] text-ink-muted hover:bg-paper"
+                    title="Edit"
+                  >
+                    <Pencil className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    onClick={() => remove(m.id)}
+                    className="h-7 w-7 flex items-center justify-center rounded-[4px] text-danger hover:bg-danger/10"
+                    title="Remove"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {showForm && (
+          <div className="px-5 py-4 border-t border-line space-y-3">
+            <div>
+              <label className="text-[12px] uppercase tracking-[0.14em] text-ink-muted mb-1 block">Model ID</label>
+              <input
+                value={draft.id}
+                onChange={(e) => setDraft({ ...draft, id: e.target.value })}
+                placeholder="e.g. gpt-4o, deepseek-chat"
+                className="w-full h-9 px-3 bg-canvas border border-line rounded-[6px] text-[13px] font-mono"
+                disabled={editId !== null}
+              />
+              <div className="text-[11px] text-ink-muted mt-1">The exact model string your proxy accepts.</div>
+            </div>
+            <div>
+              <label className="text-[12px] uppercase tracking-[0.14em] text-ink-muted mb-1 block">Label</label>
+              <input
+                value={draft.label}
+                onChange={(e) => setDraft({ ...draft, label: e.target.value })}
+                placeholder="e.g. GPT-4o, DeepSeek Chat"
+                className="w-full h-9 px-3 bg-canvas border border-line rounded-[6px] text-[13px]"
+              />
+            </div>
+            <div>
+              <label className="text-[12px] uppercase tracking-[0.14em] text-ink-muted mb-1 block">Context window (optional)</label>
+              <input
+                value={draft.contextWindow}
+                onChange={(e) => setDraft({ ...draft, contextWindow: e.target.value })}
+                placeholder="e.g. 128000"
+                type="number"
+                className="w-full h-9 px-3 bg-canvas border border-line rounded-[6px] text-[13px]"
+              />
+              <div className="text-[11px] text-ink-muted mt-1">In tokens. Used for the context-percentage ring.</div>
+            </div>
+            {err && <div className="text-[12px] text-danger">{err}</div>}
+            <div className="flex gap-2">
+              <button
+                onClick={save}
+                className="h-9 px-4 rounded-[6px] bg-ink text-canvas text-[13px] font-medium"
+              >
+                {editId ? "Update" : "Add"}
+              </button>
+              <button
+                onClick={cancelForm}
+                className="h-9 px-4 rounded-[6px] border border-line text-[13px] text-ink-muted"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
 
 function AdvancedPanel() {
   return (

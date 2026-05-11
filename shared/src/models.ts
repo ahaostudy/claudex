@@ -13,11 +13,19 @@ export const PermissionMode = z.enum([
 ]);
 export type PermissionMode = z.infer<typeof PermissionMode>;
 
-export const ModelId = z.enum([
+// Built-in Claude models shipped with claudex. Used as display defaults in
+// model selectors; the actual ModelId type accepts any string so custom
+// models from self-hosted proxies (OneAPI, New API, etc.) work seamlessly.
+export const BUILTIN_MODELS = [
   "claude-opus-4-7",
   "claude-sonnet-4-6",
   "claude-haiku-4-5",
-]);
+] as const;
+
+// ModelId accepts any non-empty string. The three built-in Claude models are
+// known to claudex (pricing, context window, effort gating), but any model id
+// the user's proxy supports can be used.
+export const ModelId = z.string().min(1);
 export type ModelId = z.infer<typeof ModelId>;
 
 // Thinking-effort level for a session's Claude runner. Selected in the Chat
@@ -49,6 +57,7 @@ export type EffortLevel = z.infer<typeof EffortLevel>;
 //       opus-4-7    → xhigh
 //       sonnet-4-6  → high
 //       haiku-4-5   → high
+//       custom      → high  (let the SDK handle unsupported levels)
 // Kept in `shared/` so the UI and server agree on what to offer and what
 // to accept when the user swaps models on an existing session.
 export function defaultEffortForModel(model: ModelId): EffortLevel {
@@ -59,6 +68,9 @@ export function effortSupportedOnModel(
   model: ModelId,
   effort: EffortLevel,
 ): boolean {
+  // xhigh is gated to Opus 4.7 for built-in models. For custom models
+  // (proxied through self-hosted APIs), allow all effort levels — the
+  // SDK and proxy will handle unsupported values.
   if (effort === "xhigh") return model === "claude-opus-4-7";
   return true;
 }
@@ -1924,13 +1936,33 @@ export const SUPPORTED_LANGUAGES = [
 export type SupportedLanguage = (typeof SUPPORTED_LANGUAGES)[number];
 
 /**
+ * A user-defined custom model entry. Stored in `app_settings` as a JSON
+ * array under the `custom_models` key. These models appear alongside the
+ * built-in Claude models in all model selectors.
+ *
+ * `id` is the model string passed verbatim to the Claude Agent SDK's
+ * `query({ model })` — it must match what the user's proxy accepts.
+ * `label` is the human-readable display name shown in the UI.
+ * `contextWindow` (optional) overrides the default 1M fallback used by
+ * the context-percentage ring; omit for proxies that don't expose this.
+ */
+export const CustomModel = z.object({
+  id: z.string().min(1),
+  label: z.string().min(1),
+  contextWindow: z.number().int().positive().optional(),
+});
+export type CustomModel = z.infer<typeof CustomModel>;
+
+/**
  * Global claudex preferences, stored in the `app_settings` KV table
  * (migration 24). `null` on a field means "no override" — for `language`
  * that means defer to Claude Code's own `~/.claude/settings.json` (the
- * pre-feature behavior).
+ * pre-feature behavior). For `customModels`, `null` or missing means no
+ * custom models configured.
  */
 export const AppSettings = z.object({
   language: z.string().nullable(),
+  customModels: z.array(CustomModel).nullable(),
 });
 export type AppSettings = z.infer<typeof AppSettings>;
 

@@ -71,19 +71,15 @@ import type { SlashCommand } from "@/lib/slash-commands";
 import { BUILTIN_FALLBACK_SLASH_COMMANDS } from "@/lib/slash-commands";
 import type { UIPiece } from "@/state/sessions";
 import { contextWindowTokens } from "@/lib/usage";
-import { MODEL_LABEL } from "@/lib/pricing";
+import { getModelLabel, getAllModelEntries } from "@/lib/pricing";
+import { useAppSettings, useCustomModels } from "@/state/app-settings";
 import { extractImagesFromText, type ImageRef } from "@/lib/images";
 import { useVisualViewport } from "@/hooks/useVisualViewport";
 
 // ---------------------------------------------------------------------------
 // Model / mode label tables shared by the desktop header pills and the chat
-// overflow sheet. Keep these in sync with NewSessionSheet in Home.
+// overflow sheet. Built-in list from pricing.ts + custom models from app settings.
 // ---------------------------------------------------------------------------
-const MODEL_IDS: ModelId[] = [
-  "claude-opus-4-7",
-  "claude-sonnet-4-6",
-  "claude-haiku-4-5",
-];
 const MODE_LABEL: Record<PermissionMode, string> = {
   default: "Ask",
   acceptEdits: "Accept",
@@ -269,6 +265,10 @@ export function ChatScreen() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const location = useLocation();
+  const loadSettings = useAppSettings((s) => s.load);
+  const customModels = useCustomModels();
+  const modelEntries = getAllModelEntries(customModels);
+  useEffect(() => { loadSettings(); }, [loadSettings]);
   // `sessionBase` holds the full session DTO we fetched via REST (title,
   // model, mode, tags, worktree path, etc). It's write-authoritative for
   // those fields and gets updated on explicit user edits (PATCH, settings
@@ -830,7 +830,7 @@ export function ChatScreen() {
         </>
       )}
       <span className="mono whitespace-nowrap">
-        {session ? MODEL_LABEL[session.model] ?? session.model : "—"}
+        {session ? getModelLabel(session.model, customModels) : "—"}
       </span>
       <span className="whitespace-nowrap">·</span>
       <span className="whitespace-nowrap">
@@ -967,14 +967,14 @@ export function ChatScreen() {
             </Link>
           )}
           <PillPicker
-            label={session ? MODEL_LABEL[session.model] ?? session.model : "—"}
+            label={session ? getModelLabel(session.model, customModels) : "—"}
             disabled={!session}
-            items={MODEL_IDS.map((m) => ({
-              id: m,
-              label: MODEL_LABEL[m],
-              active: session?.model === m,
+            items={modelEntries.map((m) => ({
+              id: m.id,
+              label: m.label,
+              active: session?.model === m.id,
             }))}
-            onPick={(m) => patchSession({ model: m as ModelId })}
+            onPick={(m) => patchSession({ model: m })}
           />
           <PillPicker
             label={session ? MODE_LABEL[session.mode] ?? session.mode : "—"}
@@ -4212,6 +4212,7 @@ function Composer({
   keyboardOffset?: number;
 }) {
   const isArchived = session?.status === "archived";
+  const customModels = useCustomModels();
   // Session errored — a hard runner error the SDK surfaced (exception
   // before turn_end, agent-runner init failure, etc). Composer is locked
   // out the same way archived sessions are, but with a different banner +
@@ -4968,7 +4969,7 @@ function Composer({
             <div className="mono text-[11px] text-ink-muted">
               {session ? (
                 <>
-                  {MODEL_LABEL[session.model] ?? session.model} ·{" "}
+                  {getModelLabel(session.model, customModels)} ·{" "}
                   {MODE_LABEL[session.mode] ?? session.mode} ·{" "}
                   {EFFORT_LABEL[session.effort] ?? session.effort} ·{" "}
                   <span className="mono">

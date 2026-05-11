@@ -24,7 +24,7 @@ describe("app-settings store", () => {
     const ctx = await bootstrapAuthedApp();
     disposers.push(ctx.cleanup);
     const store = new AppSettingsStore(ctx.dbh.db);
-    expect(store.get()).toEqual({ language: null } satisfies AppSettings);
+    expect(store.get()).toEqual({ language: null, customModels: null } satisfies AppSettings);
   });
 
   it("patch writes a language then reads it back", async () => {
@@ -96,7 +96,7 @@ describe("app-settings HTTP routes", () => {
       headers,
     });
     expect(first.statusCode).toBe(200);
-    expect(first.json()).toEqual({ settings: { language: null } });
+    expect(first.json()).toEqual({ settings: { language: null, customModels: null } });
 
     const patched = await ctx.app.inject({
       method: "PATCH",
@@ -105,14 +105,14 @@ describe("app-settings HTTP routes", () => {
       payload: { language: "chinese" },
     });
     expect(patched.statusCode).toBe(200);
-    expect(patched.json()).toEqual({ settings: { language: "chinese" } });
+    expect(patched.json()).toEqual({ settings: { language: "chinese", customModels: null } });
 
     const readBack = await ctx.app.inject({
       method: "GET",
       url: "/api/app-settings",
       headers,
     });
-    expect(readBack.json()).toEqual({ settings: { language: "chinese" } });
+    expect(readBack.json()).toEqual({ settings: { language: "chinese", customModels: null } });
   });
 
   it("PATCH with null clears the override", async () => {
@@ -132,7 +132,7 @@ describe("app-settings HTTP routes", () => {
       payload: { language: null },
     });
     expect(cleared.statusCode).toBe(200);
-    expect(cleared.json()).toEqual({ settings: { language: null } });
+    expect(cleared.json()).toEqual({ settings: { language: null, customModels: null } });
   });
 
   it("PATCH rejects a non-string / non-null language", async () => {
