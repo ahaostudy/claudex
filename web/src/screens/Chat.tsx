@@ -127,21 +127,21 @@ type RenderEntry =
   | { kind: "single"; piece: UIPiece; key: string }
   | { kind: "group"; pieces: ToolUsePiece[]; key: string };
 
-/** True when a tool_use renders as a plain ToolCallBlock — the only kind of
- * tool_use we fold into groups. Diff-producing edits (Edit/Write/MultiEdit),
- * the TodoWrite plan pointer, and the Task/Agent/Explore indigo pointers
- * all have rich inline UIs that would be hidden by a summary pill, so they
- * stay inline and break the surrounding group. */
+/** True when a tool_use should fold into an adjacent group. Only two
+ * kinds of tool_use opt out: pieces owned by a subagent (filtered by
+ * applyViewMode upstream — guard defensively here), and the Task/Agent/
+ * Explore dispatches that render as indigo pointers + have their own
+ * drawer. Everything else groups, including Edit/Write/MultiEdit (diff
+ * cards) and TodoWrite (plan pointer) — when expanded, each child still
+ * renders its existing rich surface inside the group body. */
 function isGroupableToolUse(p: UIPiece): p is ToolUsePiece {
   if (p.kind !== "tool_use") return false;
-  // parentToolUseId-scoped tool uses are already stripped by applyViewMode,
-  // but guard defensively so a regression there can't double-count a
-  // subagent's tools in the main thread.
   if (p.parentToolUseId) return false;
-  if (p.name === "TodoWrite") return false;
+  // Subagent dispatches are semantically "delegate work elsewhere", not a
+  // regular tool call — folding them into a tool summary would hide the
+  // "I spawned a subagent" moment. The /agents drawer is their home.
   if (p.name === "Task" || p.name === "Agent" || p.name === "Explore")
     return false;
-  if (toolCallToDiff(p.name, p.input)) return false;
   return true;
 }
 
@@ -2328,12 +2328,6 @@ function ToolGroup({
     : meta.anyRunning
       ? "klein"
       : "neutral";
-  const gutterClass =
-    tone === "danger"
-      ? "bg-danger"
-      : tone === "klein"
-        ? "bg-klein"
-        : "bg-line-strong";
   const frameClass =
     tone === "danger"
       ? "border-danger/35 bg-danger-wash/10"
@@ -2420,13 +2414,17 @@ function ToolGroup({
       : null;
 
   return (
-    <div className="relative pl-4 my-2">
-      <span
-        className={cn(
-          "absolute left-[3px] top-3 bottom-3 w-px",
-          gutterClass,
-        )}
-      />
+    <div
+      className={cn(
+        "my-2",
+        // Collapsed: shrink to the pill's intrinsic width so the summary
+        // row sits left-aligned under the claude message above without
+        // stretching to full column width. Expanded: grow to fit the
+        // widest child (diffs, long Bash output) but cap at 80ch on
+        // desktop so the frame doesn't edge-to-edge the chat column.
+        open ? "w-full max-w-[min(80ch,100%)]" : "w-fit max-w-full",
+      )}
+    >
       <div
         className={cn(
           "rounded-[10px] overflow-hidden border shadow-card",
