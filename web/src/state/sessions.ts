@@ -1460,29 +1460,41 @@ export const useSessions = create<SessionState>((set, get) => {
     // claude received the message and is thinking. We intentionally do NOT
     // wait for the first WS frame before showing this — the goal is to fill
     // the "what's happening?" gap between send and first assistant chunk.
-    set((s) => ({
-      transcripts: {
-        ...s.transcripts,
-        [sessionId]: [
-          ...(s.transcripts[sessionId] ?? []),
-          {
-            kind: "user",
-            id: `local-${Date.now()}`,
-            text,
-            at: new Date().toISOString(),
-            createdAt: new Date().toISOString(),
-            serverAcked: false,
-            echoId,
-          },
-          {
-            kind: "pending",
-            id: pendingId,
-            startedAt: Date.now(),
-            stalled: false,
-          },
-        ],
-      },
-    }));
+    //
+    // If the tail already carries a pending placeholder (user is queuing a
+    // second message while claude is still thinking on the first), drop it
+    // so we end up with a single trailing pending — otherwise we'd render
+    // two "..." indicators stacked under two user messages. The fresh
+    // pending takes over; armStallTimer below resets the stall clock.
+    set((s) => {
+      const list = s.transcripts[sessionId] ?? [];
+      const tailIsPending =
+        list.length > 0 && list[list.length - 1].kind === "pending";
+      const base = tailIsPending ? list.slice(0, -1) : list;
+      return {
+        transcripts: {
+          ...s.transcripts,
+          [sessionId]: [
+            ...base,
+            {
+              kind: "user",
+              id: `local-${Date.now()}`,
+              text,
+              at: new Date().toISOString(),
+              createdAt: new Date().toISOString(),
+              serverAcked: false,
+              echoId,
+            },
+            {
+              kind: "pending",
+              id: pendingId,
+              startedAt: Date.now(),
+              stalled: false,
+            },
+          ],
+        },
+      };
+    });
     armStallTimer(sessionId, pendingId);
     get().ws?.send({
       type: "user_message",
