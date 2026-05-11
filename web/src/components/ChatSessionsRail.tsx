@@ -203,7 +203,9 @@ export function ChatSessionsRail({ currentId }: { currentId: string }) {
           className="flex items-center gap-2 flex-1 min-w-0 -mx-1 px-1 py-0.5 rounded-[6px] hover:bg-canvas/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-klein/40"
         >
           <Logo className="w-5 h-5 shrink-0" />
-          <span className="mono text-[13px] truncate">Claudex</span>
+          <span className="font-sans font-black text-[15px] tracking-[-0.01em] truncate">
+            Claudex
+          </span>
         </Link>
         <span className="ml-auto text-[11px] mono text-ink-muted">
           {visible.length}
