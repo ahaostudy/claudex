@@ -21,7 +21,6 @@ import {
   Settings2,
   StopCircle,
   Terminal,
-  Wrench,
   X,
 } from "lucide-react";
 import { ChatSessionsRail } from "@/components/ChatSessionsRail";
@@ -690,13 +689,13 @@ export function ChatScreen() {
         )}
         <button
           type="button"
-          onClick={() => setShowTasksDrawer(true)}
+          onClick={() => setShowSettings(true)}
           disabled={!session}
-          aria-label="Open tasks"
-          title="Tasks"
+          aria-label="Session settings"
+          title="Session settings"
           className="h-9 w-9 rounded-[8px] bg-paper border border-line flex items-center justify-center shrink-0 disabled:opacity-40"
         >
-          <Wrench className="w-4 h-4 text-ink-soft" />
+          <Settings2 className="w-4 h-4 text-ink-soft" />
         </button>
         <button
           type="button"
@@ -1017,9 +1016,9 @@ export function ChatScreen() {
             setViewMode(m);
             setShowMore(false);
           }}
-          onOpenSettings={() => {
+          onOpenTasks={() => {
             setShowMore(false);
-            setShowSettings(true);
+            setShowTasksDrawer(true);
           }}
           onOpenSideChat={() => {
             setShowMore(false);
@@ -1387,7 +1386,7 @@ function MenuRow({
 function ChatMoreSheet({
   viewMode,
   onPickViewMode,
-  onOpenSettings,
+  onOpenTasks,
   onOpenSideChat,
   onOpenTerminal,
   onOpenSessionDiff,
@@ -1395,7 +1394,7 @@ function ChatMoreSheet({
 }: {
   viewMode: ViewMode;
   onPickViewMode: (m: ViewMode) => void;
-  onOpenSettings: () => void;
+  onOpenTasks: () => void;
   onOpenSideChat: () => void;
   onOpenTerminal: () => void;
   onOpenSessionDiff: () => void;
@@ -1457,9 +1456,9 @@ function ChatMoreSheet({
             onClick={onOpenSessionDiff}
           />
           <SheetAction
-            icon={<Settings2 className="w-4 h-4 text-ink-soft" />}
-            label="Session settings"
-            onClick={onOpenSettings}
+            icon={<ListChecks className="w-4 h-4 text-ink-soft" />}
+            label="Tasks"
+            onClick={onOpenTasks}
           />
           <SheetAction
             icon={<Terminal className="w-4 h-4 text-ink-soft" />}
