@@ -889,10 +889,28 @@ export const useSessions = create<SessionState>((set, get) => {
         // its key, but the session row's own previous status is what tells
         // us whether this frame represents a real transition.
         const prevSession = get().sessions.find((x) => x.id === sid);
+        // Bump the session's `updatedAt` locally whenever a session_update
+        // lands. The server always bumps its `updated_at` column on any
+        // mutation that emits this frame, so mirroring that client-side is
+        // how ordered lists (Home, ChatSessionsRail) keep "most-recently-
+        // updated first" semantics live — without this, `updatedAt` stays
+        // frozen at the initial `GET /api/sessions` snapshot and the rail
+        // looks randomly ordered once activity starts flowing.
+        // Frame-optional fields (mode, title, lastMessageAt) are applied
+        // when present so a title rename or mode flip on another tab
+        // propagates without a refetch.
+        const nowIso = new Date().toISOString();
         set((s) => ({
-          sessions: s.sessions.map((x) =>
-            x.id === sid ? { ...x, status: frame.status } : x,
-          ),
+          sessions: s.sessions.map((x) => {
+            if (x.id !== sid) return x;
+            const next = { ...x, status: frame.status, updatedAt: nowIso };
+            if (frame.mode !== undefined) next.mode = frame.mode;
+            if (frame.title !== undefined) next.title = frame.title;
+            if (frame.lastMessageAt !== undefined) {
+              next.lastMessageAt = frame.lastMessageAt;
+            }
+            return next;
+          }),
         }));
         // When a session drops back to idle/error without having produced any
         // assistant output (e.g. user interrupted immediately), still clear
@@ -976,6 +994,18 @@ export const useSessions = create<SessionState>((set, get) => {
         const sid = frame.sessionId;
         const ts = Date.parse(frame.createdAt) || Date.now();
         const frameEchoId = frame.echoId;
+        // Bump session-level timestamps so ordered lists re-sort this
+        // session to the top on any client that has the list rendered.
+        // Server writes `last_message_at = created_at` and bumps
+        // `updated_at`, so mirror that exactly (not "now") to stay aligned
+        // with the canonical value.
+        set((s) => ({
+          sessions: s.sessions.map((x) =>
+            x.id === sid
+              ? { ...x, updatedAt: frame.createdAt, lastMessageAt: frame.createdAt }
+              : x,
+          ),
+        }));
         set((s) => {
           const list = s.transcripts[sid] ?? [];
           let matchIdx = -1;

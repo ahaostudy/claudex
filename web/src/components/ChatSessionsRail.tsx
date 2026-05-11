@@ -68,17 +68,75 @@ export function ChatSessionsRail({ currentId }: { currentId: string }) {
     [sessions, currentId],
   );
 
-  // Project-scoped visible list. Memoized on [sessions, currentProjectId]
-  // so clicking between sessions in the same project doesn't reshuffle.
+  // Project-scoped visible list. Sorted pinned-first, then by `updatedAt`
+  // descending so any session that just saw activity (status flip, new
+  // message, rename) floats to the top. Memoized on [sessions,
+  // currentProjectId] so clicking between sessions in the same project
+  // doesn't reshuffle for free but live store updates do.
   const visible = useMemo(() => {
     if (!current) return [] as Session[];
-    return sessions.filter(
+    const filtered = sessions.filter(
       (s) =>
         s.status !== "archived" &&
         s.projectId === current.projectId &&
         !s.parentSessionId,
     );
+    const sortKey = (s: Session) => Date.parse(s.updatedAt) || 0;
+    return filtered.sort((a, b) => {
+      const pa = a.pinned ? 1 : 0;
+      const pb = b.pinned ? 1 : 0;
+      if (pa !== pb) return pb - pa;
+      return sortKey(b) - sortKey(a);
+    });
   }, [sessions, current]);
+
+  // Group the already-sorted list into time buckets so a long rail stays
+  // scannable. Pinned rows always come first (under a "Pinned" header) so
+  // they're visually distinct from "just updated"; everything else falls
+  // into Last hour / Today / This week / This month / Older by how long
+  // ago `updatedAt` was. Empty buckets are dropped entirely — we never
+  // render an empty header.
+  //
+  // A small rolling-minute tick (`nowTick`) re-buckets rows whose
+  // "Last hour" label just expired so the group headers stay correct
+  // without waiting for the next server frame.
+  const [nowTick, setNowTick] = useState(() => Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNowTick(Date.now()), 60_000);
+    return () => clearInterval(t);
+  }, []);
+  const groups = useMemo(() => {
+    const HOUR = 3_600_000;
+    const DAY = 24 * HOUR;
+    const WEEK = 7 * DAY;
+    const MONTH = 30 * DAY;
+    const pinned: Session[] = [];
+    const lastHour: Session[] = [];
+    const today: Session[] = [];
+    const thisWeek: Session[] = [];
+    const thisMonth: Session[] = [];
+    const older: Session[] = [];
+    for (const s of visible) {
+      if (s.pinned) {
+        pinned.push(s);
+        continue;
+      }
+      const delta = nowTick - (Date.parse(s.updatedAt) || 0);
+      if (delta < HOUR) lastHour.push(s);
+      else if (delta < DAY) today.push(s);
+      else if (delta < WEEK) thisWeek.push(s);
+      else if (delta < MONTH) thisMonth.push(s);
+      else older.push(s);
+    }
+    const out: Array<{ key: string; label: string; sessions: Session[] }> = [];
+    if (pinned.length) out.push({ key: "pinned", label: "Pinned", sessions: pinned });
+    if (lastHour.length) out.push({ key: "hour", label: "Last hour", sessions: lastHour });
+    if (today.length) out.push({ key: "today", label: "Today", sessions: today });
+    if (thisWeek.length) out.push({ key: "week", label: "This week", sessions: thisWeek });
+    if (thisMonth.length) out.push({ key: "month", label: "This month", sessions: thisMonth });
+    if (older.length) out.push({ key: "older", label: "Older", sessions: older });
+    return out;
+  }, [visible, nowTick]);
 
   // ---- Drag-to-resize ----------------------------------------------------
   const [width, setWidth] = useState<number>(() => readPersistedWidth());
@@ -193,17 +251,36 @@ export function ChatSessionsRail({ currentId }: { currentId: string }) {
           <div className="px-2.5 py-2 text-[12px] text-ink-muted mono">
             Loading…
           </div>
+        ) : visible.length === 0 ? (
+          <div className="px-2.5 py-2 text-[12px] text-ink-muted">
+            No other sessions in this project.
+          </div>
         ) : (
-          <>
-            {visible.map((s) => (
-              <SessionRow key={s.id} session={s} active={s.id === currentId} />
-            ))}
-            {visible.length === 0 && (
-              <div className="px-2.5 py-2 text-[12px] text-ink-muted">
-                No other sessions in this project.
+          groups.map((g, idx) => (
+            <div key={g.key} className={cn("space-y-1", idx > 0 && "pt-2")}>
+              {/* Bucket header — muted caps label that mirrors the
+                  "Sessions" title styling so the rail feels like one
+                  layered index instead of a flat list. First group's
+                  header is flush against the "+ New session" button;
+                  subsequent groups get a small gap via `pt-2` above. */}
+              <div
+                className={cn(
+                  "px-2.5",
+                  CAPS_CLS,
+                  "text-ink-faint",
+                )}
+              >
+                {g.label}
               </div>
-            )}
-          </>
+              {g.sessions.map((s) => (
+                <SessionRow
+                  key={s.id}
+                  session={s}
+                  active={s.id === currentId}
+                />
+              ))}
+            </div>
+          ))
         )}
       </div>
 
