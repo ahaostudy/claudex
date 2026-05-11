@@ -69,7 +69,26 @@ export async function registerSessionRoutes(
   app.get(
     "/api/projects",
     { preHandler: app.requireAuth as any },
-    async () => ({ projects: projects.list() }),
+    async () => {
+      // Enrich each row with an `isGitRepo` bit so NewSessionSheet can decide
+      // whether to enable the worktree toggle without a second round-trip.
+      // `isGitRepo` is an `fs.lstatSync` — cheap enough to run N times on a
+      // list a user realistically has (dozens at most). Failure is swallowed
+      // per-row so one unreadable path doesn't blank the list.
+      const rows = projects.list();
+      const enriched = await Promise.all(
+        rows.map(async (p) => {
+          let gitBit = false;
+          try {
+            gitBit = await isGitRepo(p.path);
+          } catch {
+            gitBit = false;
+          }
+          return { ...p, isGitRepo: gitBit };
+        }),
+      );
+      return { projects: enriched };
+    },
   );
 
   app.post(

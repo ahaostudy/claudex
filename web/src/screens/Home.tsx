@@ -1497,6 +1497,14 @@ function NewSessionSheet({
   const [effort, setEffort] = useState<EffortLevel>("medium");
   const [projectName, setProjectName] = useState("");
   const [projectPath, setProjectPath] = useState("");
+  // Worktree opt-in for the new session. Defaults derive from the selected
+  // project's git state: git repo → on (the user runs multiple agents in
+  // parallel and wants each session isolated on its own branch), non-git →
+  // off (worktree: true against a non-git repo is a 400). A user toggle
+  // below tracks `userTouchedWorktree` so our default-from-project logic
+  // doesn't trample an explicit choice when the user flips projects.
+  const [worktree, setWorktree] = useState<boolean>(false);
+  const [userTouchedWorktree, setUserTouchedWorktree] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -1542,6 +1550,23 @@ function NewSessionSheet({
     }
   }, [selected]);
 
+  // Derive the git-ness of the currently-selected project. For the
+  // NEW_PROJECT row we can't know yet (the directory isn't added), so we
+  // optimistically assume it might be one — the server will 400 if not and
+  // the error surfaces below.
+  const selectedProject = projects.find((p) => p.id === selected) ?? null;
+  const selectedIsGitRepo =
+    selected === NEW_PROJECT ? true : selectedProject?.isGitRepo ?? false;
+
+  // Auto-pick a sensible worktree default when the project changes, but
+  // never clobber an explicit user choice. Defaulting to ON for git repos
+  // matches how this user runs claudex: multiple agents in parallel need
+  // isolated checkouts, not a shared cwd.
+  useEffect(() => {
+    if (userTouchedWorktree) return;
+    setWorktree(selectedIsGitRepo);
+  }, [selectedIsGitRepo, userTouchedWorktree]);
+
   /**
    * Resolve the project the user wants to spawn under — creating a new row
    * if the NEW_PROJECT radio is selected, or looking up the existing one.
@@ -1579,7 +1604,7 @@ function NewSessionSheet({
       model,
       mode,
       effort,
-      worktree: false,
+      worktree,
     });
     onCreated(res.session.id);
   }
@@ -1829,6 +1854,48 @@ function NewSessionSheet({
                 </button>
               ))}
             </div>
+          </div>
+
+          {/* Worktree — isolate the session on its own branch under
+              <project>/.claude/worktrees/<sessionId>. Defaults to ON for
+              git projects because the user runs many agents in parallel
+              and each one needs its own checkout to avoid stepping on the
+              others; greyed out (and forced off) for non-git projects so
+              the server doesn't 400 `not_a_git_repo`. For a brand-new
+              project (NEW_PROJECT row) we can't probe the filesystem yet,
+              so we leave the toggle enabled with an optimistic default
+              and let the server be the source of truth. */}
+          <div>
+            <label
+              className={`flex items-start gap-3 p-3 border rounded-[8px] ${
+                selectedIsGitRepo
+                  ? "border-line cursor-pointer hover:bg-canvas"
+                  : "border-line bg-paper opacity-60 cursor-not-allowed"
+              }`}
+            >
+              <input
+                type="checkbox"
+                className="mt-0.5"
+                checked={worktree && selectedIsGitRepo}
+                disabled={!selectedIsGitRepo}
+                onChange={(e) => {
+                  setUserTouchedWorktree(true);
+                  setWorktree(e.target.checked);
+                }}
+              />
+              <div className="min-w-0 flex-1">
+                <div className="text-[14px] font-medium">
+                  Use git worktree
+                </div>
+                <div className="text-[11px] text-ink-muted mt-0.5">
+                  {selectedIsGitRepo
+                    ? "Spawn on a new claude/<slug> branch under .claude/worktrees/ so parallel agents stay off each other's toes."
+                    : selected === NEW_PROJECT
+                    ? "Available once the project is added, if it's a git repo."
+                    : "Project isn't a git repo — worktree isolation isn't available."}
+                </div>
+              </div>
+            </label>
           </div>
         </div>
 

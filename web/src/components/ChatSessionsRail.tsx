@@ -343,10 +343,52 @@ export function QuickCreateForm({
   const [mode, setMode] = useState<PermissionMode>(
     current?.mode ?? "default",
   );
+  // Worktree opt-in for the peer session. The user runs multiple agents in
+  // parallel against this project, so defaulting to ON (when the project is
+  // a git repo) gives each session its own checkout instead of racing on
+  // the shared cwd. `projectIsGit` is looked up from /api/projects lazily
+  // on mount; while it's null we optimistically assume git — if the server
+  // rejects with `not_a_git_repo` the toast carries it up.
+  const [projectIsGit, setProjectIsGit] = useState<boolean | null>(null);
+  const [worktree, setWorktree] = useState<boolean>(true);
+  const [userTouchedWorktree, setUserTouchedWorktree] = useState(false);
 
   useEffect(() => {
     textareaRef.current?.focus();
   }, []);
+
+  // Resolve the project's git-ness from the list endpoint. If the current
+  // session already has a worktreePath we know the project is a git repo
+  // and can skip the network hop — worktrees are only created on git repos.
+  useEffect(() => {
+    if (!current) return;
+    if (current.worktreePath) {
+      setProjectIsGit(true);
+      return;
+    }
+    let cancelled = false;
+    api
+      .listProjects()
+      .then((r) => {
+        if (cancelled) return;
+        const proj = r.projects.find((p) => p.id === current.projectId);
+        setProjectIsGit(proj?.isGitRepo ?? false);
+      })
+      .catch(() => {
+        if (!cancelled) setProjectIsGit(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [current]);
+
+  // Apply the git-based default once resolved — but only if the user
+  // hasn't flipped the checkbox themselves.
+  useEffect(() => {
+    if (userTouchedWorktree) return;
+    if (projectIsGit === null) return;
+    setWorktree(projectIsGit);
+  }, [projectIsGit, userTouchedWorktree]);
 
   async function submit() {
     if (!current) return;
@@ -364,10 +406,7 @@ export function QuickCreateForm({
         title: trimmed ? trimmed.slice(0, 60) : "Untitled",
         model: current.model,
         mode,
-        // Match the Home NewSessionSheet default: no worktree unless the
-        // user explicitly asks for one in the full sheet. Quick-create is
-        // for "a quick peer session" — not for branching git state.
-        worktree: false,
+        worktree: worktree && projectIsGit !== false,
         initialPrompt: trimmed || undefined,
       });
       onCreated(res.session.id);
@@ -428,6 +467,37 @@ export function QuickCreateForm({
           </button>
         ))}
       </div>
+      {/* Worktree toggle — compact variant of the Home NewSessionSheet row.
+          Disabled when we know the project isn't a git repo (projectIsGit
+          resolved to false). While still resolving (null), kept enabled so
+          an eager ⌘⏎ doesn't hit a spurious disabled state. */}
+      <label
+        className={cn(
+          "flex items-center gap-2 px-1.5 py-1 rounded-[4px] text-[11px]",
+          projectIsGit === false
+            ? "opacity-50 cursor-not-allowed"
+            : "cursor-pointer hover:bg-paper",
+        )}
+        title={
+          projectIsGit === false
+            ? "Project isn't a git repo — worktree unavailable."
+            : "Spawn on a new claude/<slug> branch so this peer session stays off the main checkout."
+        }
+      >
+        <input
+          type="checkbox"
+          checked={worktree && projectIsGit !== false}
+          disabled={busy || projectIsGit === false}
+          onChange={(e) => {
+            setUserTouchedWorktree(true);
+            setWorktree(e.target.checked);
+          }}
+          className="h-3 w-3"
+        />
+        <span className={projectIsGit === false ? "text-ink-faint" : "text-ink-soft"}>
+          Use git worktree
+        </span>
+      </label>
       {err && (
         <div className="text-[11px] text-danger mono truncate">{err}</div>
       )}

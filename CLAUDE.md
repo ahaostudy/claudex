@@ -193,10 +193,15 @@ rather than direct edits. Pattern:
 
 The user routinely runs **multiple top-level Claude sessions against this
 same checkout in parallel** (different phone tabs, different terminals,
-different agents delegated from each). That means when you `git status`
-you may see unstaged changes, untracked files, or even unmerged index
-entries in files that **you have not touched in this session**. This is
-normal. It is almost always a sibling session mid-work, not corruption.
+different agents delegated from each). The preferred way to keep them
+from stepping on each other is **one git worktree per session**, not a
+shared cwd — see "Worktree-per-session is the default" below.
+
+Even with worktrees in play, you may occasionally see unstaged changes,
+untracked files, or unmerged index entries in the main checkout that
+**you have not touched in this session** (e.g. a pre-worktree session,
+or a session deliberately spawned without one). This is normal. It is
+almost always a sibling session, not corruption.
 
 The rule: **stay in your lane.**
 
@@ -221,6 +226,35 @@ The rule: **stay in your lane.**
 This is also why step 5+6 of the iteration loop ("commit" and "push") are
 non-negotiable: every session that leaves its work uncommitted is leaving
 a landmine for the next session. Close your batches.
+
+### Worktree-per-session is the default
+
+Because the user runs several agents in parallel, **claudex sessions on
+this repo should be spawned with `worktree: true`** unless there's a
+specific reason not to. Each session gets its own checkout under
+`<project>/.claude/worktrees/<sessionId>` on a fresh `claude/<slug>`
+branch, so:
+
+- Agent A's half-finished edits never show up in Agent B's `git status`.
+- Each agent can commit and push independently without "stay in your
+  lane" concerns in its own branch.
+- The main checkout stays clean for the user's own local work.
+
+Both entry points (Home → New session sheet, and the Chat rail's inline
+`+ New session` quick-create) now expose a **Use git worktree** toggle
+that defaults to ON when the target project is a git repo. If you (as
+the top-level Claude) are asked to spawn peer sessions via the API on
+the user's behalf, pass `worktree: true` by default — the server will
+400 `not_a_git_repo` if the project isn't a repo, at which point fall
+back to `worktree: false` only for that specific project.
+
+When merging a worktree session's branch back into main:
+- The branch is `claude/<slug>-<suffix>` — find it with
+  `git branch --list 'claude/*'` in the project root.
+- Archiving a session removes the worktree dir but **leaves the branch**
+  for manual disposition (merge, rebase, delete).
+- Settings → Advanced → Worktrees lists every claudex-managed worktree
+  with linked/orphaned classification and a Prune action for stale ones.
 
 ## MVP scope (done)
 

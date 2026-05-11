@@ -71,6 +71,13 @@ export const Project = z.object({
   path: z.string(), // absolute host path
   trusted: z.boolean(), // user confirmed trust for this folder
   createdAt: z.string(), // ISO 8601
+  // Populated on the GET /api/projects list response so the NewSessionSheet
+  // can pre-gate its worktree toggle without an extra probe round-trip. The
+  // server fs-checks `<path>/.git` lazily at list time (dir or gitfile both
+  // count). Optional because code paths that build a Project from a DB row
+  // (create response, store lookups, backup import) don't do the check and
+  // we don't want to cascade-async every projects.list() call site.
+  isGitRepo: z.boolean().optional(),
 });
 export type Project = z.infer<typeof Project>;
 
