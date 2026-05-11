@@ -19,14 +19,14 @@ import { cn } from "@/lib/cn";
 // server/src/alerts/*).
 //
 // Three filter tabs:
-//   • All    — default landing tab; every deduped alert regardless of
-//              seen/resolved state. Keeps the user from landing on a blank
-//              screen when the badge says there's something to see.
-//   • Unread — seenAt IS NULL (matches the badge count, but no longer
-//              auto-clears on mount — the user has to either click a row
-//              or hit "Mark all seen" to acknowledge).
-//   • Read   — seenAt IS NOT NULL. Archival view of things the user has
-//              already looked at.
+//   • All    — every deduped alert regardless of seen/resolved state.
+//              Archival view + unified feed.
+//   • Unread — seenAt IS NULL. Default tab on mount — matches the badge
+//              count one-to-one. No longer auto-cleared: the user has to
+//              either click a row (markSeen on navigate) or hit "Mark all
+//              seen" to acknowledge.
+//   • Read   — seenAt IS NOT NULL. Archival view of things already looked
+//              at.
 //
 // Per-session dedup: the list groups by sessionId and keeps only the
 // latest alert per session (see dedupBySession in state/alerts). This
@@ -71,7 +71,11 @@ export function AlertsScreen() {
   const dismiss = useAlerts((s) => s.dismiss);
 
   const [projects, setProjects] = useState<Project[]>([]);
-  const [mode, setMode] = useState<FilterMode>("all");
+  // Default tab: Unread. With auto-mark-all-seen removed, the badge
+  // persists until the user acts, so opening the screen lands on the
+  // exact set that the badge was counting — "what's new for me". The
+  // user can flip to All / Read as needed.
+  const [mode, setMode] = useState<FilterMode>("unread");
 
   useEffect(() => {
     // First paint: make sure we have the latest list. The AppShell
