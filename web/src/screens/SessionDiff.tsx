@@ -1,11 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import {
-  ChevronDown,
-  ChevronLeft,
-  ChevronRight,
-  FileText,
-} from "lucide-react";
+import { ChevronLeft, FileText } from "lucide-react";
 import type {
   Session,
   SessionDiffApproval,
@@ -14,6 +9,7 @@ import type {
   SessionDiffTimelineEntry,
 } from "@claudex/shared";
 import { api } from "@/api/client";
+import { Logo } from "@/components/Logo";
 import { useSessions } from "@/state/sessions";
 import { DiffView } from "@/components/DiffView";
 import type { FileDiff } from "@/lib/diff";
@@ -25,9 +21,11 @@ import { timeAgoShort } from "@/lib/format";
 //
 // A PR-shaped aggregation of every file change in the session. Entered
 // from the Chat header's "Session diff" icon. Desktop layout: 3-col
-// `[260px | 1fr | 280px]` — file list | stitched diffs | timeline +
-// review card. Mobile: stacked — summary card, file rows with expand-to-
-// diff, inline timeline.
+// `[260px | 1fr | 280px]` — file list | single-file diff | timeline +
+// review card. Clicking a file in the left rail focuses it in the
+// center pane (one file at a time, GitHub-style); the first file is
+// selected by default. Mobile: stacked — summary card, file rows with
+// expand-to-diff, inline timeline.
 //
 // Non-goals for this cut:
 //   - Inline comments on diff lines (would need a whole new persistence
@@ -92,7 +90,12 @@ export function SessionDiffScreen() {
   const [sessionBase, setSessionBase] = useState<Session | null>(null);
   const [diff, setDiff] = useState<SessionDiffResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  // Desktop: which file's diff to show in the center pane. Defaults to
+  // the first file once the diff loads; if the selected path disappears
+  // from a refresh (rare — the session is still open and a file rolls
+  // back), fall back to the first file so we never render an empty
+  // center pane while the sidebar still has rows.
+  const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const [expandedMobile, setExpandedMobile] = useState<string | null>(null);
   // Mobile view switcher: "files" shows the per-file rows with expand-to-
   // diff, "timeline" shows the chronological entries list. Desktop keeps
@@ -129,6 +132,20 @@ export function SessionDiffScreen() {
       ? { ...sessionBase, status: liveStatus }
       : sessionBase;
   }, [sessionBase, liveStatus]);
+
+  // Keep `selectedFile` in sync with the file list. Default to the first
+  // file once the diff loads; if the current selection isn't in the new
+  // file list (e.g. tool-use rollback), fall back to the first file.
+  useEffect(() => {
+    if (!diff) return;
+    if (diff.files.length === 0) {
+      if (selectedFile !== null) setSelectedFile(null);
+      return;
+    }
+    if (!selectedFile || !diff.files.some((f) => f.path === selectedFile)) {
+      setSelectedFile(diff.files[0].path);
+    }
+  }, [diff, selectedFile]);
 
   if (!id) return null;
 
@@ -190,44 +207,47 @@ export function SessionDiffScreen() {
                 No file changes in this session.
               </div>
             )}
-            {diff?.files.map((f) => (
-              <button
-                key={f.path}
-                type="button"
-                onClick={() =>
-                  setCollapsed((prev) => {
-                    const next = new Set(prev);
-                    next.delete(f.path); // ensure it's expanded
-                    return next;
-                  })
-                }
-                className="w-full flex items-center gap-2 px-4 py-1.5 border-l-2 border-l-transparent hover:bg-canvas/60 text-left"
-                title="Scroll to file"
-              >
-                <FileText className="w-3.5 h-3.5 text-ink-faint shrink-0" />
-                <span className="mono text-[12.5px] flex-1 truncate">
-                  {f.path}
-                </span>
-                <span
+            {diff?.files.map((f) => {
+              const isSelected = selectedFile === f.path;
+              return (
+                <button
+                  key={f.path}
+                  type="button"
+                  onClick={() => setSelectedFile(f.path)}
+                  aria-current={isSelected ? "true" : undefined}
                   className={cn(
-                    "inline-flex items-center px-1 rounded-[3px] text-[9px] font-medium uppercase tracking-[0.1em] shrink-0",
-                    STATUS_BADGE[f.status],
+                    "w-full flex items-center gap-2 px-4 py-1.5 border-l-2 text-left transition-colors",
+                    isSelected
+                      ? "border-l-klein bg-canvas/80 text-ink"
+                      : "border-l-transparent hover:bg-canvas/60",
                   )}
+                  title={f.path}
                 >
-                  {f.status}
-                </span>
-                {f.addCount > 0 && (
-                  <span className="mono text-[10px] text-success shrink-0">
-                    +{f.addCount}
+                  <FileText className="w-3.5 h-3.5 text-ink-faint shrink-0" />
+                  <span className="mono text-[12.5px] flex-1 truncate">
+                    {f.path}
                   </span>
-                )}
-                {f.delCount > 0 && (
-                  <span className="mono text-[10px] text-danger shrink-0">
-                    −{f.delCount}
+                  <span
+                    className={cn(
+                      "inline-flex items-center px-1 rounded-[3px] text-[9px] font-medium uppercase tracking-[0.1em] shrink-0",
+                      STATUS_BADGE[f.status],
+                    )}
+                  >
+                    {f.status}
                   </span>
-                )}
-              </button>
-            ))}
+                  {f.addCount > 0 && (
+                    <span className="mono text-[10px] text-success shrink-0">
+                      +{f.addCount}
+                    </span>
+                  )}
+                  {f.delCount > 0 && (
+                    <span className="mono text-[10px] text-danger shrink-0">
+                      −{f.delCount}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
           </div>
         </aside>
 
@@ -374,7 +394,10 @@ export function SessionDiffScreen() {
               </div>
             )}
 
-            {/* Desktop: stitched diff blocks */}
+            {/* Desktop: single selected file's diff. Clicking a file in
+                the left rail swaps which one is shown here. No per-file
+                collapse — there's only one file on-screen at a time, so
+                collapse is redundant with the sidebar selection. */}
             {diff && (
               <div className="hidden md:block">
                 {diff.files.length === 0 && (
@@ -382,10 +405,10 @@ export function SessionDiffScreen() {
                     No file changes in this session yet.
                   </div>
                 )}
-                {diff.files.map((f) => {
-                  const isCollapsed = collapsed.has(f.path);
-                  return (
-                    <div key={f.path} className="border-b border-line">
+                {diff.files
+                  .filter((f) => f.path === selectedFile)
+                  .map((f) => (
+                    <div key={f.path}>
                       <div className="sticky top-0 z-10 bg-paper/90 backdrop-blur flex items-center gap-3 px-5 py-2 border-b border-line">
                         <FileText className="w-3.5 h-3.5 text-ink-faint shrink-0" />
                         <span className="mono text-[12.5px] flex-1 truncate">
@@ -406,32 +429,20 @@ export function SessionDiffScreen() {
                         >
                           {approvalLabel(f.approval)}
                         </span>
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setCollapsed((prev) => {
-                              const next = new Set(prev);
-                              if (next.has(f.path)) next.delete(f.path);
-                              else next.add(f.path);
-                              return next;
-                            })
-                          }
-                          className="h-6 w-6 rounded-[6px] border border-line bg-canvas flex items-center justify-center shrink-0"
-                          aria-label={isCollapsed ? "Expand" : "Collapse"}
-                        >
-                          {isCollapsed ? (
-                            <ChevronRight className="w-3 h-3" />
-                          ) : (
-                            <ChevronDown className="w-3 h-3" />
-                          )}
-                        </button>
                       </div>
-                      {!isCollapsed && f.hunks.length > 0 && (
-                        <DiffView diff={toFileDiff(f)} defaultOpen headerless />
+                      {f.hunks.length > 0 ? (
+                        <DiffView
+                          diff={toFileDiff(f)}
+                          defaultOpen
+                          headerless
+                        />
+                      ) : (
+                        <div className="px-6 py-8 text-center text-[13px] text-ink-muted">
+                          No textual diff for this file.
+                        </div>
                       )}
                     </div>
-                  );
-                })}
+                  ))}
               </div>
             )}
           </div>
@@ -455,10 +466,7 @@ export function SessionDiffScreen() {
           <div className="p-3 border-t border-line shrink-0">
             <div className="p-3 rounded-[10px] border border-line bg-canvas text-[12.5px] leading-[1.5] text-ink-muted">
               <div className="flex items-center gap-2 mb-1.5">
-                <svg viewBox="0 0 32 32" className="w-4 h-4" aria-hidden>
-                  <path d="M9 22 L16 8 L23 22 Z" fill="#cc785c" />
-                  <circle cx="16" cy="18" r="2.2" fill="#faf9f5" />
-                </svg>
+                <Logo className="w-4 h-4" />
                 <span className="caps text-ink-muted">claude review</span>
               </div>
               AI review isn't wired yet. This card will summarize the whole
