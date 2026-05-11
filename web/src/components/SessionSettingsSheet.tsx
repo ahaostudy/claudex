@@ -14,6 +14,7 @@ import type {
   Session,
   ToolGrant,
 } from "@claudex/shared";
+import { effortSupportedOnModel } from "@claudex/shared";
 import { useFocusReturn } from "@/hooks/useFocusReturn";
 
 /**
@@ -92,10 +93,11 @@ export function SessionSettingsSheet({
   useEffect(() => {
     setModel(session.model);
     setMode(session.mode);
+    setEffort(session.effort);
     setTags(session.tags ?? []);
     setTagDraft("");
     setTagErr(null);
-  }, [session.id, session.model, session.mode, session.tags]);
+  }, [session.id, session.model, session.mode, session.effort, session.tags]);
 
   // Escape closes the sheet — but only when it's an overlay. In rail
   // mode it's a permanent sibling of the chat column; Esc would yank it
@@ -618,10 +620,16 @@ export function SessionSettingsSheet({
             <div className="md:hidden rounded-[8px] border border-line bg-canvas overflow-hidden divide-y divide-line">
               {EFFORTS.map(([id, label]) => {
                 const active = effort === id;
+                const supported = effortSupportedOnModel(model, id);
                 return (
                   <button
                     key={id}
-                    disabled={archived || saving}
+                    disabled={archived || saving || !supported}
+                    title={
+                      supported
+                        ? undefined
+                        : "X-High is only available on Opus 4.7."
+                    }
                     onClick={() => {
                       setEffort(id);
                       if (id !== session.effort) patch({ effort: id });
@@ -655,15 +663,21 @@ export function SessionSettingsSheet({
             <div className="hidden md:grid grid-cols-5 gap-1.5 p-1 bg-paper border border-line rounded-[8px]">
               {EFFORTS.map(([id, label]) => {
                 const active = effort === id;
+                const supported = effortSupportedOnModel(model, id);
                 return (
                   <button
                     key={id}
-                    disabled={archived || saving}
+                    disabled={archived || saving || !supported}
+                    title={
+                      supported
+                        ? undefined
+                        : "X-High is only available on Opus 4.7."
+                    }
                     onClick={() => {
                       setEffort(id);
                       if (id !== session.effort) patch({ effort: id });
                     }}
-                    className={`h-9 rounded-[6px] text-[12px] font-medium ${
+                    className={`h-9 rounded-[6px] text-[12px] font-medium disabled:cursor-not-allowed ${
                       active
                         ? "bg-canvas shadow-card border border-line text-ink"
                         : "text-ink-muted"

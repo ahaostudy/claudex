@@ -5,6 +5,7 @@ import { useAuth } from "@/state/auth";
 import { useSessions } from "@/state/sessions";
 import { api, ApiError } from "@/api/client";
 import type { Project, Session, EffortLevel, ModelId, PermissionMode } from "@claudex/shared";
+import { clampEffortForModel, defaultEffortForModel, effortSupportedOnModel } from "@claudex/shared";
 import { FolderPicker } from "@/components/FolderPicker";
 import { AppShell } from "@/components/AppShell";
 import { ImportSessionsSheet } from "@/components/ImportSessionsSheet";
@@ -1494,7 +1495,10 @@ function NewSessionSheet({
   const [title, setTitle] = useState("");
   const [model, setModel] = useState<ModelId>("claude-opus-4-7");
   const [mode, setMode] = useState<PermissionMode>("default");
-  const [effort, setEffort] = useState<EffortLevel>("medium");
+  const [effort, setEffort] = useState<EffortLevel>(() =>
+    defaultEffortForModel("claude-opus-4-7"),
+  );
+  const [userTouchedEffort, setUserTouchedEffort] = useState(false);
   const [projectName, setProjectName] = useState("");
   const [projectPath, setProjectPath] = useState("");
   // Worktree opt-in for the new session. Defaults derive from the selected
@@ -1566,6 +1570,16 @@ function NewSessionSheet({
     if (userTouchedWorktree) return;
     setWorktree(selectedIsGitRepo);
   }, [selectedIsGitRepo, userTouchedWorktree]);
+
+  // Keep effort in sync with the chosen model. If the user hasn't picked a
+  // custom level, we mirror the per-model default (opus-4-7 → xhigh, others
+  // → high). If they have picked one, only clamp it when switching to a
+  // model that doesn't support it (today: xhigh outside Opus 4.7 → high).
+  useEffect(() => {
+    setEffort((prev) =>
+      userTouchedEffort ? clampEffortForModel(model, prev) : defaultEffortForModel(model),
+    );
+  }, [model, userTouchedEffort]);
 
   /**
    * Resolve the project the user wants to spawn under — creating a new row
@@ -1840,19 +1854,31 @@ function NewSessionSheet({
                   ["xhigh", "X-High"],
                   ["max", "Max"],
                 ] as Array<[EffortLevel, string]>
-              ).map(([id, label]) => (
-                <button
-                  key={id}
-                  onClick={() => setEffort(id)}
-                  className={`h-9 rounded-[6px] text-[12px] font-medium ${
-                    effort === id
-                      ? "bg-canvas shadow-card border border-line text-ink"
-                      : "text-ink-muted"
-                  }`}
-                >
-                  {label}
-                </button>
-              ))}
+              ).map(([id, label]) => {
+                const supported = effortSupportedOnModel(model, id);
+                return (
+                  <button
+                    key={id}
+                    disabled={!supported}
+                    title={
+                      supported
+                        ? undefined
+                        : "X-High is only available on Opus 4.7."
+                    }
+                    onClick={() => {
+                      setUserTouchedEffort(true);
+                      setEffort(id);
+                    }}
+                    className={`h-9 rounded-[6px] text-[12px] font-medium disabled:opacity-40 disabled:cursor-not-allowed ${
+                      effort === id
+                        ? "bg-canvas shadow-card border border-line text-ink"
+                        : "text-ink-muted"
+                    }`}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
             </div>
           </div>
 

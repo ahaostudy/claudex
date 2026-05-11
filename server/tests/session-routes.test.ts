@@ -1303,6 +1303,14 @@ describe("session HTTP routes", () => {
       const ctx = await bootstrap();
       disposers.push(ctx.cleanup);
       const { s } = await seedSession(ctx);
+      // Normalise effort to `high` up-front. The seed creates an opus-4-7
+      // session which now defaults to `xhigh`; switching to haiku-4-5
+      // below would clamp that → high and emit a second warning we don't
+      // want in this test's assertion. Doing the normalisation on the
+      // still-idle session keeps warnings empty here.
+      ctx.dbh.db
+        .prepare("UPDATE sessions SET effort = 'high' WHERE id = ?")
+        .run(s.id);
       // Flip status to running via a direct DB write — matches what
       // SessionManager does on the first status:running event.
       ctx.dbh.db
@@ -1318,6 +1326,50 @@ describe("session HTTP routes", () => {
       const body = res.json();
       expect(body.session.model).toBe("claude-haiku-4-5");
       expect(body.warnings).toEqual(["model_change_applies_to_next_turn"]);
+    });
+
+    it("clamps xhigh → high when the model is switched away from Opus 4.7", async () => {
+      const ctx = await bootstrap();
+      disposers.push(ctx.cleanup);
+      const { s } = await seedSession(ctx);
+      // Seed defaults to xhigh because we created it with opus-4-7 and no
+      // explicit effort. Sanity-check that the rule holds from creation.
+      expect(s.effort).toBe("xhigh");
+      const res = await ctx.app.inject({
+        method: "PATCH",
+        url: `/api/sessions/${s.id}`,
+        headers: { cookie: ctx.cookie },
+        payload: { model: "claude-sonnet-4-6" },
+      });
+      expect(res.statusCode).toBe(200);
+      const body = res.json();
+      expect(body.session.model).toBe("claude-sonnet-4-6");
+      // Server must downgrade the now-unsupported xhigh to high — not leave
+      // the row in an invalid state for the next SDK turn.
+      expect(body.session.effort).toBe("high");
+    });
+
+    it("rejects xhigh when PATCHed onto a non-Opus-4.7 session by clamping to high", async () => {
+      const ctx = await bootstrap();
+      disposers.push(ctx.cleanup);
+      const { s } = await seedSession(ctx);
+      // First move to sonnet so the model lane is non-opus, then try to
+      // push xhigh directly.
+      await ctx.app.inject({
+        method: "PATCH",
+        url: `/api/sessions/${s.id}`,
+        headers: { cookie: ctx.cookie },
+        payload: { model: "claude-sonnet-4-6" },
+      });
+      const res = await ctx.app.inject({
+        method: "PATCH",
+        url: `/api/sessions/${s.id}`,
+        headers: { cookie: ctx.cookie },
+        payload: { effort: "xhigh" },
+      });
+      expect(res.statusCode).toBe(200);
+      const body = res.json();
+      expect(body.session.effort).toBe("high");
     });
 
     it("refuses to patch an archived session (409)", async () => {

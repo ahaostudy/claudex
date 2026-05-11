@@ -46,6 +46,7 @@ import type {
   Session,
   SlashClaudexAction,
 } from "@claudex/shared";
+import { effortSupportedOnModel } from "@claudex/shared";
 import { cn } from "@/lib/cn";
 import { timeAgoShort } from "@/lib/format";
 import { DiffView, toolCallToDiff } from "@/components/DiffView";
@@ -981,11 +982,18 @@ export function ChatScreen() {
           <PillPicker
             label={session ? EFFORT_LABEL[session.effort] ?? session.effort : "—"}
             disabled={!session}
-            items={EFFORT_IDS.map((e) => ({
-              id: e,
-              label: EFFORT_LABEL[e],
-              active: session?.effort === e,
-            }))}
+            items={EFFORT_IDS
+              .filter((e) =>
+                // Hide levels the current model can't use — today that's
+                // `xhigh` outside Opus 4.7. The server also clamps on PATCH
+                // so a stale selection still converts cleanly.
+                session ? effortSupportedOnModel(session.model, e) : true,
+              )
+              .map((e) => ({
+                id: e,
+                label: EFFORT_LABEL[e],
+                active: session?.effort === e,
+              }))}
             onPick={(e) => patchSession({ effort: e as EffortLevel })}
           />
           <ContextRingButton
