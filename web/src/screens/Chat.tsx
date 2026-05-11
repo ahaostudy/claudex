@@ -22,7 +22,7 @@ import {
   Settings2,
   StopCircle,
   Terminal,
-  Users,
+  Wrench,
   X,
 } from "lucide-react";
 import { ChatSessionsRail } from "@/components/ChatSessionsRail";
@@ -141,7 +141,7 @@ export function ChatScreen() {
   const [showPlanSheet, setShowPlanSheet] = useState(false);
   // Subagents drawer (mockup s-18) — twin of PlanSheet. Opens from the
   // SubagentsStrip, the indigo "Agent started" pointer inside the
-  // thread, and the Users icon in the chat header.
+  // thread, and the Bot icon in the chat header.
   const [showSubagentsSheet, setShowSubagentsSheet] = useState(false);
   // Click-to-expand image overlay. Populated by the thumbnail click handlers
   // in Piece below — we hold the state here so the lightbox renders at the
@@ -658,7 +658,7 @@ export function ChatScreen() {
                 : "bg-paper border-line text-ink-soft hover:bg-paper",
             )}
           >
-            <Users className="w-4 h-4" />
+            <Bot className="w-4 h-4" />
             {subagentRuns.some((r) => r.status === "running") && (
               <span
                 className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-indigo animate-pulse border border-canvas"
@@ -675,7 +675,7 @@ export function ChatScreen() {
           title="Tasks"
           className="h-9 w-9 rounded-[8px] bg-paper border border-line flex items-center justify-center shrink-0 disabled:opacity-40"
         >
-          <Bot className="w-4 h-4 text-ink-soft" />
+          <Wrench className="w-4 h-4 text-ink-soft" />
         </button>
         <button
           type="button"
@@ -785,7 +785,7 @@ export function ChatScreen() {
                   : "border-line bg-canvas text-ink-soft",
               )}
             >
-              <Users className="w-4 h-4" />
+              <Bot className="w-4 h-4" />
               {subagentRuns.some((r) => r.status === "running") && (
                 <span
                   className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-indigo animate-pulse border border-canvas"
@@ -1089,6 +1089,7 @@ export function ChatScreen() {
       {showSubagentsSheet && (
         <SubagentsSheet
           runs={subagentRuns}
+          sessionId={id ?? ""}
           onRevealToolUse={(toolUseId) => {
             const el = scroller.current?.querySelector(
               `[data-tool-use-id="${CSS.escape(toolUseId)}"]`,

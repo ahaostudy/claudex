@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { ChevronRight, Loader2, Square } from "lucide-react";
+import { Link } from "react-router-dom";
+import { ChevronRight, ExternalLink, Loader2, Square } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { timeAgoShort } from "@/lib/format";
 import { summarizeToolCall, toolIcon } from "@/lib/tool-summary";
@@ -24,14 +25,25 @@ import type { SubagentRun, SubagentStreamEvent, UIPiece } from "@/state/sessions
  */
 export function SubagentsPanel({
   runs,
+  sessionId,
   onRevealToolUse,
+  onNavigate,
   variant = "inline",
 }: {
   runs: SubagentRun[];
+  /** Parent session id — required when we want the RunCards to render a
+   *  deep-link to the full-page `/session/:id/subagent/:taskId` view.
+   *  Omit to suppress the Open link (e.g. in a preview surface where we
+   *  don't have a session context). */
+  sessionId?: string;
   /** Jump the main transcript to a tool_use source piece. Used by the
    * nested tool chips so a user can "show me the full result" the same
    * way the main TasksList row-click does. */
   onRevealToolUse?: (toolUseId: string) => void;
+  /** Invoked when a user clicks the "Open" link to navigate to the full
+   *  subagent page. The sheet uses this to close itself so the back
+   *  button returns to the session cleanly. */
+  onNavigate?: () => void;
   /** "inline" (default) renders the panel's own "Agents" chip header,
    * used when the panel is embedded above TasksList. "embedded" is used
    * by SubagentsSheet, which supplies its own header chip/count — so we
@@ -101,8 +113,10 @@ export function SubagentsPanel({
           <RunCard
             key={run.taskId}
             run={run}
+            sessionId={sessionId}
             defaultExpanded={run.status === "running"}
             onRevealToolUse={onRevealToolUse}
+            onNavigate={onNavigate}
           />
         ))}
       </div>
@@ -112,15 +126,26 @@ export function SubagentsPanel({
 
 function RunCard({
   run,
+  sessionId,
   defaultExpanded = false,
   onRevealToolUse,
+  onNavigate,
 }: {
   run: SubagentRun;
+  sessionId?: string;
   defaultExpanded?: boolean;
   onRevealToolUse?: (toolUseId: string) => void;
+  onNavigate?: () => void;
 }) {
   const [expanded, setExpanded] = useState(defaultExpanded);
   const tint = tintFor(run.status);
+  // Only render the Open deep-link for runs that carry a real taskId.
+  // Legacy-synthesized runs use a `legacy-<toolUseId>` key — skip those
+  // because the standalone page keys on taskId and wouldn't find them.
+  const fullPageHref =
+    sessionId && run.taskId && !run.taskId.startsWith("legacy-")
+      ? `/session/${sessionId}/subagent/${encodeURIComponent(run.taskId)}`
+      : null;
   return (
     <div
       className={cn(
@@ -133,10 +158,7 @@ function RunCard({
         aria-hidden
         className={cn("absolute left-0 top-0 bottom-0 w-[3px]", tint.strip)}
       />
-      <button
-        type="button"
-        onClick={() => setExpanded((x) => !x)}
-        aria-expanded={expanded}
+      <div
         className={cn(
           "w-full pl-3 pr-2 py-2 flex items-center gap-2 text-left",
           expanded && "border-b",
@@ -144,48 +166,67 @@ function RunCard({
           "hover:bg-paper/40",
         )}
       >
-        <span
-          className={cn(
-            "inline-flex items-center gap-1 px-1.5 h-5 rounded-[4px] border mono text-[10px] shrink-0",
-            tint.chip,
-          )}
+        <button
+          type="button"
+          onClick={() => setExpanded((x) => !x)}
+          aria-expanded={expanded}
+          aria-label={expanded ? "Collapse subagent run" : "Expand subagent run"}
+          className="flex items-center gap-2 text-left flex-1 min-w-0"
         >
-          Agent
-        </span>
-        {run.agentType && (
-          <span className="mono text-[10.5px] text-ink-soft shrink-0 max-w-[14ch] truncate">
-            {run.agentType}
-          </span>
-        )}
-        <StatusDot run={run} />
-        <span className="text-[12px] text-ink truncate flex-1 font-medium">
-          {run.description || "(no description)"}
-        </span>
-        {run.isBackgrounded && (
           <span
-            className="inline-flex items-center px-1 h-4 rounded-[3px] border border-indigo/30 bg-indigo-wash/60 text-indigo mono text-[9px] uppercase tracking-[0.12em] shrink-0"
-            title="Backgrounded"
+            className={cn(
+              "inline-flex items-center gap-1 px-1.5 h-5 rounded-[4px] border mono text-[10px] shrink-0",
+              tint.chip,
+            )}
           >
-            bg
+            Agent
           </span>
+          {run.agentType && (
+            <span className="mono text-[10.5px] text-ink-soft shrink-0 max-w-[14ch] truncate">
+              {run.agentType}
+            </span>
+          )}
+          <StatusDot run={run} />
+          <span className="text-[12px] text-ink truncate flex-1 font-medium">
+            {run.description || "(no description)"}
+          </span>
+          {run.isBackgrounded && (
+            <span
+              className="inline-flex items-center px-1 h-4 rounded-[3px] border border-indigo/30 bg-indigo-wash/60 text-indigo mono text-[9px] uppercase tracking-[0.12em] shrink-0"
+              title="Backgrounded"
+            >
+              bg
+            </span>
+          )}
+          <span
+            className={cn(
+              "mono text-[10px] shrink-0 tabular-nums",
+              run.status === "failed" ? "text-danger" : "text-ink-muted",
+            )}
+            title={run.startedAt ? new Date(run.startedAt).toLocaleString() : undefined}
+          >
+            {renderRightLabel(run)}
+          </span>
+          <ChevronRight
+            className={cn(
+              "w-3 h-3 text-ink-muted shrink-0 transition-transform",
+              expanded && "rotate-90",
+            )}
+            aria-hidden
+          />
+        </button>
+        {fullPageHref && (
+          <Link
+            to={fullPageHref}
+            onClick={() => onNavigate?.()}
+            className="h-6 w-6 rounded-[6px] border border-line bg-canvas/60 flex items-center justify-center text-ink-muted hover:text-indigo hover:border-indigo/40 shrink-0"
+            aria-label="Open full-page view"
+            title="Open full view"
+          >
+            <ExternalLink className="w-3 h-3" aria-hidden />
+          </Link>
         )}
-        <span
-          className={cn(
-            "mono text-[10px] shrink-0 tabular-nums",
-            run.status === "failed" ? "text-danger" : "text-ink-muted",
-          )}
-          title={run.startedAt ? new Date(run.startedAt).toLocaleString() : undefined}
-        >
-          {renderRightLabel(run)}
-        </span>
-        <ChevronRight
-          className={cn(
-            "w-3 h-3 text-ink-muted shrink-0 transition-transform",
-            expanded && "rotate-90",
-          )}
-          aria-hidden
-        />
-      </button>
+      </div>
       {expanded && <RunBody run={run} onRevealToolUse={onRevealToolUse} />}
     </div>
   );

@@ -65,6 +65,10 @@ export function selectLatestTodos(pieces: UIPiece[]): PlanSnapshot {
     const p = pieces[i];
     if (p.kind !== "tool_use") continue;
     if (p.name !== "TodoWrite") continue;
+    // Skip subagent-owned TodoWrite calls — a subagent has its own plan
+    // that must not override the main agent's plan surface. Each
+    // subagent's plan lives inside its own run panel/page.
+    if (p.parentToolUseId) continue;
     const todos = (p.input as Record<string, unknown>).todos;
     if (!Array.isArray(todos)) continue;
     const items = todos
@@ -95,7 +99,9 @@ export function selectLatestTodos(pieces: UIPiece[]): PlanSnapshot {
 export function countTodoWriteRevisions(pieces: UIPiece[]): number {
   let n = 0;
   for (const p of pieces) {
-    if (p.kind === "tool_use" && p.name === "TodoWrite") n += 1;
+    if (p.kind === "tool_use" && p.name === "TodoWrite" && !p.parentToolUseId) {
+      n += 1;
+    }
   }
   return n;
 }
@@ -115,10 +121,15 @@ export function todoRevisionAt(
   if (!target || target.kind !== "tool_use" || target.name !== "TodoWrite") {
     return null;
   }
+  // Subagent-owned TodoWrite tool_uses aren't counted in the main plan
+  // revision history — they belong to the subagent's own plan.
+  if (target.parentToolUseId) return null;
   let n = 0;
   for (let i = 0; i <= targetIndex; i += 1) {
     const p = pieces[i];
-    if (p.kind === "tool_use" && p.name === "TodoWrite") n += 1;
+    if (p.kind === "tool_use" && p.name === "TodoWrite" && !p.parentToolUseId) {
+      n += 1;
+    }
   }
   return n;
 }

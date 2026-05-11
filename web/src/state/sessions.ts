@@ -349,6 +349,20 @@ interface SessionState {
 
 function eventToPiece(ev: SessionEvent): UIPiece | null {
   const p = ev.payload as Record<string, any>;
+  // Pick a valid ISO timestamp for subagent lifecycle pieces: some older
+  // rows may have persisted an `at` field that isn't a parseable ISO
+  // string (e.g. a numeric unix-seconds value stringified, which would
+  // render as 1970-01-XX via `timeAgoShort`'s date fallback). When `at`
+  // doesn't parse, fall back to the event's own `createdAt` (always a
+  // proper ISO set by the DB insert path).
+  const subagentAt = (): string => {
+    const candidate = typeof p.at === "string" ? p.at : null;
+    if (candidate) {
+      const ts = Date.parse(candidate);
+      if (Number.isFinite(ts) && ts > 0) return candidate;
+    }
+    return ev.createdAt;
+  };
   switch (ev.kind) {
     case "user_message":
       return {
@@ -476,7 +490,7 @@ function eventToPiece(ev: SessionEvent): UIPiece | null {
         ...(typeof p.isBackgrounded === "boolean"
           ? { isBackgrounded: p.isBackgrounded }
           : {}),
-        at: String(p.at ?? ev.createdAt),
+        at: subagentAt(),
       };
     }
     case "subagent_progress":
@@ -491,7 +505,7 @@ function eventToPiece(ev: SessionEvent): UIPiece | null {
           : {}),
         ...(typeof p.summary === "string" ? { summary: p.summary } : {}),
         usage: (p.usage as SubagentUsage | undefined) ?? {},
-        at: String(p.at ?? ev.createdAt),
+        at: subagentAt(),
       };
     case "subagent_update":
       return {
@@ -500,7 +514,7 @@ function eventToPiece(ev: SessionEvent): UIPiece | null {
         createdAt: ev.createdAt,
         taskId: String(p.taskId ?? ""),
         patch: (p.patch as Record<string, unknown> | undefined) ?? {},
-        at: String(p.at ?? ev.createdAt),
+        at: subagentAt(),
       } as UIPiece;
     case "subagent_end": {
       const status = isLifecycleStatus(p.status)
@@ -518,7 +532,7 @@ function eventToPiece(ev: SessionEvent): UIPiece | null {
           : {}),
         ...(typeof p.toolUseId === "string" ? { toolUseId: p.toolUseId } : {}),
         ...(p.usage ? { usage: p.usage as SubagentUsage } : {}),
-        at: String(p.at ?? ev.createdAt),
+        at: subagentAt(),
       };
     }
     case "subagent_tool_progress":
@@ -535,7 +549,7 @@ function eventToPiece(ev: SessionEvent): UIPiece | null {
           typeof p.parentToolUseId === "string" ? p.parentToolUseId : null,
         elapsedSeconds: Number(p.elapsedSeconds ?? 0),
         ...(typeof p.taskId === "string" ? { taskId: p.taskId } : {}),
-        at: String(p.at ?? ev.createdAt),
+        at: subagentAt(),
       };
     default:
       return null;
@@ -1775,7 +1789,14 @@ export function computeSubagentRuns(pieces: UIPiece[]): SubagentRun[] {
       workflowName: null,
       prompt: pickInputString(input, "prompt") ?? null,
       isBackgrounded: false,
-      startedAt: p.createdAt ?? new Date(0).toISOString(),
+      // Prefer the tool_use's own createdAt; otherwise fall through to
+      // the tool_result's createdAt (so a legacy run from a live session
+      // doesn't render with a bogus 1970-epoch stamp just because the
+      // live `tool_use` frame didn't carry a createdAt before server
+      // ack). Only fall through to `new Date()` when neither is set —
+      // that's the "we really don't know" branch, and using "now" means
+      // timeAgoShort renders "now" instead of the confusing epoch date.
+      startedAt: p.createdAt ?? endedAt ?? new Date().toISOString(),
       endedAt,
       lastToolName: null,
       usage: {},
@@ -1783,7 +1804,8 @@ export function computeSubagentRuns(pieces: UIPiece[]): SubagentRun[] {
       outputFile: null,
       error: null,
       stream: [],
-      lastActivityAt: endedAt ?? p.createdAt ?? new Date(0).toISOString(),
+      lastActivityAt:
+        endedAt ?? p.createdAt ?? new Date().toISOString(),
     };
     byTaskId.set(synthetic.taskId, synthetic);
   }

@@ -19,10 +19,15 @@ import type { SubagentRun } from "@/state/sessions";
  */
 export function SubagentsSheet({
   runs,
+  sessionId,
   onRevealToolUse,
   onClose,
 }: {
   runs: SubagentRun[];
+  /** Parent session id — threaded through to the panel so each run card
+   *  can render a deep-link to the full-page `/session/:id/subagent/:taskId`
+   *  standalone view. */
+  sessionId: string;
   onRevealToolUse?: (toolUseId: string) => void;
   onClose: () => void;
 }) {
@@ -141,6 +146,7 @@ export function SubagentsSheet({
           ) : (
             <SubagentsPanel
               runs={runs}
+              sessionId={sessionId}
               variant="embedded"
               onRevealToolUse={
                 onRevealToolUse
@@ -150,6 +156,7 @@ export function SubagentsSheet({
                     }
                   : undefined
               }
+              onNavigate={onClose}
             />
           )}
         </div>

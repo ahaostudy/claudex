@@ -6,6 +6,7 @@ import { HomeScreen } from "@/screens/Home";
 import { ChatScreen } from "@/screens/Chat";
 import { DiffReviewScreen } from "@/screens/DiffReview";
 import { SessionDiffScreen } from "@/screens/SessionDiff";
+import { SubagentRunScreen } from "@/screens/SubagentRun";
 import { SettingsScreen } from "@/screens/Settings";
 import { AboutScreen } from "@/screens/About";
 import { RoutinesScreen } from "@/screens/Routines";
@@ -127,6 +128,14 @@ export default function App() {
         element={
           <Guard>
             <SessionDiffScreen />
+          </Guard>
+        }
+      />
+      <Route
+        path="/session/:id/subagent/:taskId"
+        element={
+          <Guard>
+            <SubagentRunScreen />
           </Guard>
         }
       />
