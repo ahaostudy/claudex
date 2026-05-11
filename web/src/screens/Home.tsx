@@ -345,13 +345,13 @@ export function HomeScreen() {
           {activeProject && (
             <>
               <span
-                className="text-ink-faint shrink-0 font-sans text-[14px] md:text-[18px]"
+                className="text-ink-faint shrink-0 font-sans text-[14px] md:text-[16px]"
                 aria-hidden
               >
                 ·
               </span>
               <span
-                className="font-sans text-[14px] md:text-[16px] font-medium text-ink-soft truncate min-w-0"
+                className="font-sans text-[14px] md:text-[15px] font-medium text-ink-soft truncate min-w-0"
                 title={activeProject.name}
               >
                 {activeProject.name}
@@ -1048,7 +1048,7 @@ function SessionRow({
                   aria-label="Pinned"
                 />
               )}
-              <span className="text-[15px] font-medium truncate">
+              <span className="text-[14px] font-medium truncate">
                 {s.title || "Untitled"}
               </span>
               {s.worktreePath && (
