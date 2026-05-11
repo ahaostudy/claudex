@@ -2227,6 +2227,34 @@ const BUILTIN_MODEL_INFO = [
   { id: "claude-haiku-4-5", label: "Haiku 4.5", context: "200k tokens" },
 ];
 
+// Context-window input helper. We display the value in a user-friendly unit
+// (tokens / k / M) but persist the raw token count. `pickDisplayUnit` picks
+// the cleanest unit for a given token count so round values (128000 → 128k,
+// 1000000 → 1M) avoid awkward decimal representations.
+type CtxUnit = "tokens" | "k" | "M";
+const CTX_UNIT_MULTIPLIER: Record<CtxUnit, number> = {
+  tokens: 1,
+  k: 1_000,
+  M: 1_000_000,
+};
+function pickDisplayUnit(tokens: number): { value: string; unit: CtxUnit } {
+  if (tokens >= 1_000_000 && tokens % 1_000_000 === 0) {
+    return { value: String(tokens / 1_000_000), unit: "M" };
+  }
+  if (tokens >= 1_000 && tokens % 1_000 === 0) {
+    return { value: String(tokens / 1_000), unit: "k" };
+  }
+  return { value: String(tokens), unit: "tokens" };
+}
+
+// Common presets — tap to fill.
+const CTX_PRESETS: Array<{ label: string; tokens: number }> = [
+  { label: "128k", tokens: 128_000 },
+  { label: "200k", tokens: 200_000 },
+  { label: "256k", tokens: 256_000 },
+  { label: "1M", tokens: 1_000_000 },
+];
+
 function ModelsPanel() {
   const loadSettings = useAppSettings((s) => s.load);
   const patch = useAppSettings((s) => s.patch);
@@ -2235,21 +2263,30 @@ function ModelsPanel() {
 
   const [adding, setAdding] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
-  const [draft, setDraft] = useState({ id: "", label: "", contextWindow: "" });
+  const [draft, setDraft] = useState<{
+    id: string;
+    label: string;
+    contextWindow: string;
+    ctxUnit: CtxUnit;
+  }>({ id: "", label: "", contextWindow: "", ctxUnit: "k" });
   const [err, setErr] = useState<string | null>(null);
 
   function startAdd() {
-    setDraft({ id: "", label: "", contextWindow: "" });
+    setDraft({ id: "", label: "", contextWindow: "", ctxUnit: "k" });
     setErr(null);
     setAdding(true);
     setEditId(null);
   }
 
   function startEdit(m: CustomModel) {
+    const d = m.contextWindow
+      ? pickDisplayUnit(m.contextWindow)
+      : { value: "", unit: "k" as CtxUnit };
     setDraft({
       id: m.id,
       label: m.label,
-      contextWindow: m.contextWindow ? String(m.contextWindow) : "",
+      contextWindow: d.value,
+      ctxUnit: d.unit,
     });
     setErr(null);
     setEditId(m.id);
@@ -2262,6 +2299,11 @@ function ModelsPanel() {
     setErr(null);
   }
 
+  function applyPreset(tokens: number) {
+    const d = pickDisplayUnit(tokens);
+    setDraft({ ...draft, contextWindow: d.value, ctxUnit: d.unit });
+  }
+
   function save() {
     const id = draft.id.trim();
     const label = draft.label.trim();
@@ -2272,11 +2314,19 @@ function ModelsPanel() {
     if (others.some((m) => m.id === id)) {
       return setErr("A model with this ID already exists.");
     }
-    const ctx = draft.contextWindow.trim();
+    const ctxRaw = draft.contextWindow.trim();
+    let ctxTokens: number | undefined;
+    if (ctxRaw) {
+      const num = parseFloat(ctxRaw);
+      if (!Number.isFinite(num) || num <= 0) {
+        return setErr("Context window must be a positive number.");
+      }
+      ctxTokens = Math.round(num * CTX_UNIT_MULTIPLIER[draft.ctxUnit]);
+    }
     const entry: CustomModel = {
       id,
       label,
-      ...(ctx ? { contextWindow: parseInt(ctx, 10) } : {}),
+      ...(ctxTokens ? { contextWindow: ctxTokens } : {}),
     };
     const next = editId
       ? others.concat(entry)
@@ -2389,14 +2439,53 @@ function ModelsPanel() {
             </div>
             <div>
               <label className="text-[12px] uppercase tracking-[0.14em] text-ink-muted mb-1 block">Context window (optional)</label>
-              <input
-                value={draft.contextWindow}
-                onChange={(e) => setDraft({ ...draft, contextWindow: e.target.value })}
-                placeholder="e.g. 128000"
-                type="number"
-                className="w-full h-9 px-3 bg-canvas border border-line rounded-[6px] text-[13px]"
-              />
-              <div className="text-[11px] text-ink-muted mt-1">In tokens. Used for the context-percentage ring.</div>
+              {/* Quick presets — tap to fill with the most common values. */}
+              <div className="flex gap-1.5 mb-2 flex-wrap">
+                {CTX_PRESETS.map((p) => {
+                  const currentTokens =
+                    draft.contextWindow.trim() && Number.isFinite(parseFloat(draft.contextWindow))
+                      ? Math.round(parseFloat(draft.contextWindow) * CTX_UNIT_MULTIPLIER[draft.ctxUnit])
+                      : 0;
+                  const active = currentTokens === p.tokens;
+                  return (
+                    <button
+                      key={p.label}
+                      type="button"
+                      onClick={() => applyPreset(p.tokens)}
+                      className={`h-7 px-2.5 rounded-[6px] text-[12px] font-medium border ${
+                        active
+                          ? "border-ink bg-canvas text-ink"
+                          : "border-line bg-paper text-ink-muted hover:text-ink"
+                      }`}
+                    >
+                      {p.label}
+                    </button>
+                  );
+                })}
+              </div>
+              {/* Value + unit selector. Value is displayed in the chosen unit
+                  and multiplied at save-time. */}
+              <div className="flex gap-1.5">
+                <input
+                  value={draft.contextWindow}
+                  onChange={(e) => setDraft({ ...draft, contextWindow: e.target.value })}
+                  placeholder="e.g. 128"
+                  type="number"
+                  step="any"
+                  min="0"
+                  className="flex-1 min-w-0 h-9 px-3 bg-canvas border border-line rounded-[6px] text-[13px]"
+                />
+                <select
+                  value={draft.ctxUnit}
+                  onChange={(e) => setDraft({ ...draft, ctxUnit: e.target.value as CtxUnit })}
+                  className="h-9 px-2 bg-canvas border border-line rounded-[6px] text-[13px]"
+                >
+                  <option value="tokens">tokens</option>
+                  <option value="k">k tokens</option>
+                  <option value="M">M tokens</option>
+                </select>
+              </div>
+              <div className="text-[11px] text-ink-muted mt-1">Used for the context-percentage ring. Leave blank for the 1M default.</div>
             </div>
             {err && <div className="text-[12px] text-danger">{err}</div>}
             <div className="flex gap-2">
