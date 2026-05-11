@@ -56,14 +56,20 @@ export interface PerTurnTotals {
  * Result of a single-pass scan over a session's events. Both the server
  * summary and the web session-usage compute live on top of this shape.
  *
- * `totalInput` is the sum, across every non-empty `turn_end`, of the full
- * context body shipped that turn: `inputTokens + cacheReadInputTokens +
- * cacheCreationInputTokens`. The SDK's `input_tokens` alone would show ~0 on
- * a warm cache — see TurnEndUsage docs for the reasoning.
+ * `totalInput` is the sum, across every **final** (end-of-turn) `turn_end`,
+ * of the full context body shipped that turn: `inputTokens +
+ * cacheReadInputTokens + cacheCreationInputTokens`. Intermediate
+ * `stopReason === "tool_use"` chunks are NOT accumulated — the CLI JSONL
+ * writes a `turn_end` for every intermediate tool-use chunk with its own
+ * `cache_read` usage, and accumulating them double- / triple-counted the
+ * same warm cache block per turn. Matches Claude Code CLI's statusline
+ * math (one accumulation per real conversation turn).
  *
  * `lastTurn` captures the raw per-turn totals for the most recent non-empty
- * turn. Callers derive any presentation-level fields (e.g. "new tokens
- * billed this turn") from it without re-scanning events.
+ * turn — including intermediate chunks, so the context ring reflects the
+ * model's current context body even mid-turn. Callers derive any
+ * presentation-level fields (e.g. "new tokens billed this turn") from it
+ * without re-scanning events.
  */
 export interface UsageScan {
   totalInput: number;
@@ -83,6 +89,30 @@ export interface UsageScan {
 }
 
 /**
+ * Stop reasons that mark an *intermediate* chunk — NOT a true end-of-turn.
+ * Anything else counts as a final turn and accumulates into `totalInput`.
+ *
+ * We inverted the "allow-list" direction deliberately: the CLI JSONL uses
+ * Anthropic API's `stop_reason` vocabulary (`end_turn` / `stop_sequence` /
+ * `max_tokens` / `pause_turn`) while the live runner forwards the SDK
+ * `result.subtype` (`success` / `error_during_execution` / `error_max_turns`
+ * / `error_max_budget_usd` / `error_max_structured_output_retries`). Both
+ * vocabularies are end-of-turn and there's no benefit to enumerating them;
+ * any new SDK subtype should count as final by default.
+ *
+ * The ones we *do* need to exclude:
+ *   - `"tool_use"` — the CLI JSONL emits a turn_end for every intermediate
+ *     tool-use chunk with its own `usage`, sharing the same warm cache block
+ *     as the real end-of-turn. Accumulating them triple-counts the cache
+ *     body per turn and was the source of tokens climbing to "tens of M"
+ *     on long sessions (Bug A in plans/abstract-strolling-music.md).
+ *   - `"unknown"` — `cli-events-import.ts` writes this when the source
+ *     record had no `stop_reason`; laundering that into a fake final turn
+ *     would reintroduce the same over-counting.
+ */
+const NON_FINAL_STOP_REASONS = new Set(["tool_use", "unknown"]);
+
+/**
  * Canonical single-pass scan over a session's event log.
  *
  * Walks `events` once, filters to `turn_end` rows with a usage payload, and
@@ -93,6 +123,14 @@ export interface UsageScan {
  *
  * Empty / null usage, and turns with total zero tokens, are skipped — they
  * don't contribute to any counter.
+ *
+ * Two accumulation rules, matching Claude Code CLI's statusline:
+ *   - `lastTurn` updates on every non-empty `turn_end`, including
+ *     intermediate `stopReason === "tool_use"` chunks, so the context ring
+ *     reflects the model's current context body even mid-turn.
+ *   - `totalInput` / `totalOutput` / `turnCount` / `perModel` only
+ *     accumulate when `stopReason ∈ FINAL_STOP_REASONS` — one accumulation
+ *     per real conversation turn.
  */
 export function scanTurnEnds(
   events: SessionEvent[],
@@ -109,7 +147,8 @@ export function scanTurnEnds(
 
   for (const ev of events) {
     if (ev.kind !== "turn_end") continue;
-    const usage = (ev.payload as Record<string, unknown>).usage as
+    const payload = ev.payload as Record<string, unknown>;
+    const usage = payload.usage as
       | {
           inputTokens?: number;
           outputTokens?: number;
@@ -125,6 +164,20 @@ export function scanTurnEnds(
     const cacheCreate = Number(usage.cacheCreationInputTokens ?? 0) | 0;
     const totalInputThisTurn = inp + cacheRead + cacheCreate;
     if (totalInputThisTurn === 0 && out === 0) continue;
+
+    // Always refresh `lastTurn` — this is the context ring's source, and it
+    // should follow the most recent usage even mid-turn.
+    lastTurn = {
+      inputTokens: inp,
+      outputTokens: out,
+      cacheReadInputTokens: cacheRead,
+      cacheCreationInputTokens: cacheCreate,
+    };
+
+    // Only accumulate totals on real end-of-turn records. Intermediate
+    // tool_use chunks share the same warm cache block and would triple-count.
+    const stopReason = String(payload.stopReason ?? "");
+    if (NON_FINAL_STOP_REASONS.has(stopReason)) continue;
 
     const key: ModelId | string = sessionModel;
     const row = perModel.get(key);
@@ -142,12 +195,6 @@ export function scanTurnEnds(
     turnCount += 1;
     totalInput += totalInputThisTurn;
     totalOutput += out;
-    lastTurn = {
-      inputTokens: inp,
-      outputTokens: out,
-      cacheReadInputTokens: cacheRead,
-      cacheCreationInputTokens: cacheCreate,
-    };
   }
 
   const lastTurnTotal = lastTurn

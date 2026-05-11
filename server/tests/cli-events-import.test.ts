@@ -244,6 +244,125 @@ describe("importCliSessionEvents", () => {
     const events = sessions.listEvents(session.id);
     expect(events.map((e) => e.kind)).toEqual(["assistant_text"]);
   });
+
+  it("skips isSidechain records entirely (subagent / Task tool chatter)", async () => {
+    // Sidechain records carry a child agent's own context — folding them
+    // into the parent session's turn_end stream corrupted `lastTurnInput`
+    // (context ring was occasionally sitting at 100% because the last
+    // turn_end came from a subagent).
+    const { sessions, session, mkFile, cleanup } = setup();
+    cleanups.push(cleanup);
+
+    const filePath = mkFile([
+      {
+        type: "user",
+        message: { role: "user", content: "do the thing" },
+      },
+      // Child-agent assistant text — must not produce events.
+      {
+        type: "assistant",
+        isSidechain: true,
+        message: {
+          id: "child_msg",
+          role: "assistant",
+          content: [{ type: "text", text: "child says hi" }],
+          stop_reason: "end_turn",
+          usage: {
+            input_tokens: 10,
+            output_tokens: 20,
+            cache_read_input_tokens: 900_000,
+            cache_creation_input_tokens: 0,
+          },
+        },
+      },
+      // Child-agent tool_result user turn — must not produce a tool_result event.
+      {
+        type: "user",
+        isSidechain: true,
+        message: {
+          role: "user",
+          content: [
+            {
+              type: "tool_result",
+              tool_use_id: "child_tu",
+              content: "ignored",
+              is_error: false,
+            },
+          ],
+        },
+      },
+      // Main-thread assistant still passes through.
+      {
+        type: "assistant",
+        message: {
+          id: "main_msg",
+          role: "assistant",
+          content: [{ type: "text", text: "main says hi" }],
+          stop_reason: "end_turn",
+          usage: {
+            input_tokens: 5,
+            output_tokens: 10,
+            cache_read_input_tokens: 1000,
+            cache_creation_input_tokens: 0,
+          },
+        },
+      },
+    ]);
+
+    const n = await importCliSessionEvents(
+      { sessionEvents: sessions },
+      { sessionId: session.id, filePath },
+    );
+    // user_message (main) + assistant_text (main) + turn_end (main) = 3.
+    // The sidechain rows produce nothing.
+    expect(n).toBe(3);
+
+    const events = sessions.listEvents(session.id);
+    expect(events.map((e) => e.kind)).toEqual([
+      "user_message",
+      "assistant_text",
+      "turn_end",
+    ]);
+    // `lastTurn` should be the main turn's usage — NOT the 900K child read.
+    expect(events[2].payload).toMatchObject({
+      stopReason: "end_turn",
+      usage: { cacheReadInputTokens: 1000 },
+    });
+  });
+
+  it("records turn_end stopReason as 'unknown' when the CLI record has no stop_reason", async () => {
+    // Previously this fell back to "end_turn", which made scanTurnEnds
+    // accumulate the chunk into totalInput even though the real stop_reason
+    // was missing. Now we preserve "unknown" so the shared scanner skips it.
+    const { sessions, session, mkFile, cleanup } = setup();
+    cleanups.push(cleanup);
+
+    const filePath = mkFile([
+      {
+        type: "assistant",
+        message: {
+          id: "msg_x",
+          role: "assistant",
+          content: [{ type: "text", text: "partial" }],
+          // no stop_reason field
+          usage: {
+            input_tokens: 1,
+            output_tokens: 2,
+            cache_read_input_tokens: 3,
+            cache_creation_input_tokens: 0,
+          },
+        },
+      },
+    ]);
+
+    await importCliSessionEvents(
+      { sessionEvents: sessions },
+      { sessionId: session.id, filePath },
+    );
+    const events = sessions.listEvents(session.id);
+    const turnEnd = events.find((e) => e.kind === "turn_end");
+    expect(turnEnd?.payload).toMatchObject({ stopReason: "unknown" });
+  });
 });
 
 describe("importCliSession + importCliSessionEvents integration", () => {

@@ -75,6 +75,13 @@ function convertAndAppend(
   sessionId: string,
   obj: Record<string, unknown>,
 ): number {
+  // Skip subagent / Task-tool records outright. Their `usage` reflects the
+  // child agent's own context (separate from the parent session), so folding
+  // them into our turn_end stream corrupts both the context ring
+  // (lastTurnInput would sometimes come from a child's context) and the
+  // per-session token rollups. Claude Code CLI's own statusline treats
+  // sidechain records the same way.
+  if (obj.isSidechain === true) return 0;
   const type = obj.type;
   if (type === "user") {
     return appendUserRecord(sessionEvents, sessionId, obj);
@@ -216,15 +223,23 @@ function appendAssistantRecord(
 
   // After the assistant record, mirror the live runner's `turn_end` so the
   // Usage panel / context ring reflect historical turns. The CLI records
-  // usage on every assistant chunk, even intermediate tool-use chunks; we
-  // emit one turn_end per assistant record that has usage so totals add up.
+  // usage on every assistant chunk, including intermediate tool-use ones;
+  // we emit a turn_end for each so `lastTurn` tracks the most recent
+  // context body even mid-turn, but we record the raw `stop_reason` so the
+  // shared `scanTurnEnds` only accumulates `totalInput` on real end-of-turn
+  // chunks (`end_turn` / `stop_sequence` / …). `unknown` fallback (rather
+  // than `end_turn`) keeps us from laundering a missing stop_reason into a
+  // fake final turn.
   const usage = message.usage as Record<string, unknown> | undefined;
   if (usage) {
     sessionEvents.appendEvent({
       sessionId,
       kind: "turn_end",
       payload: {
-        stopReason: String(message.stop_reason ?? "end_turn"),
+        stopReason:
+          typeof message.stop_reason === "string"
+            ? message.stop_reason
+            : "unknown",
         usage: {
           inputTokens: toInt(usage.input_tokens),
           outputTokens: toInt(usage.output_tokens),
