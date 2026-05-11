@@ -1090,6 +1090,42 @@ export function ChatScreen() {
           onUpdated={(next) => setSession(next)}
         />
       )}
+      {/* Desktop-only push-mode rails for Plan + Subagents. Mount alongside
+          the Tasks / Settings rails so the live transcript stays visible
+          beside the panel instead of being covered by a backdrop. Mobile
+          keeps the overlay variants that render inside <main> above. Both
+          rails are self-hidden under `md:` so mobile never double-renders. */}
+      {showPlanSheet && (
+        <PlanSheet
+          variant="rail"
+          snapshot={planSnapshot}
+          onReveal={(seq) => {
+            const el = scroller.current?.querySelector(
+              `[data-event-seq="${String(seq)}"]`,
+            );
+            if (el) {
+              el.scrollIntoView({ behavior: "smooth", block: "center" });
+            }
+          }}
+          onClose={() => setShowPlanSheet(false)}
+        />
+      )}
+      {showSubagentsSheet && (
+        <SubagentsSheet
+          variant="rail"
+          runs={subagentRuns}
+          sessionId={id ?? ""}
+          onRevealToolUse={(toolUseId) => {
+            const el = scroller.current?.querySelector(
+              `[data-tool-use-id="${CSS.escape(toolUseId)}"]`,
+            );
+            if (el) {
+              el.scrollIntoView({ behavior: "smooth", block: "center" });
+            }
+          }}
+          onClose={() => setShowSubagentsSheet(false)}
+        />
+      )}
       {showTasksDrawer && id && (
         <TasksDrawer
           pieces={pieces}
@@ -2021,15 +2057,15 @@ function ToolPayloadPane({
   return (
     <div
       className={cn(
-        "w-full max-w-[min(80ch,100%)] rounded-[10px] border bg-white",
-        isError ? "border-danger/40" : "border-line",
+        "w-full max-w-[min(80ch,100%)] rounded-[10px] border bg-ink/95",
+        isError ? "border-danger/40" : "border-ink-soft/40",
       )}
     >
       <div className="flex items-center gap-2 px-3 pt-2 pb-1">
         <span
           className={cn(
             "caps text-[10px] tracking-wider",
-            isError ? "text-danger" : "text-ink-muted",
+            isError ? "text-danger" : "text-canvas/55",
           )}
         >
           {isError && label === "output" ? (
@@ -2042,14 +2078,14 @@ function ToolPayloadPane({
         <button
           type="button"
           onClick={onCopy}
-          className="ml-auto inline-flex items-center gap-1 px-1.5 h-5 rounded-[4px] border border-line bg-canvas mono text-[10px] text-ink-soft hover:bg-paper"
+          className="ml-auto inline-flex items-center gap-1 px-1.5 h-5 rounded-[4px] border border-canvas/15 bg-ink-soft/60 mono text-[10px] text-canvas/70 hover:bg-ink-soft"
           title={`Copy ${label}`}
         >
           <Copy className="w-2.5 h-2.5" aria-hidden />
           copy
         </button>
       </div>
-      <pre className="mono text-[12px] leading-[1.55] text-ink-soft px-3 pb-3 pt-0.5 max-h-[320px] overflow-auto whitespace-pre-wrap [overflow-wrap:anywhere] break-words">
+      <pre className="mono text-[12px] leading-[1.55] text-canvas/90 px-3 pb-3 pt-0.5 max-h-[320px] overflow-auto whitespace-pre-wrap [overflow-wrap:anywhere] break-words dark-scroll">
         {text}
       </pre>
     </div>
@@ -2670,14 +2706,19 @@ function ImageThumbs({
   tone: "dark" | "light";
 }) {
   return (
-    <div className="flex gap-2 mb-2 overflow-x-auto no-scrollbar">
+    <div className="flex gap-2 mb-2 overflow-x-auto no-scrollbar items-start">
       {images.map((img, i) => (
         <button
           key={i}
           type="button"
           onClick={() => onOpen(i)}
           className={cn(
-            "shrink-0 h-[120px] w-[120px] rounded-[8px] overflow-hidden cursor-zoom-in bg-canvas",
+            // Fixed height, width follows the image's natural aspect ratio.
+            // min-w keeps extremely tall images from shrinking to a sliver
+            // before load; max-w prevents panoramic screenshots from pushing
+            // the strip off-screen. The image itself uses object-contain so
+            // nothing is cropped.
+            "shrink-0 h-[120px] w-auto min-w-[60px] max-w-[240px] rounded-[8px] overflow-hidden cursor-zoom-in bg-canvas",
             tone === "dark"
               ? "border border-canvas/20"
               : "border border-line",
@@ -2687,7 +2728,7 @@ function ImageThumbs({
           <img
             src={img.src}
             alt={img.alt}
-            className="h-full w-full object-cover"
+            className="h-full w-auto max-w-full object-contain"
             loading="lazy"
           />
         </button>
