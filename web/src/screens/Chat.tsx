@@ -2598,7 +2598,7 @@ function ToolGroup({
     >
       <div
         className={cn(
-          "rounded-[10px] overflow-clip border shadow-card",
+          "rounded-[10px] border shadow-card",
           frameClass,
         )}
       >
@@ -2607,8 +2607,10 @@ function ToolGroup({
           onClick={toggle}
           aria-expanded={open}
           className={cn(
-            "w-full group flex items-stretch text-left focus:outline-none",
-            open && "sticky top-0 z-20",
+            "w-full group flex items-stretch text-left focus:outline-none overflow-hidden",
+            open
+              ? "sticky top-0 z-20 rounded-t-[9px]"
+              : "rounded-[9px]",
             open &&
               (tone === "danger"
                 ? "bg-danger-wash"
@@ -2775,7 +2777,7 @@ function ToolGroup({
         {open && (
           <div
             className={cn(
-              "px-3 py-2.5 space-y-2 border-t",
+              "px-3 py-2.5 space-y-2 border-t rounded-b-[9px] overflow-hidden",
               borderX,
               tone === "neutral" ? "bg-canvas" : "bg-canvas/60",
             )}
