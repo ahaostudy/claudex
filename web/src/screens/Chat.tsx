@@ -2446,15 +2446,12 @@ function UserBubble({
     [text],
   );
   // Attachments carried on the user_message event. Split into image vs
-  // non-image: images go into the ImageThumbs row with the existing lightbox
-  // wiring; non-images render as a small chip row so the user can tell a
-  // file was attached even if it's a PDF / text / other. Concatenated with
-  // `textImages` so the thumb row is a single strip — images the user
-  // attached via the composer sit first (they were the user's explicit
-  // intent for this turn), followed by whatever the CLI pasted into the
-  // text body.
-  const { attachmentImages, attachmentFiles } = useMemo(() => {
-    const imgs: ImageRef[] = [];
+  // non-image: images render as capsule pills BELOW the bubble (see
+  // ImageAttachmentCapsules) — matching iMessage/ChatGPT-style attachment
+  // layout. Non-images render as a small chip row inside the bubble so the
+  // user can tell a file was attached even if it's a PDF / text / other.
+  const { attachmentImageCapsules, attachmentFiles } = useMemo(() => {
+    const imgs: ImageCapsuleItem[] = [];
     const files: Array<{
       id: string;
       filename: string;
@@ -2466,16 +2463,30 @@ function UserBubble({
         imgs.push({
           src: `/api/attachments/${encodeURIComponent(a.id)}/raw`,
           alt: a.filename || a.mime,
+          filename: a.filename,
+          size: a.size,
         });
       } else {
         files.push(a);
       }
     }
-    return { attachmentImages: imgs, attachmentFiles: files };
+    return { attachmentImageCapsules: imgs, attachmentFiles: files };
   }, [attachments]);
-  const images = useMemo(
-    () => [...attachmentImages, ...textImages],
-    [attachmentImages, textImages],
+  // Text-sourced images (base64 blocks, `@path` refs) don't carry size
+  // metadata, so they render as capsules with just a thumbnail + filename.
+  const textImageCapsules = useMemo<ImageCapsuleItem[]>(
+    () => textImages.map((r) => ({ src: r.src, alt: r.alt })),
+    [textImages],
+  );
+  const imageCapsules = useMemo(
+    () => [...attachmentImageCapsules, ...textImageCapsules],
+    [attachmentImageCapsules, textImageCapsules],
+  );
+  // Flat list for the lightbox — same ordering as the capsule strip so
+  // clicking capsule #N opens image #N.
+  const images = useMemo<ImageRef[]>(
+    () => imageCapsules.map((c) => ({ src: c.src, alt: c.alt })),
+    [imageCapsules],
   );
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(text);
@@ -2579,88 +2590,90 @@ function UserBubble({
     );
   }
 
+  const hasBubbleContent =
+    remainingText.trim().length > 0 || attachmentFiles.length > 0;
+
   return (
     <div
       className="flex flex-col items-end group relative"
       data-event-seq={seq}
       data-show-actions={revealed ? "true" : "false"}
     >
-      <div
-        className="relative max-w-[88%] bg-ink text-canvas rounded-[14px] rounded-br-[4px] px-3.5 py-2.5 shadow-card text-[14px] leading-[1.55] md:max-w-[75%] md:text-[15px] md:leading-[1.55] md:px-4 md:py-3"
-        onClick={() => onToggleReveal?.()}
-      >
-        {editable && (
-          <button
-            type="button"
-            title="Edit this message and re-run"
-            aria-label="Edit this message and re-run"
-            onClick={(e) => {
-              // Don't let the click bubble up to the bubble's reveal toggle
-              // — opening the editor already dismisses any shown chips via
-              // `onClearReveal`.
-              e.stopPropagation();
-              onClearReveal?.();
-              setDraft(text);
-              setEditing(true);
-              setError(null);
-            }}
-            className={cn(
-              "absolute -top-2 -left-2 h-8 w-8 rounded-full bg-paper text-ink border border-line shadow-card transition-opacity flex items-center justify-center",
-              // Desktop and mobile both respect `revealed` (click/tap on
-              // the bubble toggles it). Desktop additionally reveals on
-              // sustained hover with a 500ms delay — matches the action
-              // chip row so scrolling past a bubble doesn't flicker the
-              // pencil in and out.
-              revealed ? "opacity-100" : "opacity-0",
-              "md:group-hover:opacity-100 md:group-hover:delay-500",
-              "md:focus:opacity-100 md:focus:delay-0",
-            )}
-          >
-            <Pencil className="h-3 w-3" />
-          </button>
-        )}
-        {remainingText.trim() && (
-          <div className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{remainingText}</div>
-        )}
-        {attachmentFiles.length > 0 && (
-          <div
-            className={cn(
-              "flex flex-wrap gap-1.5",
-              // Only add top margin when there's text above; otherwise the
-              // chips sit flush against the bubble top.
-              remainingText.trim() ? "mt-2" : "",
-            )}
-          >
-            {attachmentFiles.map((a) => (
-              <a
-                key={a.id}
-                href={`/api/attachments/${encodeURIComponent(a.id)}/raw`}
-                target="_blank"
-                rel="noreferrer noopener"
-                onClick={(e) => e.stopPropagation()}
-                className="h-8 pl-1.5 pr-2 rounded-[8px] border border-canvas/20 bg-canvas/10 text-[12px] text-canvas/90 hover:bg-canvas/20 flex items-center gap-1.5 whitespace-nowrap no-underline"
-                title={`${a.filename} — ${Math.max(1, Math.round(a.size / 1024))}kb`}
-              >
-                <Paperclip className="w-3 h-3 text-canvas/80" />
-                <span className="max-w-[160px] truncate">{a.filename}</span>
-                <span className="text-canvas/60 mono text-[10px]">
-                  {Math.max(1, Math.round(a.size / 1024))}kb
-                </span>
-              </a>
-            ))}
-          </div>
-        )}
-        {images.length > 0 && (
-          <ImageThumbs
-            images={images}
-            onOpen={(i) => onOpenLightbox(images, i)}
-            tone="dark"
-            topMargin={
-              remainingText.trim().length > 0 || attachmentFiles.length > 0
-            }
-          />
-        )}
-      </div>
+      {hasBubbleContent && (
+        <div
+          className="relative max-w-[88%] bg-ink text-canvas rounded-[14px] rounded-br-[4px] px-3.5 py-2.5 shadow-card text-[14px] leading-[1.55] md:max-w-[75%] md:text-[15px] md:leading-[1.55] md:px-4 md:py-3"
+          onClick={() => onToggleReveal?.()}
+        >
+          {editable && (
+            <button
+              type="button"
+              title="Edit this message and re-run"
+              aria-label="Edit this message and re-run"
+              onClick={(e) => {
+                // Don't let the click bubble up to the bubble's reveal toggle
+                // — opening the editor already dismisses any shown chips via
+                // `onClearReveal`.
+                e.stopPropagation();
+                onClearReveal?.();
+                setDraft(text);
+                setEditing(true);
+                setError(null);
+              }}
+              className={cn(
+                "absolute -top-2 -left-2 h-8 w-8 rounded-full bg-paper text-ink border border-line shadow-card transition-opacity flex items-center justify-center",
+                // Desktop and mobile both respect `revealed` (click/tap on
+                // the bubble toggles it). Desktop additionally reveals on
+                // sustained hover with a 500ms delay — matches the action
+                // chip row so scrolling past a bubble doesn't flicker the
+                // pencil in and out.
+                revealed ? "opacity-100" : "opacity-0",
+                "md:group-hover:opacity-100 md:group-hover:delay-500",
+                "md:focus:opacity-100 md:focus:delay-0",
+              )}
+            >
+              <Pencil className="h-3 w-3" />
+            </button>
+          )}
+          {remainingText.trim() && (
+            <div className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{remainingText}</div>
+          )}
+          {attachmentFiles.length > 0 && (
+            <div
+              className={cn(
+                "flex flex-wrap gap-1.5",
+                // Only add top margin when there's text above; otherwise the
+                // chips sit flush against the bubble top.
+                remainingText.trim() ? "mt-2" : "",
+              )}
+            >
+              {attachmentFiles.map((a) => (
+                <a
+                  key={a.id}
+                  href={`/api/attachments/${encodeURIComponent(a.id)}/raw`}
+                  target="_blank"
+                  rel="noreferrer noopener"
+                  onClick={(e) => e.stopPropagation()}
+                  className="h-8 pl-1.5 pr-2 rounded-[8px] border border-canvas/20 bg-canvas/10 text-[12px] text-canvas/90 hover:bg-canvas/20 flex items-center gap-1.5 whitespace-nowrap no-underline"
+                  title={`${a.filename} — ${Math.max(1, Math.round(a.size / 1024))}kb`}
+                >
+                  <Paperclip className="w-3 h-3 text-canvas/80" />
+                  <span className="max-w-[160px] truncate">{a.filename}</span>
+                  <span className="text-canvas/60 mono text-[10px]">
+                    {Math.max(1, Math.round(a.size / 1024))}kb
+                  </span>
+                </a>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+      {imageCapsules.length > 0 && (
+        <ImageAttachmentCapsules
+          items={imageCapsules}
+          onOpen={(i) => onOpenLightbox(images, i)}
+          topMargin={hasBubbleContent}
+        />
+      )}
       {(() => {
         // Preview card sits BELOW the dark bubble, right-aligned with the
         // bubble edge. Rendered outside the bubble so the card inherits
@@ -2752,6 +2765,75 @@ function ImageThumbs({
           />
         </button>
       ))}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Image capsule. Renders an image attachment as a rounded pill with a small
+// square thumbnail on the left and filename/size on the right — matches the
+// iMessage/ChatGPT-style "attachment" visual. Rendered OUTSIDE the dark user
+// bubble (see UserBubble) so the palette stays on the paper side and the
+// capsule reads as a separate attached artifact, not part of the text.
+//
+// `size` is only present for images uploaded through the composer (we have
+// the file metadata server-side). Text-extracted image refs (base64 blocks,
+// `@path` mentions) get a generic "image" label on the right instead.
+// ---------------------------------------------------------------------------
+interface ImageCapsuleItem {
+  src: string;
+  alt: string;
+  filename?: string;
+  size?: number;
+}
+
+function ImageAttachmentCapsules({
+  items,
+  onOpen,
+  topMargin,
+}: {
+  items: ImageCapsuleItem[];
+  onOpen: (index: number) => void;
+  topMargin?: boolean;
+}) {
+  return (
+    <div
+      className={cn(
+        "flex flex-col items-end gap-1.5 max-w-[88%] md:max-w-[75%]",
+        topMargin ? "mt-1.5" : "",
+      )}
+    >
+      {items.map((item, i) => {
+        const name = item.filename || item.alt || "image";
+        const kb =
+          typeof item.size === "number"
+            ? Math.max(1, Math.round(item.size / 1024))
+            : null;
+        return (
+          <button
+            key={i}
+            type="button"
+            onClick={() => onOpen(i)}
+            className="flex items-center gap-2 p-1 pr-2.5 rounded-[10px] border border-line bg-paper shadow-card hover:shadow-lift transition-shadow cursor-zoom-in max-w-full"
+            aria-label={`Open ${name}`}
+          >
+            <img
+              src={item.src}
+              alt={item.alt}
+              className="h-10 w-10 rounded-[6px] object-cover shrink-0 bg-canvas"
+              loading="lazy"
+            />
+            <div className="min-w-0 flex flex-col items-start leading-tight">
+              <span className="text-[12.5px] text-ink truncate max-w-[180px] md:max-w-[240px]">
+                {name}
+              </span>
+              <span className="mono text-[10.5px] text-ink-faint">
+                {kb != null ? `${kb}kb` : "image"}
+              </span>
+            </div>
+          </button>
+        );
+      })}
     </div>
   );
 }
