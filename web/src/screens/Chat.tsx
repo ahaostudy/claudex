@@ -2603,6 +2603,12 @@ function ToolGroup({
           className={cn(
             "w-full group flex items-stretch text-left focus:outline-none",
             open && "sticky top-0 z-20",
+            open &&
+              (tone === "danger"
+                ? "bg-danger-wash"
+                : tone === "klein"
+                  ? "bg-klein-wash"
+                  : "bg-paper"),
           )}
         >
           {/* chevron band */}
@@ -2848,9 +2854,9 @@ function ToolCallBlock({
             showBody && "sticky top-0 z-10",
             showBody &&
               (isError
-                ? "bg-danger-wash/40"
+                ? "bg-danger-wash"
                 : running
-                  ? "bg-klein-wash/50"
+                  ? "bg-klein-wash"
                   : "bg-paper"),
             canToggle &&
               (running ? "hover:bg-klein-wash/70 cursor-pointer" : "hover:bg-paper/60 cursor-pointer"),
