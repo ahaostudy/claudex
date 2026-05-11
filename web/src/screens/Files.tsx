@@ -136,7 +136,34 @@ export function FilesScreen() {
   const [projects, setProjects] = useState<Project[]>([]);
 
   const [searchQuery, setSearchQuery] = useState("");
-  const [showHidden, setShowHidden] = useState(false);
+  // Persist the show-hidden preference so users who want to see dotfiles
+  // don't have to re-enable the toggle every time. localStorage is fine on
+  // an HTTP (non-secure-context) origin. Guarded against missing `window`
+  // for safety even though this component only ever runs in the browser.
+  const [showHidden, setShowHidden] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
+    try {
+      return window.localStorage.getItem("claudex:files:showHidden") === "1";
+    } catch {
+      return false;
+    }
+  });
+  const toggleHidden = useCallback(() => {
+    setShowHidden((v) => {
+      const next = !v;
+      try {
+        if (typeof window !== "undefined") {
+          window.localStorage.setItem(
+            "claudex:files:showHidden",
+            next ? "1" : "0",
+          );
+        }
+      } catch {
+        /* quota / private mode — ignore */
+      }
+      return next;
+    });
+  }, []);
 
   // First render: fetch user's home directory and land there.
   useEffect(() => {
@@ -269,7 +296,7 @@ export function FilesScreen() {
           visibleEntries={visibleEntries}
           hiddenCount={hiddenCount}
           showHidden={showHidden}
-          onToggleHidden={() => setShowHidden((v) => !v)}
+          onToggleHidden={toggleHidden}
           searchQuery={searchQuery}
           onSearchChange={setSearchQuery}
           selectedFilePath={selectedFilePath}
@@ -296,7 +323,7 @@ export function FilesScreen() {
           visibleEntries={visibleEntries}
           hiddenCount={hiddenCount}
           showHidden={showHidden}
-          onToggleHidden={() => setShowHidden((v) => !v)}
+          onToggleHidden={toggleHidden}
           searchQuery={searchQuery}
           onSearchChange={setSearchQuery}
           selectedFilePath={selectedFilePath}
@@ -385,18 +412,12 @@ function Toolbar({
   onRoot,
   onUp,
   canUp,
-  showHidden,
-  onToggleHidden,
-  hiddenCount,
   compact,
 }: {
   onHome: () => void;
   onRoot: () => void;
   onUp: () => void;
   canUp: boolean;
-  showHidden: boolean;
-  onToggleHidden: () => void;
-  hiddenCount: number;
   compact?: boolean;
 }) {
   const size = compact ? "h-7 px-2 text-[11px]" : "h-8 px-2.5 text-[12px]";
@@ -411,21 +432,64 @@ function Toolbar({
         disabled={!canUp}
         size={size}
       />
-      <button
-        onClick={onToggleHidden}
-        className={cn(
-          "inline-flex items-center gap-1.5 rounded-[6px] border border-line bg-paper text-ink-soft shrink-0",
-          size,
-        )}
-      >
-        {showHidden ? (
-          <EyeOff className="w-3.5 h-3.5" />
-        ) : (
-          <Eye className="w-3.5 h-3.5" />
-        )}
-        {showHidden ? "Hide dotfiles" : `Dotfiles (${hiddenCount})`}
-      </button>
     </div>
+  );
+}
+
+/**
+ * Toggle for hidden entries (leading-dot). Pulled out of the main Toolbar
+ * so it has a fixed, always-visible position on the right edge — otherwise
+ * the scrolling toolbar on a 390px viewport hides it off-screen, which is
+ * how users miss that the Files screen can show hidden directories at all.
+ *
+ * Visual language:
+ *   - Off (default): outlined eye with a count badge (`12` hidden here)
+ *   - On: filled Klein-wash pill with EyeOff — "you are in show-hidden mode"
+ * The state is persisted in localStorage so the preference sticks across
+ * navigations and page reloads.
+ */
+function HiddenToggle({
+  showHidden,
+  onToggle,
+  hiddenCount,
+  compact,
+}: {
+  showHidden: boolean;
+  onToggle: () => void;
+  hiddenCount: number;
+  compact?: boolean;
+}) {
+  const size = compact ? "h-7 px-2 text-[11px]" : "h-8 px-2.5 text-[12px]";
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      aria-pressed={showHidden}
+      title={
+        showHidden
+          ? "Hide entries starting with a dot"
+          : `Show hidden entries (${hiddenCount} here)`
+      }
+      className={cn(
+        "inline-flex items-center gap-1.5 rounded-[6px] border shrink-0",
+        size,
+        showHidden
+          ? "border-klein/50 bg-klein-wash text-klein-ink"
+          : "border-line bg-paper text-ink-soft hover:bg-paper/60",
+      )}
+    >
+      {showHidden ? (
+        <EyeOff className="w-3.5 h-3.5" />
+      ) : (
+        <Eye className="w-3.5 h-3.5" />
+      )}
+      <span>{showHidden ? "Hidden" : "Show hidden"}</span>
+      {!showHidden && hiddenCount > 0 && (
+        <span className="mono text-[10px] px-1 rounded-[3px] bg-canvas border border-line text-ink-muted">
+          {hiddenCount}
+        </span>
+      )}
+    </button>
   );
 }
 
@@ -660,44 +724,52 @@ function MobileFilesView(p: FilesViewProps) {
           onNavigate={p.onNavigate}
           className="px-1"
         />
-        {/* Toolbar + project jump */}
-        <div className="flex items-center gap-1.5 overflow-x-auto">
-          <Toolbar
-            onHome={p.onHome}
-            onRoot={p.onRoot}
-            onUp={p.onUp}
-            canUp={!!p.browse?.parent}
-            showHidden={p.showHidden}
-            onToggleHidden={p.onToggleHidden}
-            hiddenCount={p.hiddenCount}
-          />
-          <div className="ml-auto">
-            <ProjectJumpSelect
-              projects={p.projects}
-              onGoToProject={p.onGoToProject}
+        {/* Nav row: Home/Root/Up on the left (scrollable if it overflows),
+            Show-hidden toggle pinned to the right so it's always visible
+            on a 390px viewport — that was the original UX bug: the toggle
+            was buried inside the scrolling toolbar where users never saw
+            it. */}
+        <div className="flex items-center gap-1.5">
+          <div className="flex-1 min-w-0 overflow-x-auto">
+            <Toolbar
+              onHome={p.onHome}
+              onRoot={p.onRoot}
+              onUp={p.onUp}
+              canUp={!!p.browse?.parent}
             />
           </div>
-        </div>
-        {/* Search */}
-        <div className="flex items-center gap-2 h-9 px-3 bg-paper border border-line rounded-[8px]">
-          <Search className="w-3.5 h-3.5 text-ink-muted shrink-0" />
-          <input
-            type="text"
-            placeholder="Filter this folder…"
-            value={p.searchQuery}
-            onChange={(e) => p.onSearchChange(e.target.value)}
-            className="flex-1 bg-transparent text-[13px] text-ink outline-none placeholder:text-ink-muted"
+          <HiddenToggle
+            showHidden={p.showHidden}
+            onToggle={p.onToggleHidden}
+            hiddenCount={p.hiddenCount}
           />
-          {p.searchQuery && (
-            <button
-              type="button"
-              onClick={() => p.onSearchChange("")}
-              className="text-ink-muted"
-              aria-label="Clear search"
-            >
-              <X className="w-3.5 h-3.5" />
-            </button>
-          )}
+        </div>
+        {/* Search + jump-to-project */}
+        <div className="flex items-center gap-1.5">
+          <div className="flex-1 flex items-center gap-2 h-9 px-3 bg-paper border border-line rounded-[8px]">
+            <Search className="w-3.5 h-3.5 text-ink-muted shrink-0" />
+            <input
+              type="text"
+              placeholder="Filter this folder…"
+              value={p.searchQuery}
+              onChange={(e) => p.onSearchChange(e.target.value)}
+              className="flex-1 bg-transparent text-[13px] text-ink outline-none placeholder:text-ink-muted"
+            />
+            {p.searchQuery && (
+              <button
+                type="button"
+                onClick={() => p.onSearchChange("")}
+                className="text-ink-muted"
+                aria-label="Clear search"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
+          <ProjectJumpSelect
+            projects={p.projects}
+            onGoToProject={p.onGoToProject}
+          />
         </div>
       </div>
 
@@ -844,13 +916,18 @@ function DesktopFilesView(p: FilesViewProps) {
             />
           </div>
           <div className="flex items-center gap-1.5">
-            <Toolbar
-              onHome={p.onHome}
-              onRoot={p.onRoot}
-              onUp={p.onUp}
-              canUp={!!p.browse?.parent}
+            <div className="flex-1 min-w-0 overflow-x-auto">
+              <Toolbar
+                onHome={p.onHome}
+                onRoot={p.onRoot}
+                onUp={p.onUp}
+                canUp={!!p.browse?.parent}
+                compact
+              />
+            </div>
+            <HiddenToggle
               showHidden={p.showHidden}
-              onToggleHidden={p.onToggleHidden}
+              onToggle={p.onToggleHidden}
               hiddenCount={p.hiddenCount}
               compact
             />
