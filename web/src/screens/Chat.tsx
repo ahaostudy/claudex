@@ -2551,6 +2551,27 @@ function UserBubble({
             tone="dark"
           />
         )}
+        {attachmentFiles.length > 0 && (
+          <div className="flex flex-wrap gap-1.5 mb-2">
+            {attachmentFiles.map((a) => (
+              <a
+                key={a.id}
+                href={`/api/attachments/${encodeURIComponent(a.id)}/raw`}
+                target="_blank"
+                rel="noreferrer noopener"
+                onClick={(e) => e.stopPropagation()}
+                className="h-8 pl-1.5 pr-2 rounded-[8px] border border-canvas/20 bg-canvas/10 text-[12px] text-canvas/90 hover:bg-canvas/20 flex items-center gap-1.5 whitespace-nowrap no-underline"
+                title={`${a.filename} — ${Math.max(1, Math.round(a.size / 1024))}kb`}
+              >
+                <Paperclip className="w-3 h-3 text-canvas/80" />
+                <span className="max-w-[160px] truncate">{a.filename}</span>
+                <span className="text-canvas/60 mono text-[10px]">
+                  {Math.max(1, Math.round(a.size / 1024))}kb
+                </span>
+              </a>
+            ))}
+          </div>
+        )}
         {remainingText.trim() && (
           <div className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{remainingText}</div>
         )}
