@@ -1023,16 +1023,6 @@ function SessionRow({
     }
     // Component will unmount on successful delete — no need to reset state.
   };
-  // "Looks stuck" — session reports `running` but its last activity timestamp
-  // is > 5 min old. Normally the server watchdog catches this; on a recent
-  // restart the in-memory timer can be missing until on-boot sweep fires, so
-  // we surface a subtle `?` badge next to the status dot so the user knows
-  // the row might be lying. The SessionSettingsSheet exposes a "Reset to
-  // idle" link that calls POST /api/sessions/:id/force-idle.
-  const anchorIso = s.lastMessageAt ?? s.updatedAt;
-  const anchorMs = anchorIso ? Date.parse(anchorIso) : Number.NaN;
-  const ageMs = Number.isFinite(anchorMs) ? Date.now() - anchorMs : 0;
-  const looksStuck = s.status === "running" && ageMs > 5 * 60 * 1000;
   // Up to 3 tag chips are rendered next to the title on desktop; mobile has
   // no room. Clicking a chip activates the `?tag=` filter on Home. The
   // chip intercepts the row's <Link> navigation via stopPropagation +
@@ -1070,15 +1060,6 @@ function SessionRow({
           <span className="text-[11px] caps text-ink-muted">
             {statusPillLabel(s.status)}
           </span>
-          {looksStuck && (
-            <span
-              className="text-[11px] text-ink-faint"
-              aria-label="Running with no activity — session may be stuck"
-              title="Running with no activity — session may be stuck. Open Settings to reset."
-            >
-              ?
-            </span>
-          )}
           <span className="ml-auto text-[11px] text-ink-faint">{rel}</span>
           {/* Mobile-only in-flow delete trigger. Lives inside the status
               line (not absolute) so it never overlaps title / context ring
@@ -1239,15 +1220,6 @@ function SessionRow({
                 <span className={cn("h-1.5 w-1.5 rounded-full", dotTone)} />
               )}
               {statusPillLabel(s.status)}
-              {looksStuck && (
-                <span
-                  className="text-ink-faint"
-                  aria-label="Running with no activity — session may be stuck"
-                  title="Running with no activity — session may be stuck. Open Settings to reset."
-                >
-                  ?
-                </span>
-              )}
             </span>
           </div>
           <div className="flex items-center justify-end">
