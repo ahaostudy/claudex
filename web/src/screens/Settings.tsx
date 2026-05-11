@@ -4,6 +4,8 @@ import {
   Bell,
   BellOff,
   Bug,
+  Check,
+  ChevronDown,
   ChevronLeft,
   Copy,
   Download,
@@ -1831,22 +1833,11 @@ function AppearancePanel() {
         label="Language"
         value={
           <div className="flex flex-col items-start gap-1.5 min-w-0 w-full">
-            <select
-              value={language ?? ""}
+            <LanguageSelect
+              value={language}
               disabled={!loaded || saving}
-              onChange={(e) => {
-                const v = e.target.value;
-                void commit(v === "" ? null : (v as SupportedLanguage));
-              }}
-              className="h-9 px-2 rounded-[6px] border border-line bg-canvas text-[13px] text-ink disabled:opacity-60 disabled:cursor-not-allowed w-full max-w-[260px]"
-            >
-              <option value="">Auto (defer to ~/.claude/settings.json)</option>
-              {SUPPORTED_LANGUAGES.map((lang) => (
-                <option key={lang} value={lang}>
-                  {LANGUAGE_LABELS[lang] ?? lang}
-                </option>
-              ))}
-            </select>
+              onPick={(next) => void commit(next)}
+            />
             <div className="text-[11.5px] text-ink-muted">
               Appended as &ldquo;Please respond in …&rdquo; to new sessions&rsquo; system
               prompt. Live sessions keep their current language until next
@@ -1889,6 +1880,124 @@ const LANGUAGE_LABELS: Record<string, string> = {
   french: "French (Français)",
   german: "German (Deutsch)",
 };
+
+// Custom listbox for the language row. Native <select> was ugly on mobile
+// (full-screen iOS picker) and inconsistent with the rest of the app's
+// menu styling — same shell as the menus in Chat.tsx / Home.tsx.
+function LanguageSelect({
+  value,
+  disabled,
+  onPick,
+}: {
+  value: string | null;
+  disabled: boolean;
+  onPick: (next: SupportedLanguage | null) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (ev: MouseEvent) => {
+      if (ref.current && !ref.current.contains(ev.target as Node)) {
+        setOpen(false);
+      }
+    };
+    const onKey = (ev: KeyboardEvent) => {
+      if (ev.key === "Escape") setOpen(false);
+    };
+    window.addEventListener("mousedown", onDoc);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", onDoc);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+  const label = value
+    ? (LANGUAGE_LABELS[value] ?? value)
+    : "Auto (defer to ~/.claude/settings.json)";
+  const pick = (next: SupportedLanguage | null) => {
+    setOpen(false);
+    onPick(next);
+  };
+  return (
+    <div ref={ref} className="relative w-full max-w-[260px]">
+      <button
+        type="button"
+        onClick={() => !disabled && setOpen((v) => !v)}
+        disabled={disabled}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        className={cn(
+          "h-9 w-full px-2.5 rounded-[6px] border border-line bg-canvas text-[13px] text-ink flex items-center justify-between gap-2",
+          disabled
+            ? "opacity-60 cursor-not-allowed"
+            : "hover:bg-paper",
+        )}
+      >
+        <span className="truncate text-left">{label}</span>
+        <ChevronDown
+          className={cn(
+            "w-3.5 h-3.5 text-ink-muted shrink-0 transition-transform",
+            open && "rotate-180",
+          )}
+        />
+      </button>
+      {open && (
+        <div
+          role="listbox"
+          className="absolute left-0 right-0 mt-1.5 z-30 rounded-[10px] border border-line bg-canvas shadow-lift p-1 max-h-[280px] overflow-auto"
+        >
+          <LangOption
+            label="Auto (defer to ~/.claude/settings.json)"
+            active={value === null}
+            onClick={() => pick(null)}
+          />
+          <div className="my-1 h-px bg-line/60" aria-hidden />
+          {SUPPORTED_LANGUAGES.map((lang) => (
+            <LangOption
+              key={lang}
+              label={LANGUAGE_LABELS[lang] ?? lang}
+              active={value === lang}
+              onClick={() => pick(lang)}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function LangOption({
+  label,
+  active,
+  onClick,
+}: {
+  label: string;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      role="option"
+      aria-selected={active}
+      onClick={onClick}
+      className={cn(
+        "w-full flex items-center gap-2 px-2 py-1.5 rounded-[6px] text-left text-[13px]",
+        active
+          ? "bg-klein-wash/40 text-ink"
+          : "text-ink-soft hover:bg-paper/60",
+      )}
+    >
+      <Check
+        className={cn(
+          "w-3.5 h-3.5 shrink-0",
+          active ? "text-klein" : "text-transparent",
+        )}
+      />
+      <span className="truncate">{label}</span>
+    </button>
+  );
+}
 
 // ----------------------------------------------------------------------------
 // MCP servers — empty state with a nudge toward the Plugins tab (adjacent
