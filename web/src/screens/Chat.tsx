@@ -785,7 +785,7 @@ export function ChatScreen() {
               session ? navigate(`/session/${id}/session-diff`) : undefined
             }
             onOpenSideChat={() => setShowSideChat(true)}
-            onOpenSettings={() => setShowSettingsRail(true)}
+            onOpenTasks={() => setShowTasks(true)}
             onOpenTerminal={() => setShowTerminal(true)}
           />
           {subagentRuns.length > 0 && (
@@ -815,20 +815,6 @@ export function ChatScreen() {
               )}
             </button>
           )}
-          <button
-            onClick={() => setShowTasks((v) => !v)}
-            title={showTasks ? "Hide tasks rail" : "Show tasks rail"}
-            aria-label="Toggle tasks rail"
-            aria-pressed={showTasks}
-            className={cn(
-              "h-8 w-8 rounded-[8px] border flex items-center justify-center hover:bg-paper shrink-0",
-              showTasks
-                ? "border-klein/30 bg-klein-wash/40 text-klein-ink"
-                : "border-line bg-canvas text-ink-soft",
-            )}
-          >
-            <Wrench className="w-4 h-4" />
-          </button>
           <button
             onClick={() => setShowSettingsRail((v) => !v)}
             title={
@@ -1076,15 +1062,6 @@ export function ChatScreen() {
         <UsagePanel session={session} onClose={() => setShowUsage(false)} />
       )}
       </main>
-      {showSettingsRail && session && (
-        <SessionSettingsSheet
-          variant="rail"
-          session={session}
-          project={project}
-          onClose={() => setShowSettingsRail(false)}
-          onUpdated={(next) => setSession(next)}
-        />
-      )}
       {showTasks && (
         <ChatTasksRail
           session={session}
@@ -1101,6 +1078,15 @@ export function ChatScreen() {
             }
           }}
           onClose={() => setShowTasks(false)}
+        />
+      )}
+      {showSettingsRail && session && (
+        <SessionSettingsSheet
+          variant="rail"
+          session={session}
+          project={project}
+          onClose={() => setShowSettingsRail(false)}
+          onUpdated={(next) => setSession(next)}
         />
       )}
       {showTasksDrawer && id && (
@@ -1256,13 +1242,13 @@ function DesktopMoreMenu({
   disabled,
   onOpenSessionDiff,
   onOpenSideChat,
-  onOpenSettings,
+  onOpenTasks,
   onOpenTerminal,
 }: {
   disabled?: boolean;
   onOpenSessionDiff: () => void;
   onOpenSideChat: () => void;
-  onOpenSettings: () => void;
+  onOpenTasks: () => void;
   onOpenTerminal: () => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -1318,9 +1304,9 @@ function DesktopMoreMenu({
             onClick={() => pick(onOpenSideChat)}
           />
           <MenuRow
-            icon={<Settings2 className="w-4 h-4 text-ink-soft" />}
-            label="Session settings"
-            onClick={() => pick(onOpenSettings)}
+            icon={<ListChecks className="w-4 h-4 text-ink-soft" />}
+            label="Tasks"
+            onClick={() => pick(onOpenTasks)}
           />
           <MenuRow
             icon={<Terminal className="w-4 h-4 text-ink-soft" />}
@@ -2649,20 +2635,21 @@ function UserBubble({
           onActionComplete={onClearReveal}
         />
       )}
-      {createdAt && (
-        <div
-          className="mono text-[10px] text-ink-faint mt-1"
-          title={new Date(createdAt).toLocaleString()}
-        >
-          {timeAgoShort(createdAt)}
-        </div>
-      )}
-      {attachmentLock && (
-        <div
-          className="absolute mt-[52px] -ml-2 hidden md:block text-[11px] text-ink-muted mono"
-          aria-hidden
-        >
-          attachments can't be edited yet
+      {(createdAt || attachmentLock) && (
+        <div className="mt-1 flex items-center gap-1.5 mono text-[10px] text-ink-faint">
+          {attachmentLock && (
+            <span
+              className="text-ink-muted"
+              title="Editing messages with attachments isn't supported yet."
+            >
+              can't edit (has attachments)
+            </span>
+          )}
+          {createdAt && (
+            <span title={new Date(createdAt).toLocaleString()}>
+              {timeAgoShort(createdAt)}
+            </span>
+          )}
         </div>
       )}
     </div>
