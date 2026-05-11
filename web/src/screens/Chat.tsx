@@ -2541,10 +2541,14 @@ function UserBubble({
             }}
             className={cn(
               "absolute -top-2 -left-2 h-8 w-8 rounded-full bg-paper text-ink border border-line shadow-card transition-opacity flex items-center justify-center",
-              // Desktop: show on hover; mobile: show when the bubble is
-              // revealed (same tap gesture as the action chips).
+              // Desktop and mobile both respect `revealed` (click/tap on
+              // the bubble toggles it). Desktop additionally reveals on
+              // sustained hover with a 500ms delay — matches the action
+              // chip row so scrolling past a bubble doesn't flicker the
+              // pencil in and out.
               revealed ? "opacity-100" : "opacity-0",
-              "md:opacity-0 md:group-hover:opacity-100 md:focus:opacity-100",
+              "md:group-hover:opacity-100 md:group-hover:delay-500",
+              "md:focus:opacity-100 md:focus:delay-0",
             )}
           >
             <Pencil className="h-3 w-3" />

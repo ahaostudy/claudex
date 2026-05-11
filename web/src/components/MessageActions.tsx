@@ -172,21 +172,32 @@ export function MessageActions({
       className={cn(
         // Don't reserve vertical space when idle — collapse to zero height
         // so consecutive pieces keep a uniform gap whether or not the row
-        // is rendered. The row expands back to its natural height when the
-        // parent `group` is hovered (desktop) or `revealed` via tap (mobile).
+        // is rendered. The row expands when `revealed` (click/tap on the
+        // bubble, mobile and desktop both), or on sustained desktop hover
+        // (see the delay-500 note below).
+        //
         // A tiny top margin is applied only when expanded so the row hugs
         // the bubble without touching it.
         "overflow-hidden transition-[height,opacity] duration-100",
-        revealed ? "h-6 opacity-100 mt-1" : "h-0 opacity-0 mt-0",
-        "md:h-0 md:opacity-0 md:mt-0",
-        "md:group-hover:h-6 md:group-hover:opacity-100 md:group-hover:mt-1",
-        "md:focus-within:h-6 md:focus-within:opacity-100 md:focus-within:mt-1",
+        // `revealed` drives the visible state on both mobile and desktop —
+        // a click on the bubble toggles it at the Chat level. Previously
+        // desktop had a hard `md:opacity-0` override and relied exclusively
+        // on `:hover`, which flickered the row as the mouse tracked across
+        // messages during scroll.
+        revealed
+          ? "h-6 opacity-100 mt-1 pointer-events-auto"
+          : "h-0 opacity-0 mt-0 pointer-events-none",
+        // Desktop also reveals on hover, but with a 500ms delay so
+        // scroll-past mouse moves don't trigger it. When hover leaves, the
+        // `group-hover:*` classes stop applying, delay drops back to 0, and
+        // the row collapses immediately — so a brief hover during scroll
+        // never starts the enter transition in the first place.
+        "md:group-hover:h-6 md:group-hover:opacity-100 md:group-hover:mt-1 md:group-hover:pointer-events-auto md:group-hover:delay-500",
+        // Keyboard focus (tabbing into an action) should be immediate — no
+        // delay — so the user can actually see what they're focusing.
+        "md:focus-within:h-6 md:focus-within:opacity-100 md:focus-within:mt-1 md:focus-within:pointer-events-auto md:focus-within:delay-0",
         "flex items-center gap-0.5",
         align === "end" ? "justify-end" : "justify-start",
-        // Don't let the collapsed row swallow clicks aimed at pieces behind it.
-        revealed
-          ? "pointer-events-auto"
-          : "pointer-events-none md:group-hover:pointer-events-auto md:focus-within:pointer-events-auto",
       )}
     >
       <ActionIcon
