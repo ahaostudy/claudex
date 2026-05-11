@@ -458,6 +458,9 @@ function runnerEventToFrame(
         content: event.text,
         createdAt: event.at,
         ...(event.echoId !== undefined ? { echoId: event.echoId } : {}),
+        ...(event.attachments && event.attachments.length > 0
+          ? { attachments: event.attachments }
+          : {}),
       };
     case "refresh_transcript":
       return {

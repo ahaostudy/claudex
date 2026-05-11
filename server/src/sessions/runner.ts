@@ -144,7 +144,24 @@ export type RunnerEvent =
   // originating tab attached to its `ClientUserMessage` — relayed
   // verbatim so the sender can match its optimistic piece without the
   // legacy text+3s heuristic. Undefined for messages from legacy clients.
-  | { type: "user_message"; text: string; at: string; echoId?: string }
+  | {
+      type: "user_message";
+      text: string;
+      at: string;
+      echoId?: string;
+      // Shallow metadata for each attachment linked to this user_message,
+      // if any. Lets the web transcript render image thumbs / filename
+      // chips inline with the user bubble on the live send path — without
+      // this, only a full page reload (which goes through the REST events
+      // endpoint and reads the persisted payload) would paint attachments.
+      // Shape mirrors the persisted `user_message` payload's `attachments`.
+      attachments?: Array<{
+        id: string;
+        filename: string;
+        mime: string;
+        size: number;
+      }>;
+    }
   // Manager-synthesized. Fired when the server has appended events to a
   // session out-of-band (e.g. the CLI JSONL resync path) — the client
   // refetches the transcript tail rather than us re-streaming each event.

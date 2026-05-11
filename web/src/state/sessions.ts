@@ -1016,6 +1016,22 @@ export const useSessions = create<SessionState>((set, get) => {
           if (matchIdx !== -1) {
             const existing = list[matchIdx];
             if (existing.kind === "user" && existing.serverAcked) {
+              // Already acked — but if the sender was us and the first
+              // broadcast lost the race to set attachments (shouldn't
+              // happen with the current ordering, but be defensive), still
+              // flow attachments through when this frame carries them.
+              if (
+                frame.attachments &&
+                frame.attachments.length > 0 &&
+                !existing.attachments
+              ) {
+                const next = [...list];
+                next[matchIdx] = {
+                  ...(existing as UIPiece & { kind: "user" }),
+                  attachments: frame.attachments,
+                };
+                return { transcripts: { ...s.transcripts, [sid]: next } };
+              }
               return s; // already acked, nothing to do
             }
             const next = [...list];
@@ -1024,6 +1040,13 @@ export const useSessions = create<SessionState>((set, get) => {
               at: frame.createdAt,
               createdAt: frame.createdAt,
               serverAcked: true,
+              // Flow attachments from the broadcast onto the reconciled
+              // piece. Optimistic echoes don't carry this (the send path
+              // only has attachment ids, not metadata) so the first paint
+              // with thumbs/chips happens exactly here.
+              ...(frame.attachments && frame.attachments.length > 0
+                ? { attachments: frame.attachments }
+                : {}),
             };
             return { transcripts: { ...s.transcripts, [sid]: next } };
           }
@@ -1037,6 +1060,9 @@ export const useSessions = create<SessionState>((set, get) => {
             at: frame.createdAt,
             createdAt: frame.createdAt,
             serverAcked: true,
+            ...(frame.attachments && frame.attachments.length > 0
+              ? { attachments: frame.attachments }
+              : {}),
           };
           const tailIsPending =
             list.length > 0 && list[list.length - 1].kind === "pending";

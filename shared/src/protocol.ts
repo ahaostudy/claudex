@@ -244,6 +244,21 @@ export const ServerUserMessage = z.object({
   // with a matching echoId and insert a fresh piece. Undefined for messages
   // sent by legacy clients that didn't supply an echoId.
   echoId: z.string().optional(),
+  // Shallow attachment metadata for the linked files, when the originating
+  // send carried `attachmentIds`. Lets every subscribed tab (including the
+  // sender) render image thumbs / filename chips on the live send path —
+  // the same shape we persist inside the user_message event payload, so
+  // the web store can flow it straight onto the reconciled piece.
+  attachments: z
+    .array(
+      z.object({
+        id: z.string(),
+        filename: z.string(),
+        mime: z.string(),
+        size: z.number(),
+      }),
+    )
+    .optional(),
 });
 
 // Broadcast when the queued_prompts table changes in any way (create, patch,

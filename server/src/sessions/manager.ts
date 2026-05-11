@@ -1018,6 +1018,16 @@ export class SessionManager {
       text: content,
       at: new Date().toISOString(),
       ...(echoId !== undefined ? { echoId } : {}),
+      ...(resolvedAttachments.length > 0
+        ? {
+            attachments: resolvedAttachments.map((a) => ({
+              id: a.id,
+              filename: a.filename,
+              mime: a.mime,
+              size: a.sizeBytes,
+            })),
+          }
+        : {}),
     });
 
     // Flip to `running` before we push the prompt into the runner. After the
