@@ -2255,6 +2255,95 @@ const CTX_PRESETS: Array<{ label: string; tokens: number }> = [
   { label: "1M", tokens: 1_000_000 },
 ];
 
+const CTX_UNIT_LABEL: Record<CtxUnit, string> = {
+  tokens: "tokens",
+  k: "k tokens",
+  M: "M tokens",
+};
+
+// Custom dropdown for the context-window unit selector. Native <select>
+// renders differently per platform (iOS especially) — we want the same
+// calm-paper look as the rest of the form. Matches the PillPicker pattern
+// from Chat.tsx (outside-click + Escape to close).
+function CtxUnitDropdown({
+  value,
+  onChange,
+}: {
+  value: CtxUnit;
+  onChange: (next: CtxUnit) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (ev: MouseEvent) => {
+      if (ref.current && !ref.current.contains(ev.target as Node)) setOpen(false);
+    };
+    const onKey = (ev: KeyboardEvent) => {
+      if (ev.key === "Escape") setOpen(false);
+    };
+    window.addEventListener("mousedown", onDoc);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", onDoc);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+  const UNITS: CtxUnit[] = ["tokens", "k", "M"];
+  return (
+    <div ref={ref} className="relative shrink-0">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="h-9 px-3 rounded-[6px] border border-line bg-canvas text-[13px] flex items-center gap-1.5 hover:bg-paper whitespace-nowrap"
+      >
+        <span>{CTX_UNIT_LABEL[value]}</span>
+        <ChevronDown className="w-3.5 h-3.5 text-ink-muted shrink-0" />
+      </button>
+      {open && (
+        <div
+          role="menu"
+          className="absolute right-0 mt-1.5 z-30 w-[140px] rounded-[10px] border border-line bg-canvas shadow-lift p-1"
+        >
+          {UNITS.map((u) => {
+            const active = u === value;
+            return (
+              <button
+                key={u}
+                type="button"
+                role="menuitemradio"
+                aria-checked={active}
+                onClick={() => {
+                  onChange(u);
+                  setOpen(false);
+                }}
+                className={cn(
+                  "w-full flex items-center gap-2 px-2 py-1.5 rounded-[6px] text-left text-[13px]",
+                  active
+                    ? "bg-klein-wash/40 text-ink"
+                    : "text-ink-soft hover:bg-paper/60",
+                )}
+              >
+                <span
+                  className={cn(
+                    "h-3.5 w-3.5 rounded-full border-2 shrink-0 flex items-center justify-center",
+                    active
+                      ? "border-klein bg-klein text-canvas"
+                      : "border-line-strong bg-canvas",
+                  )}
+                >
+                  {active && <Check className="w-2 h-2" />}
+                </span>
+                <span>{CTX_UNIT_LABEL[u]}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ModelsPanel() {
   const loadSettings = useAppSettings((s) => s.load);
   const patch = useAppSettings((s) => s.patch);
@@ -2475,15 +2564,10 @@ function ModelsPanel() {
                   min="0"
                   className="flex-1 min-w-0 h-9 px-3 bg-canvas border border-line rounded-[6px] text-[13px]"
                 />
-                <select
+                <CtxUnitDropdown
                   value={draft.ctxUnit}
-                  onChange={(e) => setDraft({ ...draft, ctxUnit: e.target.value as CtxUnit })}
-                  className="h-9 px-2 bg-canvas border border-line rounded-[6px] text-[13px]"
-                >
-                  <option value="tokens">tokens</option>
-                  <option value="k">k tokens</option>
-                  <option value="M">M tokens</option>
-                </select>
+                  onChange={(u) => setDraft({ ...draft, ctxUnit: u })}
+                />
               </div>
               <div className="text-[11px] text-ink-muted mt-1">Used for the context-percentage ring. Leave blank for the 1M default.</div>
             </div>
