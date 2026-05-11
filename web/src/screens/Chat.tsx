@@ -2422,7 +2422,12 @@ function ToolGroup({
 }) {
   const meta = useMemo(() => {
     let anyRunning = false;
-    let anyError = false;
+    let errorCount = 0;
+    // Last *completed* piece's error state — drives the resting tone once
+    // everything settles. A mid-group error followed by a successful tool
+    // shouldn't poison the whole group (user's ask: "最终的状态展示最新一
+    // 个条目的状态"); the error count chip still surfaces that it happened.
+    let lastError: boolean | null = null;
     let startMs: number | null = null;
     let endMs: number | null = null;
     const names: string[] = [];
@@ -2431,7 +2436,10 @@ function ToolGroup({
       if (r == null) {
         anyRunning = true;
       } else if (r.isError) {
-        anyError = true;
+        errorCount++;
+        lastError = true;
+      } else {
+        lastError = false;
       }
       names.push(p.name);
       if (p.createdAt) {
@@ -2447,30 +2455,30 @@ function ToolGroup({
         }
       }
     }
-    return { anyRunning, anyError, names, startMs, endMs };
+    return { anyRunning, errorCount, lastError, names, startMs, endMs };
   }, [pieces, matchedResultByToolUseId]);
 
   const [manualState, setManualState] = useState<"open" | "closed" | null>(
     null,
   );
-  // Default-open rule: expanded while anything is live OR the current
-  // tool stretch hasn't been closed out by a prose / permission / user
-  // piece yet. This deliberately does NOT include `anyError` — an
-  // errored group in the middle of an old transcript shouldn't force
-  // itself open forever; the latest errored group stays open naturally
-  // because no text has landed after it yet (!finalized), while any
-  // historical errored group has a finalizer after it so `finalized=true`
-  // pulls it back to the collapsed default. The danger tone + `ERRORED`
-  // label in the header carries the "this failed" signal either way.
-  const defaultOpen = meta.anyRunning || !finalized;
+  // "Still live" = at least one tool is mid-flight, OR the group hasn't
+  // been closed out by a non-tool finalizer yet. The latter matters
+  // because a batch of tools can all land with results while the
+  // assistant is still mid-turn about to fire more — showing ✓ done in
+  // that window looks disjointed against the loading dots below.
+  const isLive = meta.anyRunning || !finalized;
+  const defaultOpen = isLive;
   const open = manualState === "open" || (manualState === null && defaultOpen);
   const toggle = () => setManualState(open ? "closed" : "open");
 
-  // Accent color key: danger > klein (running) > neutral (done).
-  const tone: "danger" | "klein" | "neutral" = meta.anyError
-    ? "danger"
-    : meta.anyRunning
-      ? "klein"
+  // Accent color key: live (running) trumps danger — the user would
+  // rather see a running spinner than a red X while things are still
+  // landing. Once the group is fully at rest, tone reflects the *last*
+  // completed piece's state, not any-error aggregated over the history.
+  const tone: "danger" | "klein" | "neutral" = isLive
+    ? "klein"
+    : meta.lastError
+      ? "danger"
       : "neutral";
   const frameClass =
     tone === "danger"
@@ -2531,15 +2539,14 @@ function ToolGroup({
   // Re-render every second while running so the live elapsed counter ticks.
   const [, setTick] = useState(0);
   useEffect(() => {
-    if (!meta.anyRunning) return;
+    if (!isLive) return;
     const i = window.setInterval(() => setTick((x) => x + 1), 1000);
     return () => window.clearInterval(i);
-  }, [meta.anyRunning]);
+  }, [isLive]);
 
   const elapsedText = useMemo(() => {
     if (meta.startMs == null) return null;
-    const end =
-      !meta.anyRunning && meta.endMs != null ? meta.endMs : Date.now();
+    const end = !isLive && meta.endMs != null ? meta.endMs : Date.now();
     const ms = Math.max(0, end - meta.startMs);
     if (ms < 1000) return `${ms}ms`;
     const sec = ms / 1000;
@@ -2547,15 +2554,19 @@ function ToolGroup({
     const m = Math.floor(sec / 60);
     const s = Math.round(sec - m * 60);
     return `${m}m ${s}s`;
-  }, [meta.startMs, meta.endMs, meta.anyRunning]);
+  }, [meta.startMs, meta.endMs, isLive]);
 
-  const countSuffix = meta.anyError
-    ? meta.anyRunning
-      ? "running · errored"
-      : "errored"
-    : meta.anyRunning
-      ? "running"
+  // Surfaced on the summary line. While live we say so; once finished we
+  // only mention errors if there were any (silent success is fine).
+  const errorSuffix =
+    meta.errorCount > 0
+      ? `${meta.errorCount} error${meta.errorCount > 1 ? "s" : ""}`
       : null;
+  const countSuffix = isLive
+    ? errorSuffix
+      ? `running · ${errorSuffix}`
+      : "running"
+    : errorSuffix;
 
   return (
     <div
