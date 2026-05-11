@@ -1524,6 +1524,7 @@ function Piece({
       return (
         <UserBubble
           text={p.text}
+          attachments={p.attachments}
           createdAt={p.createdAt ?? p.at}
           onOpenLightbox={onOpenLightbox}
           editable={
@@ -1704,7 +1705,7 @@ function Piece({
               type="button"
               onClick={() => onOpenSubagents?.()}
               disabled={!onOpenSubagents}
-              className={`w-full flex items-center gap-2 py-1.5 pl-2.5 pr-2.5 rounded-[8px] border text-left shadow-card ${pillClass} disabled:opacity-60`}
+              className={`w-fit max-w-full flex items-center gap-2 py-1.5 pl-2.5 pr-2.5 rounded-[8px] border text-left shadow-card ${pillClass} disabled:opacity-60`}
               title="Open the subagents panel"
             >
               {hasResult && !resultIsError ? (
@@ -2060,21 +2061,32 @@ function ToolCallBlock({
   const ToolIcon = toolIcon(name);
 
   return (
-    <div className={cn(showBody ? "w-full max-w-full" : "w-fit max-w-full")}>
+    <div
+      className={cn(
+        showBody ? "w-full max-w-full" : "w-fit max-w-full",
+        // Single outer frame wrapping header + expanded body. Previously the
+        // header chip and the input/result panes floated as separate bordered
+        // siblings, which looked loose next to the subagent page's framed
+        // look. We now match SubagentRun's `ToolCallCard` — one
+        // rounded+bordered container, with the expanded body sitting behind
+        // a `border-t` divider. Color variants shift the whole frame.
+        "rounded-[10px] border overflow-hidden",
+        isError
+          ? "bg-danger-wash/40 border-danger/30"
+          : running
+            ? "bg-klein-wash/50 border-klein/30"
+            : "bg-paper border-line",
+      )}
+    >
       <div className="w-full max-w-full">
         <button
           type="button"
           onClick={() => canToggle && setExpanded((v) => !v)}
           disabled={!canToggle}
           className={cn(
-            "flex items-center gap-2 py-1.5 pl-2 pr-3 rounded-[8px] border max-w-full text-left overflow-hidden",
-            isError
-              ? "bg-danger-wash/40 border-danger/30"
-              : running
-                ? "bg-klein-wash/50 border-klein/30"
-                : "bg-paper border-line",
+            "w-full flex items-center gap-2 py-1.5 pl-2 pr-3 max-w-full text-left overflow-hidden",
             canToggle &&
-              (running ? "hover:bg-klein-wash/70 cursor-pointer" : "hover:bg-paper/80 cursor-pointer"),
+              (running ? "hover:bg-klein-wash/70 cursor-pointer" : "hover:bg-paper/60 cursor-pointer"),
           )}
           aria-expanded={showBody}
         >
@@ -2143,7 +2155,7 @@ function ToolCallBlock({
         </button>
       </div>
       {showBody && (
-        <div className="mt-1.5 space-y-1.5">
+        <div className="border-t border-line/60 bg-canvas/40 px-3 py-2.5 space-y-2">
           <ToolPayloadPane label="input" text={pretty} />
           {!running && (
             <ToolResultBlock
@@ -2302,6 +2314,7 @@ function ToolResultBlock({
 // ---------------------------------------------------------------------------
 function UserBubble({
   text,
+  attachments,
   createdAt,
   onOpenLightbox,
   editable,
@@ -2314,6 +2327,17 @@ function UserBubble({
   onClearReveal,
 }: {
   text: string;
+  /** Attachment metadata carried on the persisted user_message event.
+   * Image MIMEs get rendered as thumbs above the bubble text (merged with
+   * any images already extracted from the text body); non-image files get
+   * a filename chip so the user can tell *something* was attached. The
+   * server serves both shapes at `/api/attachments/:id/raw`. */
+  attachments?: Array<{
+    id: string;
+    filename: string;
+    mime: string;
+    size: number;
+  }>;
   /** ISO timestamp of the persisted user_message event. When present, we
    * render a small muted mono caption BELOW the bubble, right-aligned —
    * visible on both mobile and desktop. Hover reveals the absolute
@@ -2346,9 +2370,41 @@ function UserBubble({
    * inline editor. */
   onClearReveal?: () => void;
 }) {
-  const { images, remainingText } = useMemo(
+  const { images: textImages, remainingText } = useMemo(
     () => extractImagesFromText(text),
     [text],
+  );
+  // Attachments carried on the user_message event. Split into image vs
+  // non-image: images go into the ImageThumbs row with the existing lightbox
+  // wiring; non-images render as a small chip row so the user can tell a
+  // file was attached even if it's a PDF / text / other. Concatenated with
+  // `textImages` so the thumb row is a single strip — images the user
+  // attached via the composer sit first (they were the user's explicit
+  // intent for this turn), followed by whatever the CLI pasted into the
+  // text body.
+  const { attachmentImages, attachmentFiles } = useMemo(() => {
+    const imgs: ImageRef[] = [];
+    const files: Array<{
+      id: string;
+      filename: string;
+      mime: string;
+      size: number;
+    }> = [];
+    for (const a of attachments ?? []) {
+      if (typeof a.mime === "string" && a.mime.startsWith("image/")) {
+        imgs.push({
+          src: `/api/attachments/${encodeURIComponent(a.id)}/raw`,
+          alt: a.filename || a.mime,
+        });
+      } else {
+        files.push(a);
+      }
+    }
+    return { attachmentImages: imgs, attachmentFiles: files };
+  }, [attachments]);
+  const images = useMemo(
+    () => [...attachmentImages, ...textImages],
+    [attachmentImages, textImages],
   );
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(text);

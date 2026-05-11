@@ -94,6 +94,48 @@ body {
   animation: shake-x 320ms ease-in-out;
 }
 
+/* Global pretty scrollbars. Native scrollbars (especially on desktop
+   Chrome/Firefox where they're always painted, not overlayed) are chunky
+   and stylistically out of place against claudex's warm paper palette.
+   We apply a thin translucent thumb by default so every scroll region
+   picks up the same restrained look.
+
+   Opt-outs keep working:
+   - `.dark-scroll` (for dark surfaces) below wins by specificity (0,1,1
+     beats the universal selector's 0,0,1).
+   - `.no-scrollbar` (hide entirely) also wins for the same reason.
+
+   We use `background-clip: padding-box` + a transparent border so the
+   thumb reads as an inset pill with breathing room on either side —
+   this matches the aesthetic GitHub and Linear use on desktop. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(31, 30, 29, 0.22) transparent;
+}
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background-color: rgba(31, 30, 29, 0.18);
+  border-radius: 9999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  transition: background-color 120ms ease;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(31, 30, 29, 0.36);
+}
+*::-webkit-scrollbar-thumb:active {
+  background-color: rgba(31, 30, 29, 0.48);
+}
+*::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
 /* Visible scrollbar on dark surfaces (e.g. the shared tool input/output
    pane in Chat). The default Mac overlay scrollbar all but vanishes on a
    near-black background; this styles the WebKit scrollbar track + thumb
