@@ -256,10 +256,7 @@ function InputPreview({ prompt }: { prompt: string | null }) {
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className={cn(
-          "w-full flex items-center gap-2 text-left",
-          open && "sticky top-0 z-10 bg-paper py-1 -mx-3 px-3",
-        )}
+        className="w-full flex items-center gap-2 text-left"
         aria-expanded={open}
       >
         <ChevronRight

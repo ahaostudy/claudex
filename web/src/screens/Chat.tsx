@@ -2851,13 +2851,6 @@ function ToolCallBlock({
           disabled={!canToggle}
           className={cn(
             "w-full flex items-center gap-2 py-1.5 pl-2 pr-3 max-w-full text-left overflow-hidden",
-            showBody && "sticky top-0 z-10",
-            showBody &&
-              (isError
-                ? "bg-danger-wash"
-                : running
-                  ? "bg-klein-wash"
-                  : "bg-paper"),
             canToggle &&
               (running ? "hover:bg-klein-wash/70 cursor-pointer" : "hover:bg-paper/60 cursor-pointer"),
           )}
