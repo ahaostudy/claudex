@@ -563,28 +563,29 @@ function ToolResultLine({
 }
 
 function RunFooter({ run }: { run: SubagentRun }) {
-  // TODO(s-17): wire a client stop frame so this actually cancels the
-  // subagent (SDK has SDKControlStopTaskRequest). For now it's disabled
-  // with a tooltip so the surface is in place.
+  // Nothing interactive in the drawer footer — the stop control the SDK
+  // would need isn't wired yet, and a permanently-disabled button just
+  // takes space. The full-page SubagentRun view still carries outputFile
+  // + usage stats, so users who want those details use the "Open" link
+  // on each row header. Here we just keep a minimal identity line: short
+  // taskId + outputFile path when present.
+  if (!run.outputFile) {
+    return (
+      <div className="px-3 pt-2 pb-2.5 border-t border-line/70 flex items-center bg-paper/40">
+        <span className="ml-auto mono text-[10px] text-ink-muted">
+          {run.taskId.slice(0, 8)}…
+        </span>
+      </div>
+    );
+  }
   return (
     <div className="px-3 pt-2 pb-2.5 border-t border-line/70 flex items-center gap-2 bg-paper/40">
-      <button
-        type="button"
-        disabled
-        title="Stopping subagents is not wired yet — use the session interrupt (⌘⇧X) to cancel the whole turn instead."
-        className="h-6 px-2 rounded-[6px] border border-line bg-canvas text-[11px] flex items-center gap-1 opacity-50 cursor-not-allowed"
+      <span
+        className="mono text-[10px] text-ink-muted truncate max-w-[30ch]"
+        title={run.outputFile}
       >
-        <Square className="w-2.5 h-2.5" aria-hidden />
-        stop
-      </button>
-      {run.outputFile && (
-        <span
-          className="mono text-[10px] text-ink-muted truncate max-w-[30ch]"
-          title={run.outputFile}
-        >
-          → {run.outputFile}
-        </span>
-      )}
+        → {run.outputFile}
+      </span>
       <span className="ml-auto mono text-[10px] text-ink-muted">
         {run.taskId.slice(0, 8)}…
       </span>

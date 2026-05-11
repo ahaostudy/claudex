@@ -75,7 +75,14 @@ export function SubagentRunScreen() {
   }, [isLive]);
 
   return (
-    <div className="min-h-screen flex flex-col bg-canvas">
+    // `h-screen` (not `min-h-screen`) pins the root to exactly the
+    // viewport height. Without a fixed height, the inner `flex-1
+    // min-h-0 overflow-y-auto` scroller has nothing to scroll *against*
+    // — the parent grows with its content and the whole page becomes
+    // static. With h-screen, header stays put + the scroller gets the
+    // remaining height and handles long transcripts correctly on both
+    // mobile Safari and desktop.
+    <div className="h-screen flex flex-col bg-canvas">
       <Header
         run={run}
         sessionId={id ?? ""}
