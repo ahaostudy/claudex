@@ -117,3 +117,19 @@ body {
   background-color: rgba(250, 249, 245, 0.38);
 }
 
+/* Scroll-but-don't-show-a-scrollbar. Used by the Files breadcrumb and the
+   Home/Root/Up toolbar — both are `overflow-x-auto` so long paths / extra
+   buttons scroll horizontally, but on mobile Chrome the always-visible
+   WebKit horizontal scrollbar rendered as a thin line under each element
+   and looked exactly like a text underline. We still want overflow-scroll
+   behavior (drag to pan), just not the painted track. */
+.no-scrollbar {
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* Edge legacy */
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+

@@ -422,7 +422,7 @@ function Toolbar({
 }) {
   const size = compact ? "h-7 px-2 text-[11px]" : "h-8 px-2.5 text-[12px]";
   return (
-    <div className="flex items-center gap-1.5 overflow-x-auto">
+    <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar">
       <ToolbarButton onClick={onHome} icon={<Home className="w-3.5 h-3.5" />} label="Home" size={size} />
       <ToolbarButton onClick={onRoot} icon={<HardDrive className="w-3.5 h-3.5" />} label="Root" size={size} />
       <ToolbarButton
@@ -603,7 +603,7 @@ function Breadcrumb({
   return (
     <div
       className={cn(
-        "flex items-center gap-1 overflow-x-auto mono text-[11.5px] text-ink-muted",
+        "flex items-center gap-1 overflow-x-auto no-scrollbar mono text-[11.5px] text-ink-muted",
         className,
       )}
     >
@@ -730,7 +730,7 @@ function MobileFilesView(p: FilesViewProps) {
             was buried inside the scrolling toolbar where users never saw
             it. */}
         <div className="flex items-center gap-1.5">
-          <div className="flex-1 min-w-0 overflow-x-auto">
+          <div className="flex-1 min-w-0 overflow-x-auto no-scrollbar">
             <Toolbar
               onHome={p.onHome}
               onRoot={p.onRoot}
@@ -916,7 +916,7 @@ function DesktopFilesView(p: FilesViewProps) {
             />
           </div>
           <div className="flex items-center gap-1.5">
-            <div className="flex-1 min-w-0 overflow-x-auto">
+            <div className="flex-1 min-w-0 overflow-x-auto no-scrollbar">
               <Toolbar
                 onHome={p.onHome}
                 onRoot={p.onRoot}
