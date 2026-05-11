@@ -10,6 +10,7 @@ import type {
   SessionEvent,
   SessionStatus,
 } from "@claudex/shared";
+import { defaultEffortForModel } from "@claudex/shared";
 import { SearchStore } from "../search/store.js";
 
 interface SessionRow {
@@ -360,7 +361,7 @@ export class SessionStore {
       status: "idle",
       model: input.model,
       mode: input.mode,
-      effort: input.effort ?? "medium",
+      effort: input.effort ?? defaultEffortForModel(input.model),
       created_at: now,
       updated_at: now,
       last_message_at: null,

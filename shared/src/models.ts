@@ -43,6 +43,36 @@ export const EffortLevel = z.enum([
 ]);
 export type EffortLevel = z.infer<typeof EffortLevel>;
 
+// Thinking-effort defaults / gating by model. Rule (user-stated):
+//   - `xhigh` is Opus 4.7 only. Other models can't use it.
+//   - Default effort is the highest level the model supports:
+//       opus-4-7    → xhigh
+//       sonnet-4-6  → high
+//       haiku-4-5   → high
+// Kept in `shared/` so the UI and server agree on what to offer and what
+// to accept when the user swaps models on an existing session.
+export function defaultEffortForModel(model: ModelId): EffortLevel {
+  return model === "claude-opus-4-7" ? "xhigh" : "high";
+}
+
+export function effortSupportedOnModel(
+  model: ModelId,
+  effort: EffortLevel,
+): boolean {
+  if (effort === "xhigh") return model === "claude-opus-4-7";
+  return true;
+}
+
+// Clamp an effort level to what the given model supports. If the current
+// level isn't available on the new model (today: `xhigh` outside Opus 4.7),
+// fall back to `high` — closest neighbour that every model supports.
+export function clampEffortForModel(
+  model: ModelId,
+  effort: EffortLevel,
+): EffortLevel {
+  return effortSupportedOnModel(model, effort) ? effort : "high";
+}
+
 export const SessionStatus = z.enum([
   "idle", // no turn in progress
   "running", // claude is working (driven by claudex's SDK runner)

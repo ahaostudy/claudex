@@ -11,6 +11,7 @@ import {
   TrustProjectRequest,
   UpdateProjectRequest,
   UpdateSessionRequest,
+  clampEffortForModel,
   type ToolGrant,
 } from "@claudex/shared";
 import { ProjectStore } from "./projects.js";
@@ -614,6 +615,19 @@ export async function registerSessionRoutes(
       const warnings: string[] = [];
       const { title, model, mode, effort, tags, pinned } = parsed.data;
 
+      // Clamp `effort` to what the (possibly-new) model supports. Today this
+      // only matters for `xhigh`, which is Opus 4.7-only — switching to a
+      // smaller model (or PATCHing xhigh onto one) silently downgrades to
+      // `high` so the runner never hands an unsupported budget to the SDK.
+      const nextModel = model ?? existing.model;
+      const incomingEffort = effort ?? existing.effort;
+      const clamped = clampEffortForModel(nextModel, incomingEffort);
+      // Only turn clamp into a field change when it actually differs from the
+      // incoming patch — if the caller didn't pass `effort` and the existing
+      // row is already unsupported (stale data), we still want to fix it.
+      const effectiveEffort =
+        clamped !== incomingEffort ? clamped : effort;
+
       if (title !== undefined) sessions.setTitle(id, title);
       if (model !== undefined && model !== existing.model) {
         sessions.setModel(id, model);
@@ -637,8 +651,11 @@ export async function registerSessionRoutes(
           );
         }
       }
-      if (effort !== undefined && effort !== existing.effort) {
-        sessions.setEffort(id, effort);
+      if (
+        effectiveEffort !== undefined &&
+        effectiveEffort !== existing.effort
+      ) {
+        sessions.setEffort(id, effectiveEffort);
         // Runner stores the new value for the NEXT SDK turn — same warning
         // as model swap so the UI can tell the user the change is deferred
         // if Claude is currently mid-turn.
@@ -646,10 +663,10 @@ export async function registerSessionRoutes(
           warnings.push("effort_change_applies_to_next_turn");
         }
         try {
-          await deps.manager.applyEffort(id, effort);
+          await deps.manager.applyEffort(id, effectiveEffort);
         } catch (err) {
           req.log.warn(
-            { err, sessionId: id, effort },
+            { err, sessionId: id, effort: effectiveEffort },
             "failed to propagate effort level to runner",
           );
         }
