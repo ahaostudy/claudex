@@ -702,23 +702,28 @@ function ProjectGroup({
   const path = project?.path ?? "";
 
   // Default-collapsed view: every non-idle session (awaiting / running /
-  // error / cli_running) is always rendered regardless of count, plus the
-  // top 3 most-recent idle sessions so the user still gets quick access
-  // to recent work. The rest live behind "Show all". Iterates in sort
-  // order (already pinned-first + updatedAt desc) so the resulting list
-  // preserves the group's ordering.
+  // error / cli_running) is always rendered regardless of count. Beyond
+  // that, the visible list is padded with idle sessions up to a total
+  // budget of 3 rows — so a group with 1 non-idle + 20 idle shows 1
+  // non-idle + 2 idle (3 total), and a group with 5 non-idle + 20 idle
+  // shows all 5 non-idle + 0 idle. Iterates in sort order (already
+  // pinned-first + updatedAt desc) so display order is preserved.
   const { visibleSessions, hiddenCount } = useMemo(() => {
     if (expanded) {
       return { visibleSessions: sessions, hiddenCount: 0 };
     }
-    const IDLE_BUDGET = 3;
+    const TOTAL_BUDGET = 3;
+    const nonIdleCount = sessions.reduce(
+      (n, s) => (s.status !== "idle" ? n + 1 : n),
+      0,
+    );
+    const idleBudget = Math.max(0, TOTAL_BUDGET - nonIdleCount);
     const visible: Session[] = [];
     let idleShown = 0;
     for (const s of sessions) {
-      const isIdle = s.status === "idle";
-      if (!isIdle) {
+      if (s.status !== "idle") {
         visible.push(s);
-      } else if (idleShown < IDLE_BUDGET) {
+      } else if (idleShown < idleBudget) {
         visible.push(s);
         idleShown++;
       }
