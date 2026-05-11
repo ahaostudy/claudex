@@ -37,14 +37,6 @@ const DOT_GLOW: Record<string, string> = {
   error: "0 0 0 4px rgba(185,28,28,0.18)",
 };
 
-// Compact label for model ids shown in the row meta line.
-function shortModel(id: string): string {
-  if (id === "claude-opus-4-7") return "opus-4.7";
-  if (id === "claude-sonnet-4-6") return "sonnet-4.6";
-  if (id === "claude-haiku-4-5") return "haiku-4.5";
-  return id;
-}
-
 // ---------------------------------------------------------------------------
 // Filter chip rail (mockup s-02 lines 492–500).
 //
@@ -1053,9 +1045,12 @@ function SessionRow({
           archived && "opacity-75",
         )}
       >
-      {/* Mobile stacked layout — mirrors mockup s-02 rows (lines 370-403):
-          CAPS status line (dot + label + relative time) on top, title with
-          context ring aligned to its right, optional subtitle, meta row. */}
+      {/* Mobile stacked layout — mirrors mockup s-02 rows (lines 376-392):
+          CAPS status line (dot + label + relative time) on top, title,
+          optional last-user-message preview, then a single meta row that
+          groups branch + diff stats on the left with the context ring
+          pinned to the right. Model / permission-mode intentionally not
+          shown here — they're visible inside the chat session once opened. */}
       <div className="md:hidden px-4 py-3">
         <div className="flex items-center gap-2">
           <span
@@ -1066,10 +1061,6 @@ function SessionRow({
             {statusPillLabel(s.status)}
           </span>
           <span className="ml-auto text-[11px] text-ink-faint">{rel}</span>
-          {/* Mobile-only in-flow delete trigger. Lives inside the status
-              line (not absolute) so it never overlaps title / context ring
-              / tags. Small target with an accessible label; confirm popover
-              anchors from the row itself. */}
           <button
             type="button"
             onClick={openConfirm}
@@ -1090,17 +1081,30 @@ function SessionRow({
           <div className="text-[15px] font-medium leading-snug truncate flex-1 min-w-0">
             {s.title || "Untitled"}
           </div>
-          <span className="shrink-0">
+        </div>
+        {s.lastUserMessage && (
+          <div className="text-[13px] text-ink-muted truncate mt-1">
+            {s.lastUserMessage}
+          </div>
+        )}
+        <div className="mt-2 flex items-center gap-2 text-[11px]">
+          <span className="mono text-ink-soft inline-flex items-center gap-1 truncate min-w-0">
+            <GitBranch className="w-3 h-3 shrink-0" />
+            {branch ?? <span className="text-ink-faint">—</span>}
+          </span>
+          {hasDiffs && (
+            <span className="mono text-ink-muted shrink-0">
+              <span className="text-success">+{linesAdded}</span>{" "}
+              <span className="text-danger">−{linesRemoved}</span>
+              {filesChanged > 0 && (
+                <span className="opacity-70"> · {filesChanged}f</span>
+              )}
+            </span>
+          )}
+          <span className="ml-auto shrink-0">
             {showRing ? (
               <svg width="20" height="20">
-                <circle
-                  cx="10"
-                  cy="10"
-                  r="8"
-                  fill="none"
-                  stroke="#e8e4d8"
-                  strokeWidth="2.5"
-                />
+                <circle cx="10" cy="10" r="8" fill="none" stroke="#e8e4d8" strokeWidth="2.5" />
                 <circle
                   cx="10"
                   cy="10"
@@ -1114,46 +1118,8 @@ function SessionRow({
                   transform="rotate(-90 10 10)"
                 />
               </svg>
-            ) : (
-              <svg width="20" height="20">
-                <circle
-                  cx="10"
-                  cy="10"
-                  r="8"
-                  fill="none"
-                  stroke="#e8e4d8"
-                  strokeWidth="2.5"
-                />
-              </svg>
-            )}
+            ) : null}
           </span>
-        </div>
-        {/* Last sent user message — single line, ellipsis-truncated.
-            Server seeds it in SESSION_SELECT_COLS; web store mirrors it
-            optimistically on `user_message` WS frames so the list stays
-            live as the user types across tabs. Rendered only when the
-            session actually has a prior user message. */}
-        {s.lastUserMessage && (
-          <div className="text-[12px] text-ink-muted truncate mt-0.5">
-            {s.lastUserMessage}
-          </div>
-        )}
-        {hasDiffs && (
-          <div className="mono text-[12px] text-ink-muted truncate mt-0.5">
-            <span className="text-success">+{linesAdded}</span>{" "}
-            <span className="text-danger">−{linesRemoved}</span>{" "}
-            <span>· {filesChanged}f</span>
-          </div>
-        )}
-        <div className="mt-1 flex items-center gap-2 text-[11px] text-ink-muted">
-          <span className="mono inline-flex items-center gap-1 truncate">
-            <GitBranch className="w-3 h-3 shrink-0" />
-            {branch ?? <span className="text-ink-faint">—</span>}
-          </span>
-          <span>·</span>
-          <span className="mono shrink-0">{shortModel(s.model)}</span>
-          <span>·</span>
-          <span className="shrink-0">{s.mode}</span>
         </div>
       </div>
 
@@ -1276,11 +1242,10 @@ function SessionRow({
             ) : null}
           </div>
         </div>
+        {/* Compact meta row — model / permission mode intentionally dropped.
+            Status pill carries the state signal and rel-time the recency;
+            model + mode are surfaced inside the chat session, not here. */}
         <div className="mt-1.5 flex items-center gap-3 text-[11px] text-ink-muted">
-          <span className="mono">{shortModel(s.model)}</span>
-          <span>·</span>
-          <span>{s.mode}</span>
-          <span>·</span>
           <span>{rel}</span>
         </div>
       </div>
