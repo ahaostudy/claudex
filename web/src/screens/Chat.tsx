@@ -326,6 +326,46 @@ export function ChatScreen() {
       /* private browsing etc. — ignore */
     }
   }, [showSettingsRail]);
+  // Right-rail slot arbitration — Settings / Plan / Subagents share one
+  // desktop rail slot, so opening any of them must close the other two.
+  // Without this, the previous "gate Settings render on !plan && !subagents"
+  // hack made the Settings button silently no-op whenever Plan/Subagents
+  // were already open: state flipped but render stayed suppressed. Routing
+  // every open/toggle through these helpers keeps button behavior
+  // predictable — last click wins, and the visible panel always matches
+  // the state flags. Mobile overlays are driven off the same flags; the
+  // mutex is harmless there because the overlay variants already block
+  // each other visually and the rail-only state is unused at <md.
+  const openPlanRail = () => {
+    setShowPlanSheet(true);
+    setShowSubagentsSheet(false);
+    setShowSettingsRail(false);
+  };
+  const openSubagentsRail = () => {
+    setShowSubagentsSheet(true);
+    setShowPlanSheet(false);
+    setShowSettingsRail(false);
+  };
+  const toggleSettingsRail = () => {
+    setShowSettingsRail((v) => {
+      const next = !v;
+      if (next) {
+        setShowPlanSheet(false);
+        setShowSubagentsSheet(false);
+      }
+      return next;
+    });
+  };
+  const toggleSubagentsRail = () => {
+    setShowSubagentsSheet((v) => {
+      const next = !v;
+      if (next) {
+        setShowPlanSheet(false);
+        setShowSettingsRail(false);
+      }
+      return next;
+    });
+  };
   const {
     transcripts,
     transcriptMeta,
@@ -798,7 +838,7 @@ export function ChatScreen() {
         {subagentRuns.length > 0 && (
           <button
             type="button"
-            onClick={() => setShowSubagentsSheet(true)}
+            onClick={openSubagentsRail}
             disabled={!session}
             aria-label="Open subagents"
             title={
@@ -925,7 +965,7 @@ export function ChatScreen() {
           {subagentRuns.length > 0 && (
             <button
               type="button"
-              onClick={() => setShowSubagentsSheet((v) => !v)}
+              onClick={toggleSubagentsRail}
               aria-label="Open subagents"
               aria-pressed={showSubagentsSheet}
               title={
@@ -950,7 +990,7 @@ export function ChatScreen() {
             </button>
           )}
           <button
-            onClick={() => setShowSettingsRail((v) => !v)}
+            onClick={toggleSettingsRail}
             title={
               showSettingsRail ? "Hide settings rail" : "Show settings rail"
             }
@@ -974,7 +1014,7 @@ export function ChatScreen() {
           (bottom sheet on mobile, right slide-over on desktop). */}
       <PlanStrip
         snapshot={planSnapshot}
-        onOpen={() => setShowPlanSheet(true)}
+        onOpen={openPlanRail}
       />
 
       {/* Subagents strip — same always-visible pattern as PlanStrip but
@@ -985,7 +1025,7 @@ export function ChatScreen() {
           — same trigger as the header Tasks icon. */}
       <SubagentsStrip
         runs={subagentRuns}
-        onOpen={() => setShowSubagentsSheet(true)}
+        onOpen={openSubagentsRail}
       />
 
       {/* Messages — `flex-1 min-h-0` is the magic pair that lets the child
@@ -1055,8 +1095,8 @@ export function ChatScreen() {
               onOpenLightbox={(images, index) =>
                 setLightbox({ images, index })
               }
-              onOpenPlan={() => setShowPlanSheet(true)}
-              onOpenSubagents={() => setShowSubagentsSheet(true)}
+              onOpenPlan={openPlanRail}
+              onOpenSubagents={openSubagentsRail}
               revealedSeq={revealedSeq}
               onToggleReveal={(seq) =>
                 setRevealedSeq((current) => (current === seq ? null : seq))
@@ -1125,6 +1165,9 @@ export function ChatScreen() {
         }}
         onStop={() => id && interruptSession(id)}
         onOpenSideChat={() => setShowSideChat(true)}
+        onOpenLightbox={(images, index) =>
+          setLightbox({ images, index })
+        }
         onClaudexAction={(action) => {
           // Route a picked `claudex-action` slash command to the local UI
           // instead of sending the token over the WS. Each case matches one
@@ -1236,7 +1279,7 @@ export function ChatScreen() {
           onClose={() => setShowTasks(false)}
         />
       )}
-      {showSettingsRail && session && !showPlanSheet && !showSubagentsSheet && (
+      {showSettingsRail && session && (
         <SessionSettingsSheet
           variant="rail"
           session={session}
@@ -1246,11 +1289,13 @@ export function ChatScreen() {
         />
       )}
       {/* Desktop-only push-mode rails for Plan + Subagents. They share the
-          right-rail slot with the Settings rail above: when either opens
-          Settings is hidden (same slot, not a second column) so the header
-          never stacks two right rails. Mobile keeps the overlay variants
-          that render inside <main> above. Both rails are self-hidden under
-          `md:` so mobile never double-renders. */}
+          right-rail slot with the Settings rail via state-level mutex
+          (see `openPlanRail` / `openSubagentsRail` / `toggleSettingsRail`
+          up top) — at most one of the three flags is ever true at a time
+          after any user interaction, so we don't need a render gate here.
+          Mobile keeps the overlay variants that render inside <main>
+          above. Both rails are self-hidden under `md:` so mobile never
+          double-renders. */}
       {showPlanSheet && (
         <PlanSheet
           variant="rail"
@@ -3996,6 +4041,7 @@ function Composer({
   onStop,
   onOpenSideChat,
   onClaudexAction,
+  onOpenLightbox,
   keyboardOffset = 0,
 }: {
   project: Project | null;
@@ -4010,6 +4056,12 @@ function Composer({
    * the `/x` token over the wire.
    */
   onClaudexAction?: (action: SlashClaudexAction) => void;
+  /**
+   * Click-to-expand for image attachment thumbnails in the chip row above the
+   * textarea. Same lightbox the transcript uses — state is owned by
+   * ChatScreen so the overlay renders above every drawer/sheet.
+   */
+  onOpenLightbox?: (images: ImageRef[], index: number) => void;
   /**
    * CSS pixels currently hidden under the mobile software keyboard (from
    * `visualViewport`). When > 0 we translate the composer wrapper upward by
@@ -4512,11 +4564,35 @@ function Composer({
               className="h-10 pl-1 pr-2 rounded-[10px] border border-line bg-paper/70 text-[12px] flex items-center gap-2 whitespace-nowrap"
             >
               {a.previewUrl ? (
-                <img
-                  src={a.previewUrl}
-                  alt={a.filename}
-                  className="w-8 h-8 rounded-md object-cover"
-                />
+                (() => {
+                  // Build the lightbox set from all image attachments currently
+                  // in the chip row, in display order. Clicking any image opens
+                  // the full-size viewer at that image's index and lets the
+                  // user arrow-nav through the whole set without closing.
+                  const imageAtts = attachments.filter(
+                    (x): x is typeof x & { previewUrl: string } =>
+                      !!x.previewUrl,
+                  );
+                  const idx = imageAtts.findIndex((x) => x.id === a.id);
+                  const images: ImageRef[] = imageAtts.map((x) => ({
+                    src: x.previewUrl,
+                    alt: x.filename,
+                  }));
+                  return (
+                    <button
+                      type="button"
+                      onClick={() => onOpenLightbox?.(images, Math.max(0, idx))}
+                      className="shrink-0 rounded-md focus:outline-none focus:ring-2 focus:ring-klein/40"
+                      aria-label={`Preview ${a.filename}`}
+                    >
+                      <img
+                        src={a.previewUrl}
+                        alt={a.filename}
+                        className="w-8 h-8 rounded-md object-cover"
+                      />
+                    </button>
+                  );
+                })()
               ) : (
                 <span className="w-8 h-8 rounded-md bg-ink/5 flex items-center justify-center">
                   <Paperclip className="w-3.5 h-3.5 text-ink-soft" />
