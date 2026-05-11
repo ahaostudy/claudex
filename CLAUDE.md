@@ -113,14 +113,18 @@ you are creating that mess. Commit and push now; iterate on top.
    ask for approval.** The user no longer edits main directly — every
    batch reaches main via a worktree → merge → push chain. Worktree
    branches are **never pushed to origin**. Full procedure
-   (clean-checkout preconditions, `--no-ff` merge, conflict handling)
-   is in "Merging a worktree session back into main" below; read it
-   once, then from each worktree session run these commands
-   unprompted right after the commit lands:
+   (clean-checkout preconditions, `--no-ff` merge, **merge-commit
+   message policy**, conflict handling) is in "Merging a worktree
+   session back into main" below; read it once, then from each
+   worktree session run these commands unprompted right after the
+   commit lands (the merge commit reuses the worktree branch's HEAD
+   commit message — see the subsection for why and for the "multiple
+   commits in one batch" caveat):
    ```sh
    ROOT="$(git worktree list --porcelain | awk '/^worktree / {print $2; exit}')"
    BRANCH="$(git rev-parse --abbrev-ref HEAD)"
-   git -C "$ROOT" merge --no-ff "$BRANCH" -m "Merge $BRANCH into main"
+   MSG="$(git log -1 --format=%B HEAD)"
+   git -C "$ROOT" merge --no-ff "$BRANCH" -m "$MSG"
    https_proxy=http://localhost:7890 http_proxy=http://localhost:7890 \
      git -C "$ROOT" push origin main
    ```
@@ -327,8 +331,27 @@ the work came from a claudex worktree (useful when bisecting later):
 ```sh
 ROOT="$(git worktree list --porcelain | awk '/^worktree / {print $2; exit}')"
 BRANCH="$(git rev-parse --abbrev-ref HEAD)"   # claude/<slug>-<suffix>
-git -C "$ROOT" merge --no-ff "$BRANCH" -m "Merge $BRANCH into main"
+MSG="$(git log -1 --format=%B HEAD)"
+git -C "$ROOT" merge --no-ff "$BRANCH" -m "$MSG"
 ```
+
+**Merge-commit message policy.** Do NOT use the default
+`Merge $BRANCH into main` template — a main history full of "Merge
+claude/<nanoid>" lines tells the reader nothing about what actually
+changed, and the branch names (slug + nanoid) are noise once the
+worktree is gone. Reuse the batch commit's own message via
+`git log -1 --format=%B HEAD` as shown above so the merge commit
+reads as a real change description instead of plumbing noise. This
+is the common case — a claudex batch is usually a single commit on
+the worktree branch, so reusing its message is exactly right.
+
+If the batch happens to span multiple commits on the worktree branch
+(rare — only when you intentionally split the work mid-batch), don't
+grab just the last commit's message. Instead write a fresh short
+subject that summarizes the batch the same way you'd write a standalone
+commit: one-line imperative subject, optional body, no "Merge …"
+prefix. Passing `-m "<that message>"` to `git merge --no-ff` is the
+mechanical part; the content is your call.
 
 If `git merge` exits non-zero with conflicts, **abort and stop**:
 ```sh
