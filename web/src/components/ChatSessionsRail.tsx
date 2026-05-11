@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Plus, X } from "lucide-react";
-import type { Session } from "@claudex/shared";
+import type { PermissionMode, Session } from "@claudex/shared";
 import { useSessions } from "@/state/sessions";
 import { api, ApiError } from "@/api/client";
 import { cn } from "@/lib/cn";
@@ -255,6 +255,13 @@ function QuickCreateForm({
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  // Default the new session's permission mode to whatever the current session
+  // is running under — matches the ergonomics of the old inherit-mode path
+  // while letting the user override before spawning. Falls back to "default"
+  // if `current` hasn't loaded yet (button is disabled in that case anyway).
+  const [mode, setMode] = useState<PermissionMode>(
+    current?.mode ?? "default",
+  );
 
   useEffect(() => {
     textareaRef.current?.focus();
@@ -269,12 +276,13 @@ function QuickCreateForm({
     try {
       const res = await api.createSession({
         projectId: current.projectId,
-        // Title is optional on the server; leaving it undefined lets the
-        // CreateSession handler fall back to its own derivation (first-
-        // prompt truncation) rather than us pre-coining a placeholder.
+        // Title is secondary in the quick-create flow — users almost never
+        // type one here. Derive from the first prompt when present, otherwise
+        // "Untitled"; the server/UI will still show a friendly name based on
+        // the first message anyway.
         title: trimmed ? trimmed.slice(0, 60) : "Untitled",
         model: current.model,
-        mode: current.mode,
+        mode,
         // Match the Home NewSessionSheet default: no worktree unless the
         // user explicitly asks for one in the full sheet. Quick-create is
         // for "a quick peer session" — not for branching git state.
@@ -309,6 +317,36 @@ function QuickCreateForm({
         rows={2}
         className="w-full resize-none bg-paper border border-line rounded-[6px] p-2 text-[12px] text-ink placeholder:text-ink-faint focus:outline-none focus:border-klein/60"
       />
+      {/* Compact permission-mode segmented control. Mirrors the NewSessionSheet
+          control from Home, shrunk to fit the rail (h-7, 11px labels). Title
+          is intentionally omitted from this form — it's a low-value field at
+          this entry point and pushed to the full sheet on Home instead. */}
+      <div className="grid grid-cols-4 gap-0.5 p-0.5 bg-paper border border-line rounded-[6px]">
+        {(
+          [
+            ["default", "Ask"],
+            ["acceptEdits", "Accept"],
+            ["plan", "Plan"],
+            ["bypassPermissions", "Bypass"],
+          ] as Array<[PermissionMode, string]>
+        ).map(([id, label]) => (
+          <button
+            key={id}
+            type="button"
+            onClick={() => setMode(id)}
+            disabled={busy}
+            className={cn(
+              "h-7 rounded-[4px] text-[11px] font-medium transition-colors",
+              mode === id
+                ? "bg-canvas shadow-card border border-line text-ink"
+                : "text-ink-muted hover:text-ink-soft",
+            )}
+            title={`Permission mode: ${label}`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
       {err && (
         <div className="text-[11px] text-danger mono truncate">{err}</div>
       )}
