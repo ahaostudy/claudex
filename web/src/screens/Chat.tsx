@@ -125,7 +125,19 @@ type ToolUsePiece = Extract<UIPiece, { kind: "tool_use" }>;
 
 type RenderEntry =
   | { kind: "single"; piece: UIPiece; key: string }
-  | { kind: "group"; pieces: ToolUsePiece[]; key: string };
+  | {
+      kind: "group";
+      pieces: ToolUsePiece[];
+      key: string;
+      /** True when a "finalizer" piece (assistant_text / thinking / user /
+       * permission_request / ask_user_question / plan_accept_request) has
+       * landed AFTER this group in the transcript. A non-finalized group
+       * is conceptually "claude is still operating in tool mode, no prose
+       * yet" — keeps itself expanded even if all its own tool_results
+       * have landed, so back-to-back tool runs with brief gaps don't
+       * flicker the group open/closed/open/closed. */
+      finalized: boolean;
+    };
 
 /** True when a tool_use should fold into an adjacent group. Only two
  * kinds of tool_use opt out: pieces owned by a subagent (filtered by
@@ -168,7 +180,13 @@ function pieceKey(p: UIPiece, idx: number): string {
  * into a `group` entry. A `tool_result` whose toolUseId is in `absorbed`
  * belongs to its matching tool_use block and is transparent to grouping —
  * it neither starts nor breaks a group, and renders nothing itself (its
- * matching tool_use already shows the result). */
+ * matching tool_use already shows the result). After the first pass, a
+ * second reverse walk annotates each group's `finalized` flag based on
+ * whether a non-tool "finalizer" piece (assistant_text / thinking / user
+ * / permission / ask / plan_accept) appears later in the list — groups
+ * without a finalizer stay expanded by default to prevent back-to-back
+ * tool runs from flickering open/closed/open while claude is still
+ * operating in tool mode. */
 function buildRenderEntries(
   pieces: UIPiece[],
   absorbed: Set<string>,
@@ -194,6 +212,7 @@ function buildRenderEntries(
         kind: "group",
         pieces: run,
         key: `group:${run[0].id}`,
+        finalized: false,
       });
     } else {
       out.push({
@@ -221,7 +240,35 @@ function buildRenderEntries(
     out.push({ kind: "single", piece: p, key: pieceKey(p, i) });
   }
   flush();
+  // Second pass — walk in reverse, mark groups finalized once we've
+  // passed a "finalizer" piece on the tail side.
+  let seenFinalizer = false;
+  for (let i = out.length - 1; i >= 0; i--) {
+    const e = out[i];
+    if (e.kind === "single") {
+      if (isFinalizerPiece(e.piece)) seenFinalizer = true;
+    } else if (seenFinalizer) {
+      e.finalized = true;
+    }
+  }
   return out;
+}
+
+/** A piece that ends a "claude is still in tool mode" streak. Once any of
+ * these lands, every preceding tool group is treated as closed business
+ * and can auto-collapse. Tool events (tool_use, tool_result) and pending
+ * do NOT count — we explicitly want back-to-back tool activity to stay
+ * expanded even if the per-group `anyRunning` flag momentarily flips
+ * false between runs. */
+function isFinalizerPiece(p: UIPiece): boolean {
+  return (
+    p.kind === "assistant_text" ||
+    p.kind === "thinking" ||
+    p.kind === "user" ||
+    p.kind === "permission_request" ||
+    p.kind === "ask_user_question" ||
+    p.kind === "plan_accept_request"
+  );
 }
 
 export function ChatScreen() {
@@ -1129,6 +1176,7 @@ export function ChatScreen() {
                 key={e.key}
                 pieces={e.pieces}
                 matchedResultByToolUseId={matchedResultByToolUseId}
+                finalized={e.finalized}
                 renderPiece={(child) =>
                   renderPiece(child, visiblePieces.indexOf(child))
                 }
@@ -1876,6 +1924,15 @@ function Piece({
       if (diff) {
         // Mid-thread Edit/Write diffs render full-width so the hunk grid
         // isn't clipped; the DiffView itself handles horizontal overflow.
+        // When the matched tool_result landed with isError=true (e.g. the
+        // string wasn't unique, or the file changed since Claude last
+        // read it), the diff shows the *proposed* hunks but the edit
+        // didn't actually apply. DiffView has no error surface of its
+        // own, so we tuck a small danger banner underneath — otherwise
+        // a failed edit hides silently and any parent ToolGroup looks
+        // like it's flagging nothing (header says ERRORED but no
+        // visible culprit).
+        const editErrored = matchedResult?.isError === true;
         return (
           <div
             className="w-full"
@@ -1883,6 +1940,20 @@ function Piece({
             data-event-seq={p.seq}
           >
             <DiffView diff={diff} />
+            {editErrored && (
+              <div className="mt-1 flex items-start gap-1.5 rounded-[6px] border border-danger/35 bg-danger-wash/60 px-2 py-1.5 text-[12px] text-danger">
+                <span
+                  className="h-1.5 w-1.5 rounded-full bg-danger mt-1.5 shrink-0"
+                  aria-hidden
+                />
+                <span className="min-w-0 flex-1 leading-[1.4]">
+                  <span className="font-medium mr-1">Edit didn’t apply.</span>
+                  <span className="text-danger/90 break-words">
+                    {summarizeResult(matchedResult!.content, true)}
+                  </span>
+                </span>
+              </div>
+            )}
             {p.createdAt && (
               <div
                 className="mono text-[10px] text-ink-faint mt-1"
@@ -2320,6 +2391,7 @@ function ToolGroup({
   pieces,
   matchedResultByToolUseId,
   renderPiece,
+  finalized,
 }: {
   pieces: ToolUsePiece[];
   matchedResultByToolUseId: Map<
@@ -2327,6 +2399,12 @@ function ToolGroup({
     { content: string; isError: boolean; createdAt?: string }
   >;
   renderPiece: (p: ToolUsePiece) => React.ReactNode;
+  /** True once a non-tool "finalizer" piece has landed AFTER this group —
+   * only then does the group treat itself as historical and fold. Until
+   * then, even an all-green group stays expanded so claude's continuing
+   * tool run doesn't flicker the summary open/closed/open as consecutive
+   * batches complete with brief gaps between them. */
+  finalized: boolean;
 }) {
   const meta = useMemo(() => {
     let anyRunning = false;
@@ -2361,9 +2439,16 @@ function ToolGroup({
   const [manualState, setManualState] = useState<"open" | "closed" | null>(
     null,
   );
-  // Default: expanded while anything is live or a failure lingers; collapsed
-  // once every child has landed green. User clicks flip the override.
-  const defaultOpen = meta.anyRunning || meta.anyError;
+  // Default-open rule: expanded while anything is live OR the current
+  // tool stretch hasn't been closed out by a prose / permission / user
+  // piece yet. This deliberately does NOT include `anyError` — an
+  // errored group in the middle of an old transcript shouldn't force
+  // itself open forever; the latest errored group stays open naturally
+  // because no text has landed after it yet (!finalized), while any
+  // historical errored group has a finalizer after it so `finalized=true`
+  // pulls it back to the collapsed default. The danger tone + `ERRORED`
+  // label in the header carries the "this failed" signal either way.
+  const defaultOpen = meta.anyRunning || !finalized;
   const open = manualState === "open" || (manualState === null && defaultOpen);
   const toggle = () => setManualState(open ? "closed" : "open");
 
