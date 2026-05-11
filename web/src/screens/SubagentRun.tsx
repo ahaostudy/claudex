@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   ArrowLeft,
@@ -74,6 +74,37 @@ export function SubagentRunScreen() {
     return () => clearInterval(h);
   }, [isLive]);
 
+  // Auto-scroll the transcript to the bottom as new stream events arrive
+  // (and once after initial load). Mirrors the tail-append pattern in
+  // Chat.tsx so a live subagent run follows the latest activity without
+  // requiring the user to scroll manually on mobile.
+  const scroller = useRef<HTMLDivElement>(null);
+  const streamLen = run?.stream.length ?? 0;
+  const prevTailLenRef = useRef(0);
+  useEffect(() => {
+    const grew = streamLen > prevTailLenRef.current;
+    prevTailLenRef.current = streamLen;
+    if (!grew) return;
+    const el = scroller.current;
+    if (!el) return;
+    el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+  }, [streamLen]);
+
+  // One-shot instant jump after the run first becomes available — lands
+  // big completed transcripts at the tail without a visible animation.
+  const runLoaded = run !== null;
+  const didInitialJumpRef = useRef(false);
+  useEffect(() => {
+    if (!runLoaded) return;
+    if (didInitialJumpRef.current) return;
+    didInitialJumpRef.current = true;
+    requestAnimationFrame(() => {
+      const el = scroller.current;
+      if (!el) return;
+      el.scrollTop = el.scrollHeight;
+    });
+  }, [runLoaded]);
+
   return (
     // `h-screen` (not `min-h-screen`) pins the root to exactly the
     // viewport height. Without a fixed height, the inner `flex-1
@@ -92,7 +123,10 @@ export function SubagentRunScreen() {
           else navigate("/sessions");
         }}
       />
-      <div className="flex-1 min-h-0 overflow-y-auto">
+      <div
+        ref={scroller}
+        className="flex-1 min-h-0 overflow-y-auto"
+      >
         {run ? (
           <RunView run={run} />
         ) : (
@@ -169,10 +203,10 @@ function Header({
 }
 
 function StatusLabel({ run }: { run: SubagentRun | null }) {
-  if (!run) return <span className="mono">—</span>;
+  if (!run) return <span className="mono shrink-0">—</span>;
   if (run.status === "running") {
     return (
-      <span className="inline-flex items-center gap-1 mono">
+      <span className="inline-flex items-center gap-1 mono whitespace-nowrap shrink-0">
         <Loader2 className="w-3 h-3 animate-spin text-indigo" aria-hidden />
         running · {formatElapsedClock(run.startedAt)}
       </span>
@@ -180,20 +214,20 @@ function StatusLabel({ run }: { run: SubagentRun | null }) {
   }
   if (run.status === "failed") {
     return (
-      <span className="mono text-danger">
+      <span className="mono text-danger whitespace-nowrap shrink-0">
         failed · {timeAgoShort(run.endedAt ?? run.startedAt)}
       </span>
     );
   }
   if (run.status === "stopped") {
     return (
-      <span className="mono">
+      <span className="mono whitespace-nowrap shrink-0">
         stopped · {timeAgoShort(run.endedAt ?? run.startedAt)}
       </span>
     );
   }
   return (
-    <span className="mono">
+    <span className="mono whitespace-nowrap shrink-0">
       completed · {timeAgoShort(run.endedAt ?? run.startedAt)}
     </span>
   );
@@ -256,7 +290,12 @@ function EmptyState({
 
 function RunView({ run }: { run: SubagentRun }) {
   return (
-    <div className="max-w-[860px] mx-auto px-3 md:px-6 py-4 space-y-4">
+    // `pb-[calc(env(safe-area-inset-bottom)+40px)]` keeps the last
+    // message clear of the iPhone home-bar and rounded screen corners —
+    // without it, the bottom of the final bubble is clipped on the sides
+    // as it scrolls into the curved region. 40px gives a little extra
+    // breathing room below even on devices with zero inset.
+    <div className="max-w-[860px] mx-auto px-3 md:px-6 pt-4 pb-[calc(env(safe-area-inset-bottom)+40px)] space-y-4">
       <PromptCard prompt={run.prompt} />
       <StreamList run={run} />
       <FooterCard run={run} />
