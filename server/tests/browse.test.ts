@@ -233,4 +233,131 @@ describe("filesystem browse HTTP routes", () => {
       expect(realDir.isDir).toBe(true);
     });
   });
+
+  describe("GET /api/browse/raw", () => {
+    it("requires auth", async () => {
+      const ctx = await bootstrapAuthedApp();
+      disposers.push(ctx.cleanup);
+      const root = fs.mkdtempSync(path.join(os.tmpdir(), "claudex-raw-"));
+      disposers.push(async () =>
+        fs.rmSync(root, { recursive: true, force: true }),
+      );
+      const filePath = path.join(root, "pixel.png");
+      fs.writeFileSync(filePath, Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+      const res = await ctx.app.inject({
+        method: "GET",
+        url: `/api/browse/raw?path=${encodeURIComponent(filePath)}`,
+      });
+      expect(res.statusCode).toBe(401);
+    });
+
+    it("rejects a non-absolute path with 400 not_absolute", async () => {
+      const ctx = await bootstrapAuthedApp();
+      disposers.push(ctx.cleanup);
+      const res = await ctx.app.inject({
+        method: "GET",
+        url: "/api/browse/raw?path=not-abs.png",
+        headers: { cookie: ctx.cookie },
+      });
+      expect(res.statusCode).toBe(400);
+      expect(res.json().error).toBe("not_absolute");
+    });
+
+    it("returns 404 not_found for a missing file", async () => {
+      const ctx = await bootstrapAuthedApp();
+      disposers.push(ctx.cleanup);
+      const root = fs.mkdtempSync(path.join(os.tmpdir(), "claudex-raw-"));
+      disposers.push(async () =>
+        fs.rmSync(root, { recursive: true, force: true }),
+      );
+      const res = await ctx.app.inject({
+        method: "GET",
+        url: `/api/browse/raw?path=${encodeURIComponent(
+          path.join(root, "nope.png"),
+        )}`,
+        headers: { cookie: ctx.cookie },
+      });
+      expect(res.statusCode).toBe(404);
+      expect(res.json().error).toBe("not_found");
+    });
+
+    it("rejects a directory with 400 is_a_directory", async () => {
+      const ctx = await bootstrapAuthedApp();
+      disposers.push(ctx.cleanup);
+      const root = fs.mkdtempSync(path.join(os.tmpdir(), "claudex-raw-"));
+      disposers.push(async () =>
+        fs.rmSync(root, { recursive: true, force: true }),
+      );
+      const res = await ctx.app.inject({
+        method: "GET",
+        url: `/api/browse/raw?path=${encodeURIComponent(root)}`,
+        headers: { cookie: ctx.cookie },
+      });
+      expect(res.statusCode).toBe(400);
+      expect(res.json().error).toBe("is_a_directory");
+    });
+
+    it("streams bytes with extension-based Content-Type (png)", async () => {
+      const ctx = await bootstrapAuthedApp();
+      disposers.push(ctx.cleanup);
+      const root = fs.mkdtempSync(path.join(os.tmpdir(), "claudex-raw-"));
+      disposers.push(async () =>
+        fs.rmSync(root, { recursive: true, force: true }),
+      );
+      const filePath = path.join(root, "pixel.png");
+      const bytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+      fs.writeFileSync(filePath, bytes);
+      const res = await ctx.app.inject({
+        method: "GET",
+        url: `/api/browse/raw?path=${encodeURIComponent(filePath)}`,
+        headers: { cookie: ctx.cookie },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.headers["content-type"]).toBe("image/png");
+      expect(res.headers["content-length"]).toBe(String(bytes.length));
+      expect(res.headers["content-disposition"]).toContain("inline");
+      expect(res.headers["content-disposition"]).toContain("pixel.png");
+      expect(res.rawPayload.equals(bytes)).toBe(true);
+    });
+
+    it("falls back to application/octet-stream for unknown extensions", async () => {
+      const ctx = await bootstrapAuthedApp();
+      disposers.push(ctx.cleanup);
+      const root = fs.mkdtempSync(path.join(os.tmpdir(), "claudex-raw-"));
+      disposers.push(async () =>
+        fs.rmSync(root, { recursive: true, force: true }),
+      );
+      const filePath = path.join(root, "mystery.weirdext");
+      fs.writeFileSync(filePath, Buffer.from([0x01, 0x02, 0x03]));
+      const res = await ctx.app.inject({
+        method: "GET",
+        url: `/api/browse/raw?path=${encodeURIComponent(filePath)}`,
+        headers: { cookie: ctx.cookie },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.headers["content-type"]).toBe("application/octet-stream");
+    });
+
+    it("sets Content-Disposition: attachment when download=1", async () => {
+      const ctx = await bootstrapAuthedApp();
+      disposers.push(ctx.cleanup);
+      const root = fs.mkdtempSync(path.join(os.tmpdir(), "claudex-raw-"));
+      disposers.push(async () =>
+        fs.rmSync(root, { recursive: true, force: true }),
+      );
+      const filePath = path.join(root, "report.docx");
+      fs.writeFileSync(filePath, Buffer.from([0x50, 0x4b, 0x03, 0x04])); // PK zip header
+      const res = await ctx.app.inject({
+        method: "GET",
+        url: `/api/browse/raw?path=${encodeURIComponent(filePath)}&download=1`,
+        headers: { cookie: ctx.cookie },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.headers["content-type"]).toBe(
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      );
+      expect(res.headers["content-disposition"]).toContain("attachment");
+      expect(res.headers["content-disposition"]).toContain("report.docx");
+    });
+  });
 });

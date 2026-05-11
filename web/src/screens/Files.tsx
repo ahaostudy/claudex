@@ -1,8 +1,12 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  Check,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  Code,
+  Copy,
+  Download,
   Eye,
   EyeOff,
   File as FileIcon,
@@ -52,6 +56,32 @@ function formatSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+// Classify a file by extension so we know which preview renderer to use.
+// Anything we don't recognize falls through to "text" — the server will
+// 415 with binary_file if the bytes don't look like text and the UI will
+// show the "no preview" message.
+type PreviewKind = "text" | "image" | "pdf" | "html" | "audio" | "video" | "office";
+
+function previewKindForPath(absPath: string): PreviewKind {
+  const ext = (absPath.split(".").pop() ?? "").toLowerCase();
+  if (["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "ico", "avif", "tiff", "tif"].includes(ext)) return "image";
+  if (ext === "pdf") return "pdf";
+  if (["html", "htm"].includes(ext)) return "html";
+  if (["mp3", "wav", "ogg", "flac", "aac"].includes(ext)) return "audio";
+  if (["mp4", "webm", "mov"].includes(ext)) return "video";
+  if (["doc", "docx", "xls", "xlsx", "ppt", "pptx", "odt", "ods", "odp"].includes(ext)) return "office";
+  return "text";
+}
+
+// Build a same-origin URL for the /api/browse/raw endpoint. Cookie auth is
+// sent automatically by the browser when the <img>/<iframe>/<audio>/<video>
+// tag fetches the bytes — no API client changes needed.
+function rawUrl(absPath: string, download = false): string {
+  const qs = new URLSearchParams({ path: absPath });
+  if (download) qs.set("download", "1");
+  return `/api/browse/raw?${qs.toString()}`;
+}
+
 /** Copy text to the clipboard with an HTTP (non-secure-context) fallback.
  *  claudex is served over plain HTTP through an frpc tunnel, so
  *  `navigator.clipboard.writeText` is undefined on the user's mobile; we
@@ -78,6 +108,32 @@ function fallbackCopy(text: string) {
     /* give up silently — nothing else to try */
   }
   ta.remove();
+}
+
+// sessionStorage key for "last file opened in the Files tab" — restored on
+// re-mount within the same browser session (tab-scoped). Deliberately not
+// localStorage: the user only expects this auto-reopen within a single
+// session, and sessionStorage survives SPA navigation between tabs within
+// the app but not a fresh browser session.
+const LAST_FILE_KEY = "claudex:files:lastOpenedFile";
+
+function readLastOpenedFile(): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    return window.sessionStorage.getItem(LAST_FILE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function writeLastOpenedFile(p: string | null) {
+  if (typeof window === "undefined") return;
+  try {
+    if (p) window.sessionStorage.setItem(LAST_FILE_KEY, p);
+    else window.sessionStorage.removeItem(LAST_FILE_KEY);
+  } catch {
+    /* quota / private mode — ignore */
+  }
 }
 
 function errorMessage(code: string): string {
@@ -119,6 +175,15 @@ export function FilesScreen() {
   const [fileData, setFileData] = useState<BrowseReadResponse | null>(null);
   const [fileLoading, setFileLoading] = useState(false);
   const [fileError, setFileError] = useState<string | null>(null);
+  // Preview kind derived from the path extension. Drives which renderer
+  // (text / image / pdf / html / audio / video / office) the preview
+  // panel uses. Set synchronously by openFile() alongside selectedFilePath
+  // so there's no flash of the wrong renderer while browseRead resolves.
+  const [previewKind, setPreviewKind] = useState<PreviewKind | null>(null);
+  // Size of the currently-selected file, copied out of the BrowseEntry at
+  // click time. Used for the header size line when we don't have
+  // fileData (i.e. non-text kinds that skip /api/browse/read).
+  const [previewSize, setPreviewSize] = useState<number | null>(null);
 
   // projects (for the "jump to project" dropdown — a convenience, not the
   // primary nav anymore)
@@ -215,18 +280,49 @@ export function FilesScreen() {
     };
   }, []);
 
-  const openFile = useCallback(async (absPath: string) => {
+  // Run-once guard for the sessionStorage auto-restore below. Declared
+  // here (near the other state) so the effect that uses it stays near
+  // the `openFile` it references.
+  const restoredRef = useRef(false);
+
+  const openFile = useCallback(async (absPath: string, entry?: BrowseEntry) => {
+    const kind = previewKindForPath(absPath);
     setSelectedFilePath(absPath);
-    setFileLoading(true);
+    setPreviewKind(kind);
+    setPreviewSize(entry?.size ?? null);
+    setFileData(null);
     setFileError(null);
+    // For non-text kinds the <img>/<iframe>/<audio>/<video> tag loads the
+    // bytes itself — we don't need to hit /api/browse/read at all, and
+    // doing so would just 415 with binary_file for images/pdfs/etc.
+    // html is still fetched as text so the default view is the source;
+    // the MobilePreviewSheet / Desktop preview shows a Render toggle.
+    if (kind !== "text" && kind !== "html") {
+      setFileLoading(false);
+      // Persist the selection so the sessionStorage restore still works
+      // for binary previews — nothing to validate server-side up front,
+      // and if the file has vanished the tag's onError will surface it.
+      writeLastOpenedFile(absPath);
+      return;
+    }
+    setFileLoading(true);
     try {
       const res = await api.browseRead(absPath);
       setFileData(res);
+      // Remember the successfully-opened file so a re-mount within the
+      // same browser session restores it. We only persist on success —
+      // paths that blow up with not_found / permission_denied aren't
+      // worth re-trying on next mount.
+      writeLastOpenedFile(absPath);
     } catch (e) {
       setFileError(
         e instanceof ApiError ? errorMessage(e.code) : "Couldn't load this file.",
       );
       setFileData(null);
+      // If the file has since vanished, stop auto-reopening it.
+      if (e instanceof ApiError && e.code === "not_found") {
+        writeLastOpenedFile(null);
+      }
     } finally {
       setFileLoading(false);
     }
@@ -236,7 +332,26 @@ export function FilesScreen() {
     setSelectedFilePath(null);
     setFileData(null);
     setFileError(null);
+    setPreviewKind(null);
+    setPreviewSize(null);
+    // User explicitly dismissed the preview — don't resurrect it next time.
+    writeLastOpenedFile(null);
   }, []);
+
+  // Restore the last-opened file (sessionStorage) on mount. If the file
+  // still exists, we pop the preview sheet back open exactly like a
+  // normal click. If it's gone (not_found), openFile itself clears the
+  // stashed path and shows the standard "does not exist" error — so the
+  // user at least knows why nothing came up.
+  //
+  // `openFile` is stable (empty deps), but we still gate with a ref so a
+  // stray re-run from hot-reload or dep change can't double-restore.
+  useEffect(() => {
+    if (restoredRef.current) return;
+    restoredRef.current = true;
+    const last = readLastOpenedFile();
+    if (last) void openFile(last);
+  }, [openFile]);
 
   const goHome = useCallback(async () => {
     try {
@@ -292,6 +407,8 @@ export function FilesScreen() {
           fileData={fileData}
           fileLoading={fileLoading}
           fileError={fileError}
+          previewKind={previewKind}
+          previewSize={previewSize}
           onNavigate={setCurrentPath}
           onOpenFile={openFile}
           onClosePreview={closePreview}
@@ -319,6 +436,8 @@ export function FilesScreen() {
           fileData={fileData}
           fileLoading={fileLoading}
           fileError={fileError}
+          previewKind={previewKind}
+          previewSize={previewSize}
           onNavigate={setCurrentPath}
           onOpenFile={openFile}
           onClosePreview={closePreview}
@@ -619,6 +738,218 @@ function Breadcrumb({
   );
 }
 
+// ---- copy button -----------------------------------------------------------
+//
+// Small, self-contained copy button with a "just copied" confirmation.
+// Used for both "Copy path" and "Copy content" in the preview header so
+// the user gets feedback that the action landed — important because
+// claudex runs on plain HTTP (no navigator.clipboard) and the fallback
+// copy via execCommand is silent on mobile.
+
+function CopyButton({
+  getText,
+  label,
+  title,
+  className,
+}: {
+  /** Lazily resolve the text — keeps long file contents out of the
+   *  closure until the user actually taps copy. */
+  getText: () => string | null | undefined;
+  label: string;
+  title?: string;
+  className?: string;
+}) {
+  const [copied, setCopied] = useState(false);
+  const timer = useRef<number | null>(null);
+  useEffect(
+    () => () => {
+      if (timer.current) window.clearTimeout(timer.current);
+    },
+    [],
+  );
+  const text = getText();
+  const disabled = !text;
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      title={title ?? label}
+      onClick={() => {
+        const t = getText();
+        if (!t) return;
+        copyText(t);
+        setCopied(true);
+        if (timer.current) window.clearTimeout(timer.current);
+        timer.current = window.setTimeout(() => setCopied(false), 1200);
+      }}
+      className={cn(
+        "inline-flex items-center gap-1.5 rounded-[8px] border border-line bg-canvas text-[12px] disabled:opacity-50 shrink-0",
+        className,
+      )}
+    >
+      {copied ? (
+        <Check className="w-3.5 h-3.5 text-success" />
+      ) : (
+        <Copy className="w-3.5 h-3.5 text-ink-muted" />
+      )}
+      <span>{copied ? "Copied" : label}</span>
+    </button>
+  );
+}
+
+// ---- download button -------------------------------------------------------
+//
+// A link styled like CopyButton that opens rawUrl(path, true) in a new
+// tab so the browser fires its native download UI. The server sends
+// Content-Disposition: attachment when ?download=1, so mobile Safari /
+// Chrome both treat it as a save rather than a navigation.
+
+function DownloadButton({
+  absPath,
+  label = "Download",
+  className,
+}: {
+  absPath: string;
+  label?: string;
+  className?: string;
+}) {
+  return (
+    <a
+      href={rawUrl(absPath, true)}
+      target="_blank"
+      rel="noopener"
+      title={`Download ${absPath.split("/").pop() ?? absPath}`}
+      className={cn(
+        "inline-flex items-center gap-1.5 rounded-[8px] border border-line bg-canvas text-[12px] shrink-0",
+        className,
+      )}
+    >
+      <Download className="w-3.5 h-3.5 text-ink-muted" />
+      <span>{label}</span>
+    </a>
+  );
+}
+
+// ---- binary preview renderers ---------------------------------------------
+//
+// Renders one of image / pdf / audio / video / office inline in the preview
+// pane. Text and html go through the line-numbered <pre> view; for html the
+// caller can flip `renderHtml` on via the header toggle to swap that for an
+// iframe of the source. Office files get a friendly "download to view" card
+// because nothing renders them usefully in the browser without a heavy
+// viewer library.
+
+function BinaryPreview({
+  absPath,
+  kind,
+  fileData,
+  renderHtml,
+}: {
+  absPath: string;
+  kind: PreviewKind;
+  // For html only — when fileData is loaded we can choose between source
+  // text view (handled by the caller) and iframe rendered view (handled
+  // here when renderHtml is true).
+  fileData: BrowseReadResponse | null;
+  renderHtml: boolean;
+}) {
+  const [imgError, setImgError] = useState(false);
+  const basename = absPath.split("/").pop() ?? absPath;
+
+  // Reset image error whenever the selected file changes.
+  useEffect(() => {
+    setImgError(false);
+  }, [absPath]);
+
+  if (kind === "image") {
+    if (imgError) {
+      return (
+        <div className="flex-1 flex items-center justify-center text-[13px] text-danger mono px-6 text-center">
+          Couldn't load image.
+        </div>
+      );
+    }
+    return (
+      <div className="flex-1 min-h-0 flex items-center justify-center bg-canvas p-4 overflow-auto">
+        <img
+          src={rawUrl(absPath)}
+          alt={basename}
+          onError={() => setImgError(true)}
+          className="max-w-full max-h-full object-contain"
+        />
+      </div>
+    );
+  }
+
+  if (kind === "pdf") {
+    return (
+      <iframe
+        src={rawUrl(absPath)}
+        title={basename}
+        className="flex-1 w-full h-full border-0 bg-white"
+      />
+    );
+  }
+
+  if (kind === "audio") {
+    return (
+      <div className="flex-1 flex items-center justify-center bg-canvas px-6">
+        <audio controls src={rawUrl(absPath)} className="w-full max-w-md" />
+      </div>
+    );
+  }
+
+  if (kind === "video") {
+    return (
+      <div className="flex-1 min-h-0 flex items-center justify-center bg-canvas p-4">
+        <video
+          controls
+          src={rawUrl(absPath)}
+          className="w-full max-h-full"
+        />
+      </div>
+    );
+  }
+
+  if (kind === "office") {
+    return (
+      <div className="flex-1 flex items-center justify-center px-6 py-10 bg-canvas">
+        <div className="max-w-md w-full p-5 rounded-[10px] border border-line bg-paper/60 text-center space-y-3">
+          <div className="mono text-[13px] text-ink truncate" title={basename}>
+            {basename}
+          </div>
+          <p className="text-[12.5px] text-ink-muted leading-[1.55]">
+            Office files can't render inline in the browser. Download the
+            file to open it in Word, Excel, Keynote, LibreOffice, or a
+            similar app.
+          </p>
+          <div className="flex items-center justify-center">
+            <DownloadButton absPath={absPath} className="h-9 px-4" />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (kind === "html" && renderHtml) {
+    // Sandbox attribute `""` blocks scripts, forms, and same-origin access.
+    // Safe for locally-trusted-but-unreviewed HTML — we're rendering the
+    // user's own files, but they may have loaded something dodgy onto
+    // their own machine and we don't want to run its JS from the claudex
+    // origin where the auth cookie lives.
+    return (
+      <iframe
+        srcDoc={fileData?.content ?? ""}
+        title={basename}
+        sandbox=""
+        className="flex-1 w-full h-full border-0 bg-white"
+      />
+    );
+  }
+
+  return null;
+}
+
 // ---- preview panel ---------------------------------------------------------
 
 function PreviewPanel({
@@ -693,8 +1024,10 @@ interface FilesViewProps {
   fileData: BrowseReadResponse | null;
   fileLoading: boolean;
   fileError: string | null;
+  previewKind: PreviewKind | null;
+  previewSize: number | null;
   onNavigate: (absPath: string) => void;
-  onOpenFile: (absPath: string) => void;
+  onOpenFile: (absPath: string, entry?: BrowseEntry) => void;
   onClosePreview: () => void;
   onHome: () => void;
   onRoot: () => void;
@@ -787,19 +1120,21 @@ function MobileFilesView(p: FilesViewProps) {
               entry={e}
               active={p.selectedFilePath === e.path}
               onClick={() =>
-                e.isDir ? p.onNavigate(e.path) : p.onOpenFile(e.path)
+                e.isDir ? p.onNavigate(e.path) : p.onOpenFile(e.path, e)
               }
               variant="mobile"
             />
           ))}
       </div>
 
-      {(p.fileData || p.fileLoading || p.fileError) && p.selectedFilePath && (
+      {p.selectedFilePath && (
         <MobilePreviewSheet
           absPath={p.selectedFilePath}
           fileData={p.fileData}
           loading={p.fileLoading}
           error={p.fileError}
+          kind={p.previewKind ?? "text"}
+          size={p.previewSize}
           onClose={p.onClosePreview}
         />
       )}
@@ -812,14 +1147,34 @@ function MobilePreviewSheet({
   fileData,
   loading,
   error,
+  kind,
+  size,
   onClose,
 }: {
   absPath: string;
   fileData: BrowseReadResponse | null;
   loading: boolean;
   error: string | null;
+  kind: PreviewKind;
+  size: number | null;
   onClose: () => void;
 }) {
+  // HTML source / rendered toggle. Reset whenever the selected path
+  // changes so opening a different file doesn't inherit the previous
+  // file's render state.
+  const [renderHtml, setRenderHtml] = useState(false);
+  useEffect(() => {
+    setRenderHtml(false);
+  }, [absPath]);
+
+  const basename = absPath.split("/").pop() ?? absPath;
+  const isText = kind === "text";
+  const isHtml = kind === "html";
+  const showDownload = kind === "pdf" || kind === "office" || kind === "audio" || kind === "video";
+  // Copy-contents only makes sense when we actually have the text in
+  // memory. For binary kinds browseRead was skipped, so disable it.
+  const copyContentsEnabled = isText || isHtml;
+
   return (
     <div className="absolute inset-0 z-30 bg-canvas flex flex-col">
       <header className="shrink-0 flex items-center gap-2 px-3 py-2.5 border-b border-line bg-canvas/95 backdrop-blur">
@@ -833,24 +1188,56 @@ function MobilePreviewSheet({
         </button>
         <div className="min-w-0 flex-1">
           <div className="mono text-[13px] truncate" title={absPath}>
-            {fileData?.name ?? absPath.split("/").pop() ?? absPath}
+            {fileData?.name ?? basename}
           </div>
-          {fileData && (
+          {fileData ? (
             <div className="mono text-[11px] text-ink-muted truncate">
               {fileData.lines} lines · {formatSize(fileData.sizeBytes)}
               {fileData.truncated ? " · truncated" : ""}
             </div>
-          )}
+          ) : size !== null ? (
+            <div className="mono text-[11px] text-ink-muted truncate">
+              {formatSize(size)}
+            </div>
+          ) : null}
         </div>
-        <button
-          type="button"
-          className="h-8 px-2.5 rounded-[8px] border border-line bg-canvas text-[12px] shrink-0"
-          onClick={() => copyText(absPath)}
-        >
-          Copy path
-        </button>
+        <div className="flex items-center gap-1.5 shrink-0">
+          {isHtml && (
+            <button
+              type="button"
+              onClick={() => setRenderHtml((v) => !v)}
+              aria-pressed={renderHtml}
+              title={renderHtml ? "Show source" : "Render HTML"}
+              className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-[8px] border border-line bg-canvas text-[12px] shrink-0"
+            >
+              {renderHtml ? (
+                <Code className="w-3.5 h-3.5 text-ink-muted" />
+              ) : (
+                <Eye className="w-3.5 h-3.5 text-ink-muted" />
+              )}
+              <span>{renderHtml ? "Source" : "Render"}</span>
+            </button>
+          )}
+          {copyContentsEnabled && (
+            <CopyButton
+              getText={() => fileData?.content}
+              label="Copy"
+              title="Copy file contents"
+              className="h-8 px-2.5"
+            />
+          )}
+          {showDownload && (
+            <DownloadButton absPath={absPath} className="h-8 px-2.5" />
+          )}
+          <CopyButton
+            getText={() => absPath}
+            label="Path"
+            title="Copy file path"
+            className="h-8 px-2.5"
+          />
+        </div>
       </header>
-      <div className="flex-1 min-h-0 overflow-auto bg-canvas">
+      <div className="flex-1 min-h-0 overflow-auto bg-canvas flex flex-col">
         {loading && (
           <div className="p-6 text-center mono text-[12.5px] text-ink-muted">
             loading…
@@ -861,7 +1248,15 @@ function MobilePreviewSheet({
             {error}
           </div>
         )}
-        {fileData && !loading && !error && (
+        {!loading && !error && isHtml && renderHtml && fileData && (
+          <BinaryPreview
+            absPath={absPath}
+            kind="html"
+            fileData={fileData}
+            renderHtml
+          />
+        )}
+        {!loading && !error && (isText || (isHtml && !renderHtml)) && fileData && (
           <div className="mono text-[12.5px] leading-[1.7] px-4 py-3">
             {fileData.content.split("\n").map((line, i) => (
               <div key={i} className="grid grid-cols-[40px_1fr] gap-1">
@@ -882,6 +1277,14 @@ function MobilePreviewSheet({
               </div>
             )}
           </div>
+        )}
+        {!loading && !error && !isText && !isHtml && (
+          <BinaryPreview
+            absPath={absPath}
+            kind={kind}
+            fileData={null}
+            renderHtml={false}
+          />
         )}
       </div>
     </div>
@@ -974,7 +1377,7 @@ function DesktopFilesView(p: FilesViewProps) {
                 entry={e}
                 active={p.selectedFilePath === e.path}
                 onClick={() =>
-                  e.isDir ? p.onNavigate(e.path) : p.onOpenFile(e.path)
+                  e.isDir ? p.onNavigate(e.path) : p.onOpenFile(e.path, e)
                 }
                 variant="desktop"
               />
@@ -984,43 +1387,15 @@ function DesktopFilesView(p: FilesViewProps) {
 
       {/* Middle: preview */}
       <section className="min-w-0 flex flex-col overflow-hidden border-r border-line">
-        {p.fileData || p.fileLoading || p.fileError ? (
-          <>
-            <div className="px-5 py-3 border-b border-line flex items-center gap-3 shrink-0">
-              <FileIcon className="w-3.5 h-3.5 text-ink-faint shrink-0" />
-              <div className="min-w-0 flex-1">
-                <div
-                  className="mono text-[13px] truncate"
-                  title={p.selectedFilePath ?? ""}
-                >
-                  {p.selectedFilePath ?? "…"}
-                </div>
-                {p.fileData && (
-                  <div className="mono text-[11px] text-ink-muted truncate">
-                    {p.fileData.lines} lines · {formatSize(p.fileData.sizeBytes)}
-                    {p.fileData.mtimeMs
-                      ? ` · modified ${timeAgoShort(p.fileData.mtimeMs)}`
-                      : ""}
-                  </div>
-                )}
-              </div>
-              <button
-                type="button"
-                className="h-8 px-3 rounded-[8px] border border-line bg-canvas text-[12px] disabled:opacity-50"
-                disabled={!p.selectedFilePath}
-                onClick={() =>
-                  p.selectedFilePath && copyText(p.selectedFilePath)
-                }
-              >
-                Copy path
-              </button>
-            </div>
-            <PreviewPanel
-              fileData={p.fileData}
-              loading={p.fileLoading}
-              error={p.fileError}
-            />
-          </>
+        {p.selectedFilePath ? (
+          <DesktopPreviewBody
+            absPath={p.selectedFilePath}
+            fileData={p.fileData}
+            loading={p.fileLoading}
+            error={p.fileError}
+            kind={p.previewKind ?? "text"}
+            size={p.previewSize}
+          />
         ) : (
           <div className="flex-1 flex items-center justify-center text-center px-8">
             <p className="text-[13px] text-ink-muted">
@@ -1054,6 +1429,22 @@ function DesktopFilesView(p: FilesViewProps) {
               <span className="mono">{p.fileData.mode}</span>
             </div>
           </div>
+        ) : p.selectedFilePath ? (
+          // Binary kinds skip /api/browse/read, so we don't have lines/
+          // mode/mtime metadata here. Show what we know: kind + size (if
+          // the EntryRow click handed us one).
+          <div className="px-4 py-3 text-[12.5px] space-y-2.5">
+            <div className="flex items-center justify-between">
+              <span className="text-ink-muted">Kind</span>
+              <span className="mono">{p.previewKind ?? "file"}</span>
+            </div>
+            {p.previewSize !== null && (
+              <div className="flex items-center justify-between">
+                <span className="text-ink-muted">Size</span>
+                <span className="mono">{formatSize(p.previewSize)}</span>
+              </div>
+            )}
+          </div>
         ) : (
           <div className="px-4 py-3 text-[12px] text-ink-faint">
             No file selected.
@@ -1067,5 +1458,125 @@ function DesktopFilesView(p: FilesViewProps) {
         </div>
       </aside>
     </div>
+  );
+}
+
+// Body of the desktop preview pane. Extracted so the HTML source/render
+// toggle can own its own state (same shape as MobilePreviewSheet) without
+// leaking into the outer DesktopFilesView render.
+function DesktopPreviewBody({
+  absPath,
+  fileData,
+  loading,
+  error,
+  kind,
+  size,
+}: {
+  absPath: string;
+  fileData: BrowseReadResponse | null;
+  loading: boolean;
+  error: string | null;
+  kind: PreviewKind;
+  size: number | null;
+}) {
+  const [renderHtml, setRenderHtml] = useState(false);
+  useEffect(() => {
+    setRenderHtml(false);
+  }, [absPath]);
+
+  const isText = kind === "text";
+  const isHtml = kind === "html";
+  const showDownload = kind === "pdf" || kind === "office" || kind === "audio" || kind === "video";
+  const copyContentsEnabled = isText || isHtml;
+
+  return (
+    <>
+      <div className="px-5 py-3 border-b border-line flex items-center gap-3 shrink-0">
+        <FileIcon className="w-3.5 h-3.5 text-ink-faint shrink-0" />
+        <div className="min-w-0 flex-1">
+          <div className="mono text-[13px] truncate" title={absPath}>
+            {absPath}
+          </div>
+          {fileData ? (
+            <div className="mono text-[11px] text-ink-muted truncate">
+              {fileData.lines} lines · {formatSize(fileData.sizeBytes)}
+              {fileData.mtimeMs
+                ? ` · modified ${timeAgoShort(fileData.mtimeMs)}`
+                : ""}
+            </div>
+          ) : size !== null ? (
+            <div className="mono text-[11px] text-ink-muted truncate">
+              {formatSize(size)}
+            </div>
+          ) : null}
+        </div>
+        <div className="flex items-center gap-1.5 shrink-0">
+          {isHtml && (
+            <button
+              type="button"
+              onClick={() => setRenderHtml((v) => !v)}
+              aria-pressed={renderHtml}
+              title={renderHtml ? "Show source" : "Render HTML"}
+              className="inline-flex items-center gap-1.5 h-8 px-3 rounded-[8px] border border-line bg-canvas text-[12px] shrink-0"
+            >
+              {renderHtml ? (
+                <Code className="w-3.5 h-3.5 text-ink-muted" />
+              ) : (
+                <Eye className="w-3.5 h-3.5 text-ink-muted" />
+              )}
+              <span>{renderHtml ? "Source" : "Render"}</span>
+            </button>
+          )}
+          {copyContentsEnabled && (
+            <CopyButton
+              getText={() => fileData?.content}
+              label="Copy"
+              title="Copy file contents"
+              className="h-8 px-3"
+            />
+          )}
+          {showDownload && (
+            <DownloadButton absPath={absPath} className="h-8 px-3" />
+          )}
+          <CopyButton
+            getText={() => absPath}
+            label="Path"
+            title="Copy file path"
+            className="h-8 px-3"
+          />
+        </div>
+      </div>
+      {loading ? (
+        <div className="flex-1 flex items-center justify-center text-[13px] text-ink-muted mono">
+          loading…
+        </div>
+      ) : error ? (
+        <div className="flex-1 flex items-center justify-center text-[13px] text-danger mono px-6 text-center">
+          {error}
+        </div>
+      ) : isHtml && renderHtml && fileData ? (
+        <BinaryPreview
+          absPath={absPath}
+          kind="html"
+          fileData={fileData}
+          renderHtml
+        />
+      ) : (isText || (isHtml && !renderHtml)) && fileData ? (
+        <PreviewPanel fileData={fileData} loading={false} error={null} />
+      ) : !isText && !isHtml ? (
+        <BinaryPreview
+          absPath={absPath}
+          kind={kind}
+          fileData={null}
+          renderHtml={false}
+        />
+      ) : (
+        <div className="flex-1 flex items-center justify-center text-center px-8">
+          <p className="text-[13px] text-ink-muted">
+            Select a file to preview its contents.
+          </p>
+        </div>
+      )}
+    </>
   );
 }

@@ -43,6 +43,55 @@ const BINARY_EXTENSIONS = new Set([
 
 const MAX_READ_BYTES = 1 * 1024 * 1024; // 1 MB
 
+// Hard cap on the raw-bytes endpoint. Images are usually small, PDFs can
+// be larger — but nobody wants to pull a 500 MB video through an frpc
+// tunnel on a phone. 50 MB is enough for everyday office docs and PDFs
+// and still a sane ceiling. Files bigger than this return 413.
+const MAX_RAW_BYTES = 50 * 1024 * 1024;
+
+// Content-Type lookup for the raw endpoint. Deliberately small — we only
+// need the types the browser can actually render inline or that we send
+// as downloads (office). `application/octet-stream` is the fallback for
+// anything we don't recognize; the browser will download it.
+const CONTENT_TYPE_BY_EXT: Record<string, string> = {
+  // images
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  gif: "image/gif",
+  webp: "image/webp",
+  svg: "image/svg+xml",
+  bmp: "image/bmp",
+  ico: "image/x-icon",
+  avif: "image/avif",
+  tiff: "image/tiff",
+  tif: "image/tiff",
+  // documents
+  pdf: "application/pdf",
+  // office
+  doc: "application/msword",
+  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  xls: "application/vnd.ms-excel",
+  xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  ppt: "application/vnd.ms-powerpoint",
+  pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  odt: "application/vnd.oasis.opendocument.text",
+  ods: "application/vnd.oasis.opendocument.spreadsheet",
+  odp: "application/vnd.oasis.opendocument.presentation",
+  // audio / video (browser-decodable subset)
+  mp3: "audio/mpeg",
+  wav: "audio/wav",
+  ogg: "audio/ogg",
+  flac: "audio/flac",
+  aac: "audio/aac",
+  mp4: "video/mp4",
+  webm: "video/webm",
+  mov: "video/quicktime",
+  // web
+  html: "text/html; charset=utf-8",
+  htm: "text/html; charset=utf-8",
+};
+
 function formatMode(mode: number): string {
   const chars = ["-", "-", "-", "-", "-", "-", "-", "-", "-", "-"];
   if ((mode & 0o400) !== 0) chars[1] = "r";
@@ -243,6 +292,84 @@ export async function registerBrowseRoutes(
         mode: formatMode(stat.mode),
         truncated,
       };
+    },
+  );
+
+  // GET /api/browse/raw?path=<absPath>&download=1
+  //
+  // Streams raw bytes at any absolute host path with a best-guess
+  // Content-Type. Powers inline previews for images / PDFs / HTML /
+  // audio / video, and the "Download" button for Office docs that the
+  // UI can't render inline.
+  //
+  // Same auth + absolute-path validation as the rest of /api/browse*.
+  // No null-byte sniff — this endpoint is explicitly for binary content.
+  // The 50 MB cap is enforced before streaming so we don't start a
+  // response we can't finish.
+  //
+  // `download=1` (or any truthy value) toggles
+  // `Content-Disposition: attachment` so clicking a download-link in
+  // the UI actually saves instead of navigating. Default is `inline`
+  // so <img> / <iframe> previews don't break.
+  app.get(
+    "/api/browse/raw",
+    { preHandler: app.requireAuth as any },
+    async (req, reply) => {
+      const q = req.query as { path?: string; download?: string };
+      const raw = q?.path;
+      if (typeof raw !== "string" || raw.length === 0) {
+        return reply.code(400).send({ error: "not_absolute" });
+      }
+      if (!path.isAbsolute(raw)) {
+        return reply.code(400).send({ error: "not_absolute" });
+      }
+      const abs = path.resolve(raw);
+
+      let stat: fs.Stats;
+      try {
+        stat = await fsp.stat(abs);
+      } catch (err: unknown) {
+        const code = (err as NodeJS.ErrnoException)?.code;
+        if (code === "ENOENT")
+          return reply.code(404).send({ error: "not_found" });
+        if (code === "EACCES" || code === "EPERM")
+          return reply.code(403).send({ error: "permission_denied" });
+        throw err;
+      }
+      if (stat.isDirectory()) {
+        return reply.code(400).send({ error: "is_a_directory" });
+      }
+      if (stat.size > MAX_RAW_BYTES) {
+        return reply.code(413).send({ error: "file_too_large" });
+      }
+
+      const ext = path.extname(abs).toLowerCase().slice(1);
+      const contentType =
+        CONTENT_TYPE_BY_EXT[ext] ?? "application/octet-stream";
+
+      // ASCII-only filename in Content-Disposition's filename= plus an
+      // RFC 5987 filename* for anything with non-ASCII characters — same
+      // pattern common Node frameworks use.
+      const baseName = path.basename(abs);
+      const safeAscii = baseName.replace(/[^\x20-\x7e]/g, "_").replace(/"/g, "");
+      const encoded = encodeURIComponent(baseName);
+      const disposition =
+        q?.download && q.download !== "0" && q.download !== "false"
+          ? "attachment"
+          : "inline";
+
+      reply
+        .header("Content-Type", contentType)
+        .header("Content-Length", String(stat.size))
+        .header(
+          "Content-Disposition",
+          `${disposition}; filename="${safeAscii}"; filename*=UTF-8''${encoded}`,
+        )
+        // Short-lived cache: same-file re-renders within a session are
+        // fine from cache, but edits on disk are visible on refresh.
+        .header("Cache-Control", "private, max-age=30");
+
+      return reply.send(fs.createReadStream(abs));
     },
   );
 }
