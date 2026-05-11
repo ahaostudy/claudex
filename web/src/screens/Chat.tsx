@@ -2620,7 +2620,7 @@ function ToolGroup({
           )}
         >
           {/* chevron band */}
-          <span className={cn("flex items-center px-2", chipBg)}>
+          <span className={cn("flex items-center pl-2 pr-1", chipBg)}>
             {open ? (
               <ChevronDown
                 className={cn(
@@ -2648,7 +2648,7 @@ function ToolGroup({
           {/* tool chip strip */}
           <span
             className={cn(
-              "flex items-center gap-1 px-2 py-1.5 border-r shrink-0",
+              "flex items-center gap-1 pl-0 pr-2 py-1.5 border-r shrink-0",
               chipBg,
               borderX,
             )}
