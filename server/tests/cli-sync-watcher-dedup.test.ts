@@ -116,6 +116,9 @@ function setup() {
     mode: "default",
   });
   sessions.setSdkSessionId(session.id, SDK_ID);
+  // Simulate a CLI-adopted session so the watcher's new native-session
+  // short-circuit doesn't skip us. See cli-sync/watcher.ts onExistingChange.
+  sessions.setAdoptedFromCli(session.id, true);
 
   const cliRoot = fs.mkdtempSync(
     path.join(os.tmpdir(), "claudex-watcher-dedup-"),

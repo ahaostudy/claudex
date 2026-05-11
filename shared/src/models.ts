@@ -121,6 +121,14 @@ export const Session = z.object({
   // adopted from the CLI (or when the row predates the column). Internal to
   // the server; clients can ignore it.
   cliJsonlSeq: z.number().int().nonnegative().default(0),
+  // True when this row was created by adopting an existing `claude` CLI
+  // session under `~/.claude/projects/<slug>/<uuid>.jsonl`. Native claudex
+  // sessions — the ones spawned via the SDK from this server — stay false
+  // even though the SDK also writes that JSONL. The cli-resync and
+  // cli-sync-watcher paths key off this flag so they never re-import the
+  // JSONL on top of a native session (which would drop `attachments` off
+  // `user_message` payloads; see migrations 26/27).
+  adoptedFromCli: z.boolean().default(false),
   // User-authored tags for filtering / organization. Persisted as a JSON
   // string array in SQLite (migration id=15). Tag strings must match
   // `[a-z0-9-]{1,24}` and there is a max of 8 tags per session — both rules

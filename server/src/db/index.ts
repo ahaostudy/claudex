@@ -9,9 +9,18 @@ export interface ClaudexDb {
   close(): void;
 }
 
-// Hand-rolled migrations. Each entry is a (id, up) pair. ID must be monotonic.
-// Do NOT rewrite history — add a new entry.
-const MIGRATIONS: { id: number; name: string; up: string }[] = [
+// Hand-rolled migrations. Each entry has a monotonic id and at least one of
+// `up` (plain SQL, runs first) or `upFn` (JS callback with the open Database
+// handle, runs after the SQL block). Do NOT rewrite history — add a new
+// entry. `upFn` is how data-backfill migrations that need JSON / string
+// parsing stay readable instead of fighting SQLite JSON1 edge cases.
+interface MigrationEntry {
+  id: number;
+  name: string;
+  up?: string;
+  upFn?: (db: Db) => void;
+}
+const MIGRATIONS: MigrationEntry[] = [
   {
     id: 1,
     name: "init",
@@ -712,6 +721,124 @@ const MIGRATIONS: { id: number; name: string; up: string }[] = [
       UPDATE sessions SET cli_jsonl_seq = 0 WHERE cli_jsonl_seq > 0;
     `,
   },
+  {
+    id: 26,
+    name: "sessions_adopted_from_cli",
+    // Explicit "this row came from adopting a `~/.claude/projects/*.jsonl`"
+    // flag. Prior to this, the server tried to infer it from `cli_jsonl_seq
+    // > 0`, but the legacy-row branch in `resyncCliSession` silently bumped
+    // that counter on every `GET /api/sessions/:id` for native claudex
+    // sessions too (because the SDK writes the same JSONL, so the counter
+    // looked CLI-shaped). That wedge made migration 25's
+    // `DELETE FROM session_events WHERE cli_jsonl_seq > 0` wipe native
+    // sessions' events — which then got rebuilt from the JSONL, losing
+    // `payload.attachments` along the way (the CLI transcript carries the
+    // rendered `@<upload-path>` prompt, not the original metadata). See
+    // cli-resync.ts / watcher.ts for the matching guards.
+    //
+    // Backfill policy: NULL/0 for every existing row. Historically-adopted
+    // sessions lose the continue-syncing-from-CLI fast-path (they'd stop
+    // picking up new turns the user typed in the external CLI) — acceptable
+    // tradeoff; re-adopt via the Import sheet to re-arm. This is much
+    // safer than guessing, which is what got us into the bug in the first
+    // place.
+    up: `
+      ALTER TABLE sessions ADD COLUMN adopted_from_cli INTEGER NOT NULL DEFAULT 0;
+    `,
+  },
+  {
+    id: 27,
+    name: "restore_user_message_attachments",
+    // One-shot data repair for native `user_message` events whose payload
+    // lost `attachments` during the migration-25 wipe + resync-rebuild cycle.
+    //
+    // Strategy: for every `user_message` event that has no `payload.attachments`
+    // but whose `payload.text` begins with one or more `@/<abs>` lines
+    // followed by a blank line (the exact shape `manager.ts` writes as the
+    // SDK prompt), parse those `@<abs>` tokens out and reverse-lookup rows
+    // in `attachments` by `(session_id, path)`. If we find matches, stamp
+    // their metadata back into `payload.attachments` so the chip/thumb UI
+    // re-renders. We deliberately do NOT strip the `@<abs>` tokens out of
+    // `text` — users sometimes type `@<path>` literally, and there's no
+    // reliable way to tell the two cases apart after the fact.
+    upFn: (db) => {
+      const rows = db
+        .prepare(
+          `SELECT id, session_id, payload
+             FROM session_events
+            WHERE kind = 'user_message'`,
+        )
+        .all() as Array<{ id: string; session_id: string; payload: string }>;
+
+      // Line shape: `@/abs/path` up to the first whitespace (space, tab, newline).
+      // Consumed greedily from the top of text as long as each line IS a bare
+      // @path — mixed lines (`@/foo hello`) stop the scan.
+      const ATT_LINE_RE = /^@(\/[^\s]+)$/;
+
+      const findAttachment = db.prepare(
+        `SELECT id, filename, mime, size_bytes FROM attachments
+          WHERE session_id = ? AND path = ?
+          LIMIT 1`,
+      );
+      const updatePayload = db.prepare(
+        `UPDATE session_events SET payload = ? WHERE id = ?`,
+      );
+
+      let patched = 0;
+      for (const r of rows) {
+        let payload: Record<string, unknown>;
+        try {
+          payload = JSON.parse(r.payload) as Record<string, unknown>;
+        } catch {
+          continue;
+        }
+        if (Array.isArray(payload.attachments) && payload.attachments.length > 0) {
+          continue;
+        }
+        const text = payload.text;
+        if (typeof text !== "string" || !text.startsWith("@/")) continue;
+
+        // Split into lines; consume consecutive `@/abs` lines from the top
+        // until we hit a non-matching line (blank, or real content).
+        const lines = text.split("\n");
+        const atPaths: string[] = [];
+        for (const line of lines) {
+          const m = ATT_LINE_RE.exec(line);
+          if (!m) break;
+          atPaths.push(m[1] as string);
+        }
+        if (atPaths.length === 0) continue;
+
+        const attachments: Array<{
+          id: string;
+          filename: string;
+          mime: string;
+          size: number;
+        }> = [];
+        for (const p of atPaths) {
+          const hit = findAttachment.get(r.session_id, p) as
+            | { id: string; filename: string; mime: string; size_bytes: number }
+            | undefined;
+          if (!hit) continue;
+          attachments.push({
+            id: hit.id,
+            filename: hit.filename,
+            mime: hit.mime,
+            size: hit.size_bytes,
+          });
+        }
+        if (attachments.length === 0) continue;
+
+        payload.attachments = attachments;
+        updatePayload.run(JSON.stringify(payload), r.id);
+        patched += 1;
+      }
+      // Record the tally inline in the migrations table via the `name`? No —
+      // _migrations is immutable post-insert. Swallow the count; the user
+      // will see chips reappear on next open.
+      void patched;
+    },
+  },
 ];
 
 export function openDb(config: Config, log: Logger): ClaudexDb {
@@ -758,7 +885,8 @@ export function openDb(config: Config, log: Logger): ClaudexDb {
     if (applied.has(m.id)) continue;
     log.info({ id: m.id, name: m.name }, "applying migration");
     db.transaction(() => {
-      db.exec(m.up);
+      if (m.up) db.exec(m.up);
+      if (m.upFn) m.upFn(db);
       insertMigration.run(m.id, m.name, new Date().toISOString());
     })();
   }

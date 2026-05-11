@@ -93,6 +93,11 @@ export async function importCliSession(
   // store's setSdkSessionId uses first-write-wins (`WHERE sdk_session_id IS
   // NULL`) which is exactly what we want here.
   deps.sessions.setSdkSessionId(session.id, input.sessionId);
+  // Flag the row as CLI-adopted so the resync-on-open and cli-sync-watcher
+  // paths are willing to re-import subsequent JSONL growth into it. Native
+  // claudex sessions stay `adopted_from_cli=0` (the DEFAULT) so neither
+  // path touches them — see migrations 26/27 for the full rationale.
+  deps.sessions.setAdoptedFromCli(session.id, true);
 
   // Seed session_events from the CLI transcript on first adoption. One bad
   // JSONL line is already swallowed by importCliSessionEvents; we still
