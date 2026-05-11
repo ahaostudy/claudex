@@ -177,8 +177,13 @@ export function MessageActions({
         // (see the delay-500 note below).
         //
         // A tiny top margin is applied only when expanded so the row hugs
-        // the bubble without touching it.
-        "overflow-hidden transition-[height,opacity] duration-100",
+        // the bubble without touching it. `margin` is in the transition
+        // property list so the `mt-0 → mt-1` flip is gated by the same
+        // `delay-500` that `height` and `opacity` obey — otherwise margin
+        // snaps instantly on hover-in and the bubble visibly jumps down
+        // 4px before the buttons fade in, which during scroll reads as
+        // the transcript "shivering" as the mouse crosses each message.
+        "overflow-hidden transition-[height,opacity,margin] duration-100",
         // `revealed` drives the visible state on both mobile and desktop —
         // a click on the bubble toggles it at the Chat level. Previously
         // desktop had a hard `md:opacity-0` override and relied exclusively
