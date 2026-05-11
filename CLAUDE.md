@@ -94,14 +94,28 @@ you are creating that mess. Commit and push now; iterate on top.
 4. **Update `docs/FEATURES.md` if behavior changed** (see "Feature ledger"
    above). This is part of the commit, not a follow-up.
 5. **Commit.** Message describes what changed, not how many agents ran.
-   You do this yourself — do not ask first.
-6. **Push through the user's proxy:**
+   You do this yourself — do not ask first. If you're in a worktree
+   session (the default — see "Worktree-per-session is the default"
+   below), the commit lands on the session's `claude/<slug>` branch,
+   not on main.
+6. **Merge into local main, then push main.** The user no longer edits
+   main directly — every batch reaches main via a worktree → merge →
+   push chain. Worktree branches are **never pushed to origin**. Full
+   procedure (clean-checkout preconditions, `--no-ff` merge, conflict
+   handling) is in "Merging a worktree session back into main" below;
+   read it once, then from each worktree session you run:
    ```sh
+   ROOT="$(git worktree list --porcelain | awk '/^worktree / {print $2; exit}')"
+   BRANCH="$(git rev-parse --abbrev-ref HEAD)"
+   git -C "$ROOT" merge --no-ff "$BRANCH" -m "Merge $BRANCH into main"
    https_proxy=http://localhost:7890 http_proxy=http://localhost:7890 \
-     git push origin main
+     git -C "$ROOT" push origin main
    ```
-   Outbound git/npm/curl always need the proxy; localhost does not. You
-   do this yourself right after the commit — do not ask first.
+   If the session is NOT on a worktree (rare — only when the user
+   explicitly opted out), the old flow applies: `git commit` lands
+   directly on main and a single `git push origin main` closes the
+   batch. Outbound git/npm/curl always need the proxy; localhost does
+   not. You do this yourself right after the commit — do not ask first.
 7. **Wait for the user's go-ahead, then restart the server.** Restart is
    gated: after pushing, report the batch is ready and stop. Only when
    the user explicitly says to restart (e.g. "restart", "重启", "go") do
@@ -248,13 +262,77 @@ the user's behalf, pass `worktree: true` by default — the server will
 400 `not_a_git_repo` if the project isn't a repo, at which point fall
 back to `worktree: false` only for that specific project.
 
-When merging a worktree session's branch back into main:
+Reference notes on a worktree's lifecycle:
 - The branch is `claude/<slug>-<suffix>` — find it with
   `git branch --list 'claude/*'` in the project root.
 - Archiving a session removes the worktree dir but **leaves the branch**
-  for manual disposition (merge, rebase, delete).
+  for manual disposition. After a successful merge (see below) the
+  branch has served its purpose; it's safe to leave or prune via
+  Settings → Advanced → Worktrees.
 - Settings → Advanced → Worktrees lists every claudex-managed worktree
   with linked/orphaned classification and a Prune action for stale ones.
+
+### Merging a worktree session back into main
+
+The user does **not** edit the local `main` branch directly anymore.
+Every batch of changes lands on a `claude/<slug>` worktree branch first,
+then gets merged into the local main, then main gets pushed. Worktree
+branches are **never pushed to origin** — `git push origin claude/...`
+is always the wrong call. This is how step 6 of the iteration loop
+actually executes inside a worktree session.
+
+Before merging, verify three preconditions in this order. If any fails,
+**stop and report to the user** — do not "clean up" the main checkout
+yourself, it's either sibling-session state or the user's in-progress
+work:
+
+1. You're in a worktree session. Inside the worktree,
+   `git rev-parse --show-toplevel` and
+   `git worktree list --porcelain | awk '/^worktree / {print $2; exit}'`
+   disagree — the latter is the main checkout, the former is your
+   `.claude/worktrees/<sessionId>` dir. If they agree, you're NOT in a
+   worktree and the merge step doesn't apply; fall back to the plain
+   commit-on-main flow.
+2. The main checkout is clean.
+   `git -C "$ROOT" status --porcelain` empty, or STOP. Don't `git stash`,
+   don't `git checkout --`, don't `git reset` — any of those can
+   annihilate another session's work.
+3. The main checkout is on `main`.
+   `git -C "$ROOT" rev-parse --abbrev-ref HEAD` prints `main`, or STOP
+   and ask. The user may be mid-something on another branch; a silent
+   branch-switch breaks their mental model.
+
+The merge itself — always `--no-ff` so the merge commit records that
+the work came from a claudex worktree (useful when bisecting later):
+```sh
+ROOT="$(git worktree list --porcelain | awk '/^worktree / {print $2; exit}')"
+BRANCH="$(git rev-parse --abbrev-ref HEAD)"   # claude/<slug>-<suffix>
+git -C "$ROOT" merge --no-ff "$BRANCH" -m "Merge $BRANCH into main"
+```
+
+If `git merge` exits non-zero with conflicts, **abort and stop**:
+```sh
+git -C "$ROOT" merge --abort
+```
+Then report to the user. Do NOT try to resolve conflicts across two
+checkouts — the tooling is confusing, the blast radius is large, and
+the user has better context on which side should win. They'll tell you
+whether to rebase the worktree branch onto the updated main, merge
+main into the worktree for local resolution, or hand-edit from there.
+
+After the merge succeeds, push main through the proxy:
+```sh
+https_proxy=http://localhost:7890 http_proxy=http://localhost:7890 \
+  git -C "$ROOT" push origin main
+```
+
+**Never** run `git push origin "$BRANCH"` for a `claude/*` worktree
+branch. It's a local staging surface — once main carries the commits,
+the branch has no reason to exist on origin, and pushing one would
+clutter origin with dozens of one-shot session branches. Leaving the
+branch locally is fine (user can prune via Settings → Advanced →
+Worktrees when they want); deleting it here is also fine via
+`git -C "$ROOT" branch -D "$BRANCH"` but not required.
 
 ## MVP scope (done)
 
