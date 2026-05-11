@@ -68,11 +68,15 @@ export function ChatSessionsRail({ currentId }: { currentId: string }) {
     [sessions, currentId],
   );
 
-  // Project-scoped visible list. Sorted pinned-first, then by `updatedAt`
-  // descending so any session that just saw activity (status flip, new
-  // message, rename) floats to the top. Memoized on [sessions,
-  // currentProjectId] so clicking between sessions in the same project
-  // doesn't reshuffle for free but live store updates do.
+  // Project-scoped visible list. Sorted pinned-first, then by the same
+  // "last activity" key the row renders (`lastMessageAt ?? updatedAt`) so
+  // the displayed timestamp and the row's position agree — sorting by
+  // `updatedAt` alone while showing `lastMessageAt ?? updatedAt` made
+  // the list look random whenever a non-message mutation (rename, mode
+  // flip, pin toggle) had bumped `updatedAt` past a session's last
+  // message. Memoized on [sessions, currentProjectId] so clicking between
+  // sessions in the same project doesn't reshuffle for free but live
+  // store updates do.
   const visible = useMemo(() => {
     if (!current) return [] as Session[];
     const filtered = sessions.filter(
@@ -81,7 +85,8 @@ export function ChatSessionsRail({ currentId }: { currentId: string }) {
         s.projectId === current.projectId &&
         !s.parentSessionId,
     );
-    const sortKey = (s: Session) => Date.parse(s.updatedAt) || 0;
+    const sortKey = (s: Session) =>
+      Date.parse(s.lastMessageAt ?? s.updatedAt) || 0;
     return filtered.sort((a, b) => {
       const pa = a.pinned ? 1 : 0;
       const pb = b.pinned ? 1 : 0;
@@ -121,7 +126,8 @@ export function ChatSessionsRail({ currentId }: { currentId: string }) {
         pinned.push(s);
         continue;
       }
-      const delta = nowTick - (Date.parse(s.updatedAt) || 0);
+      const activityIso = s.lastMessageAt ?? s.updatedAt;
+      const delta = nowTick - (Date.parse(activityIso) || 0);
       if (delta < HOUR) lastHour.push(s);
       else if (delta < DAY) today.push(s);
       else if (delta < WEEK) thisWeek.push(s);

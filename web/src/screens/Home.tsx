@@ -245,13 +245,16 @@ export function HomeScreen() {
       if (list) list.push(s);
       else byProject.set(s.projectId, [s]);
     }
-    // Sort strictly by `updatedAt` (ISO 8601) descending. We previously
-    // keyed on `lastMessageAt ?? updatedAt`, but that ignored non-message
-    // updates (status flips, tag edits, title renames) — a session whose
-    // status transitioned to `awaiting` but had no fresh user message
-    // wouldn't float to the top even though its state just changed. The
-    // user wants strict "most-recently-updated first" semantics.
-    const sortKey = (s: Session) => Date.parse(s.updatedAt) || 0;
+    // Sort key MUST match what the row actually renders — `SessionRow`
+    // shows `formatRel(s.lastMessageAt ?? s.updatedAt)`. Keying the sort
+    // on `updatedAt` alone while the display shows "last activity" made
+    // the list look random whenever a non-message mutation (status flip,
+    // rename, mode change, tag edit, pin) had bumped `updatedAt` past a
+    // session's last message — a row labelled "22h ago" would sort above
+    // a row labelled "5m ago". The display is the source of truth; the
+    // sort follows it.
+    const sortKey = (s: Session) =>
+      Date.parse(s.lastMessageAt ?? s.updatedAt) || 0;
     // Session-level ordering is pinned-first, then activity-desc. Within
     // each project group the pinned rows float; at the group level we bucket
     // groups by whether they contain any pinned session so projects with
