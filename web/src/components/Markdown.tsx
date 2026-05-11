@@ -210,11 +210,11 @@ const COMPONENTS: Components = {
     return (
       <div className="relative group my-2">
         {lang && (
-          <span className="absolute left-2 top-1.5 text-[10px] uppercase tracking-[0.14em] text-ink-muted mono pointer-events-none">
+          <span className="absolute left-3 top-2 text-[10px] uppercase tracking-[0.14em] text-ink-muted mono pointer-events-none z-10">
             {lang}
           </span>
         )}
-        <pre className="mono text-[12.5px] bg-paper text-ink-soft border border-line rounded-[8px] p-3 overflow-x-auto">
+        <pre className="mono text-[12.5px] bg-paper text-ink-soft border border-line rounded-[8px] px-3 pt-8 pb-3 overflow-x-auto">
           {children}
         </pre>
         <button

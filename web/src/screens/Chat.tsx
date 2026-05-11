@@ -1187,12 +1187,14 @@ export function ChatScreen() {
         {/* Tail indicator — as long as the session is running, show three
             bouncing dots at the bottom so the user knows claude is working.
             A `pending` UIPiece already renders its own dots; only show this
-            fallback when the tail isn't already one. */}
+            fallback when no pending piece exists in the transcript at all.
+            We check the unfiltered `pieces` (not `visiblePieces`) because
+            view-mode filters and the sub-agent `parentToolUseId` filter can
+            hide the pending piece from `visiblePieces` while it's still
+            being rendered inline by a parent tool — rendering a second
+            RunningDots here in that case produces the double-dots bug. */}
         {session?.status === "running" &&
-          (visiblePieces.length === 0 ||
-            visiblePieces[visiblePieces.length - 1].kind !== "pending") && (
-            <RunningDots />
-          )}
+          !pieces.some((p) => p.kind === "pending") && <RunningDots />}
         {viewMode === "summary" && (
           <SummaryCards session={session} changes={changes} />
         )}
@@ -1941,7 +1943,7 @@ function Piece({
           >
             <DiffView diff={diff} />
             {editErrored && (
-              <div className="mt-1 flex items-start gap-1.5 rounded-[6px] border border-danger/35 bg-danger-wash/60 px-2 py-1.5 text-[12px] text-danger">
+              <div className="mt-1 inline-flex items-start gap-1.5 rounded-[6px] border border-danger/35 bg-danger-wash/60 px-2 py-1.5 text-[12px] text-danger w-fit max-w-full">
                 <span
                   className="h-1.5 w-1.5 rounded-full bg-danger mt-1.5 shrink-0"
                   aria-hidden
