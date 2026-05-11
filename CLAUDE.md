@@ -76,6 +76,16 @@ This is how you close a batch of changes. **No shortcuts, no reordering.**
 Even for a one-line fix, walk the whole list — the one time you skip step 3
 is the time a Vite-side type elision breaks the server build.
 
+**Steps 4, 5, 6 are not optional.** A "done" batch is one that is
+typechecked, tested, built, documented in `docs/FEATURES.md`, committed,
+and pushed. Anything short of that is "in progress" and **must not be left
+that way** — see "Working with agents" below for why: the user runs
+multiple agents in parallel, and an uncommitted working tree from one
+session is what makes another session walk into a mess of unfamiliar
+unstaged files, unmerged index entries, and no clue what's theirs vs. a
+sibling's. If you think "I'll commit after the next round of feedback,"
+you are creating that mess. Commit and push now; iterate on top.
+
 1. **`pnpm -r typecheck`** — shared + server + web all green.
 2. **`pnpm --filter @claudex/server test`** — all green. `.skip` is allowed
    but call it out in the commit message.
@@ -178,6 +188,39 @@ rather than direct edits. Pattern:
   the running server, even though the main Claude session does.
 - **Side-branch QA agents don't block.** Spawn them in parallel with
   dev agents; their feedback rolls into the next batch, not this one.
+
+### Parallel Claude sessions — you are not alone on this repo
+
+The user routinely runs **multiple top-level Claude sessions against this
+same checkout in parallel** (different phone tabs, different terminals,
+different agents delegated from each). That means when you `git status`
+you may see unstaged changes, untracked files, or even unmerged index
+entries in files that **you have not touched in this session**. This is
+normal. It is almost always a sibling session mid-work, not corruption.
+
+The rule: **stay in your lane.**
+
+- If `git status` shows modifications to files outside your current task,
+  do NOT `git add` them, do NOT stash them away, do NOT `git checkout --`
+  to "clean up", do NOT resolve conflicts in them. They belong to another
+  session and overwriting them is destroying that session's work.
+- If `git commit` / `git push` is blocked by someone else's dirty state
+  (unmerged index entries, unstaged changes colliding with the push),
+  **stop immediately** and report to the user. Do not try to force the
+  commit through by stashing / resetting / checking out other files.
+  The user will tell you whether to wait, whether to save your diff as a
+  patch, or whether the sibling session is done and you can proceed.
+- If you see unmerged entries (`git ls-files -u` non-empty) with no
+  `.git/MERGE_HEAD` / `CHERRY_PICK_HEAD` / `REBASE_HEAD`, that's a
+  sibling's half-finished merge that the user paused. Leave it alone.
+- When you stage files for commit, **name them explicitly** — `git add
+  path/to/file1 path/to/file2`. Never `git add -A` or `git add .`; that
+  is what sweeps sibling sessions' work into your commit and causes the
+  cross-contamination the user is trying to avoid.
+
+This is also why step 5+6 of the iteration loop ("commit" and "push") are
+non-negotiable: every session that leaves its work uncommitted is leaving
+a landmine for the next session. Close your batches.
 
 ## MVP scope (done)
 
