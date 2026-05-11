@@ -590,10 +590,10 @@ describe("SessionManager", () => {
 
   // ---- Silence watchdog ----------------------------------------------------
 
-  it("force-flips to error + broadcasts when the runner is silent past the watchdog window", async () => {
-    // Tight window so the test runs fast under fake timers. Has to be set
-    // BEFORE `sendUserMessage` arms the timer — the manager reads the env
-    // var at arming time.
+  it("leaves status + transcript alone when the runner is silent past the watchdog window", async () => {
+    // Live silence is diagnostic-only now — we emit a pino warn and stop
+    // there. Any status mutation here would kick the composer into the
+    // errored lockout for what may be a legitimately-running turn.
     const prev = process.env.CLAUDEX_SESSION_WATCHDOG_MS;
     process.env.CLAUDEX_SESSION_WATCHDOG_MS = "1000";
     vi.useFakeTimers();
@@ -604,36 +604,29 @@ describe("SessionManager", () => {
       else process.env.CLAUDEX_SESSION_WATCHDOG_MS = prev;
       s.cleanup();
     });
-    // Send a user message to arm the watchdog, then simulate total silence.
     await s.manager.sendUserMessage(s.session.id, "kick off");
-    // Session should be active; runner has NOT emitted turn_end / idle / error.
     expect(s.sessions.findById(s.session.id)!.status).not.toBe("error");
-    // Clear existing broadcasts so assertions below only see watchdog-driven
-    // frames.
     s.broadcasts.length = 0;
 
     // Advance past the watchdog window.
     await vi.advanceTimersByTimeAsync(1100);
 
-    // DB row flipped to error.
-    expect(s.sessions.findById(s.session.id)!.status).toBe("error");
-    // Synthesized `error` RunnerEvent fired (ws bridge will turn this into a
-    // client-visible frame).
+    // Status is untouched — no lockout.
+    expect(s.sessions.findById(s.session.id)!.status).not.toBe("error");
+    // No synthesized `error` RunnerEvent went out (that's the frame that
+    // would have driven the composer errored-lockout on the client).
     const errorBroadcasts = s.broadcasts.filter(
       (b) => b.event.type === "error" && b.sessionId === s.session.id,
     );
-    expect(errorBroadcasts).toHaveLength(1);
-    const err = errorBroadcasts[0].event as { code: string; message: string };
-    expect(err.code).toBe("watchdog_timeout");
-    // Persisted as an error session_event too, so the transcript shows why.
+    expect(errorBroadcasts).toHaveLength(0);
+    // No transcript error event appended.
     const logged = s.sessions
       .listEvents(s.session.id)
       .filter((e) => e.kind === "error");
-    expect(logged).toHaveLength(1);
-    expect(logged[0].payload).toMatchObject({ code: "watchdog_timeout" });
+    expect(logged).toHaveLength(0);
   });
 
-  it("runner events reset the watchdog so active sessions aren't force-errored", async () => {
+  it("runner events reset the watchdog so no spurious work happens mid-turn", async () => {
     const prev = process.env.CLAUDEX_SESSION_WATCHDOG_MS;
     process.env.CLAUDEX_SESSION_WATCHDOG_MS = "1000";
     vi.useFakeTimers();
@@ -654,12 +647,18 @@ describe("SessionManager", () => {
       text: "still thinking",
       done: false,
     });
-    // Go past the original window; if the reset worked, we're still NOT errored.
+    // Go past the original window + past the new window — status is
+    // untouched either way because live silence is log-only now. We still
+    // test both advances to keep the reset-on-activity invariant covered.
     await vi.advanceTimersByTimeAsync(400);
     expect(s.sessions.findById(s.session.id)!.status).not.toBe("error");
-    // But letting it sit silent past the *new* window does fire the watchdog.
     await vi.advanceTimersByTimeAsync(1100);
-    expect(s.sessions.findById(s.session.id)!.status).toBe("error");
+    expect(s.sessions.findById(s.session.id)!.status).not.toBe("error");
+    // No error events / broadcasts ever fired.
+    const errorBroadcasts = s.broadcasts.filter(
+      (b) => b.event.type === "error" && b.sessionId === s.session.id,
+    );
+    expect(errorBroadcasts).toHaveLength(0);
   });
 
   it("turn_end clears the watchdog so no spurious error fires after a clean turn", async () => {
@@ -706,7 +705,7 @@ describe("SessionManager", () => {
 
   // ---- Boot sweep ----------------------------------------------------------
 
-  it("sweepStuckOnBoot flips a row whose updated_at is older than the watchdog window to error", async () => {
+  it("sweepStuckOnBoot recovers a stale row to idle (composer-unlocking) instead of flipping to error", async () => {
     // Default 5-min window — force updated_at 10 min in the past so the
     // sweep counts the row as dead. Clock math is done in-DB via UPDATE.
     const s = setupManager();
@@ -714,7 +713,6 @@ describe("SessionManager", () => {
     // Stamp the seeded session as running with a stale updated_at.
     const stale = new Date(Date.now() - 10 * 60 * 1000).toISOString();
     s.sessions.setStatus(s.session.id, "running");
-    (s.manager as unknown as { deps: { sessions: unknown } }).deps;
     // Direct UPDATE — SessionStore doesn't expose a way to set updated_at.
     const dbh = (s.sessions as unknown as { db: import("better-sqlite3").Database }).db;
     dbh.prepare("UPDATE sessions SET updated_at = ? WHERE id = ?").run(
@@ -725,21 +723,31 @@ describe("SessionManager", () => {
     s.manager.sweepStuckOnBoot();
 
     const fresh = s.sessions.findById(s.session.id)!;
-    expect(fresh.status).toBe("error");
-    // A watchdog_timeout error event was appended so the transcript shows why.
+    // Recovered to idle, not error — the composer is usable again.
+    expect(fresh.status).toBe("idle");
+    // A watchdog_timeout event was appended so the transcript shows why.
     const errors = s.sessions
       .listEvents(s.session.id)
       .filter((e) => e.kind === "error");
     expect(errors).toHaveLength(1);
     expect(errors[0].payload).toMatchObject({ code: "watchdog_timeout" });
-    // Synthesized error broadcast fired.
+    // Status broadcast fired so tabs unlock; no synthesized error frame
+    // (that would re-lock the composer, which is exactly what we're
+    // backing out of here).
+    const statusBroadcasts = s.broadcasts.filter(
+      (b) =>
+        b.event.type === "status" &&
+        (b.event as { status: string }).status === "idle" &&
+        b.sessionId === s.session.id,
+    );
+    expect(statusBroadcasts.length).toBeGreaterThanOrEqual(1);
     const errBroadcasts = s.broadcasts.filter(
       (b) => b.event.type === "error" && b.sessionId === s.session.id,
     );
-    expect(errBroadcasts).toHaveLength(1);
+    expect(errBroadcasts).toHaveLength(0);
   });
 
-  it("sweepStuckOnBoot re-arms the watchdog for in-window rows for the remaining time", async () => {
+  it("sweepStuckOnBoot re-arms the watchdog for in-window rows but the re-armed timer is log-only", async () => {
     const prev = process.env.CLAUDEX_SESSION_WATCHDOG_MS;
     process.env.CLAUDEX_SESSION_WATCHDOG_MS = "2000";
     vi.useFakeTimers();
@@ -764,9 +772,14 @@ describe("SessionManager", () => {
 
     // Still running right after sweep — re-armed, not force-flipped.
     expect(s.sessions.findById(s.session.id)!.status).toBe("running");
-    // Advance past the remaining window — timer fires, row flips to error.
+    // Advance past the remaining window — the live timer fires, but as
+    // of the watchdog refactor it only logs. Status stays put.
     await vi.advanceTimersByTimeAsync(700);
-    expect(s.sessions.findById(s.session.id)!.status).toBe("error");
+    expect(s.sessions.findById(s.session.id)!.status).toBe("running");
+    const errBroadcasts = s.broadcasts.filter(
+      (b) => b.event.type === "error" && b.sessionId === s.session.id,
+    );
+    expect(errBroadcasts).toHaveLength(0);
   });
 
   it("sweepStuckOnBoot is a no-op for idle rows", () => {

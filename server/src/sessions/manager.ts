@@ -164,11 +164,23 @@ function truncateForPush(s: string, max: number): string {
 }
 
 /**
- * Default window of runner silence after which the watchdog force-transitions
- * a session to `error`. Chosen to be long enough that a genuinely-slow tool
- * (a long `pnpm install`, a Claude turn that streams a big patch) doesn't
- * trip it, but short enough that a dead AgentRunner surfaces as a visible
- * error rather than an eternally-"running" row.
+ * Default window of runner silence after which the watchdog takes action.
+ *
+ * Two paths with different semantics (see `logWatchdogSilence` vs
+ * `recoverStaleSessionToIdle`):
+ *   - **Live timer** (session active, in-process): after this long without
+ *     any runner event we just log a warning. We used to force-transition
+ *     the row to `error` here — that was wrong. A long tool call can
+ *     legitimately go silent (a 15-min `pnpm install`, a slow WebFetch,
+ *     the model chewing through a big patch) and the previous behaviour
+ *     locked the composer out mid-work. Status stays put; the user keeps
+ *     Send and Stop, and the existing `POST /api/sessions/:id/force-idle`
+ *     escape hatch (surfaced in SessionSettingsSheet) handles the rare
+ *     "runner is truly stuck" case.
+ *   - **On-boot sweep**: stale rows are recovered to `idle` (not `error`).
+ *     The runner subprocess definitionally did not survive a server
+ *     restart, so `idle` is the accurate status; the composer unlocks and
+ *     the user's next message spawns a fresh runner.
  *
  * Overridable at boot via `CLAUDEX_SESSION_WATCHDOG_MS` for tests and
  * operators who want a faster/slower leash.
@@ -189,11 +201,14 @@ export class SessionManager {
   private pushSender: ManagerPushSender | null = null;
 
   // Per-session watchdog timers. A runner that emits NO events for
-  // `CLAUDEX_SESSION_WATCHDOG_MS` (default 5 min) while status=running is
-  // assumed to have died silently (SDK throw before turn_end, WS drop, manager
-  // crash) and gets force-transitioned to "error" so the composer lockout
-  // fires and the user can start a fresh session instead of staring at a
-  // permanently-"running" row.
+  // `CLAUDEX_SESSION_WATCHDOG_MS` (default 5 min) while the session is in
+  // an active state gets a diagnostic pino warn line — **no** status change,
+  // **no** transcript event, **no** broadcast. The previous force-to-`error`
+  // behaviour locked the composer out whenever a long tool call went quiet;
+  // in practice that fired on legitimately-running sessions far more often
+  // than it caught actually-dead ones. The on-boot sweep is the path that
+  // still takes action (recovers stale rows to `idle`) because at that point
+  // the runner process is definitionally gone.
   private watchdogs = new Map<string, NodeJS.Timeout>();
 
   /**
@@ -227,12 +242,17 @@ export class SessionManager {
    * active state forever with no timer to force-transition it.
    *
    * Policy per row:
-   *   - `now - updated_at > watchdogMs`  → dead. Flip to `error`, persist a
-   *     watchdog_timeout event, audit `session_watchdog_swept`, broadcast
-   *     error + status.
+   *   - `now - updated_at > watchdogMs`  → runner did not survive the
+   *     restart. Recover to `idle` (append a `watchdog_timeout` error event
+   *     for forensic visibility, audit `session_watchdog_swept`, broadcast
+   *     `status:idle`). The composer unlocks and the next user message
+   *     spawns a fresh runner. (We used to flip to `error` here; that made
+   *     the chat banner scream "Session errored — start a new session" on
+   *     every restart even though the previous work was salvageable.)
    *   - still within the window         → re-arm a watchdog timer for the
    *     *remaining* time, so it fires at the same wall-clock moment it
-   *     would've on an uninterrupted server.
+   *     would've on an uninterrupted server. (The re-armed live timer is
+   *     now log-only, so this mostly exists for operator visibility.)
    *
    * Called explicitly by `buildApp` once after the manager is constructed so
    * tests (which inject a bare manager directly) can run without the sweep
@@ -248,10 +268,10 @@ export class SessionManager {
     for (const row of candidates) {
       const updatedMs = Date.parse(row.updatedAt);
       if (!Number.isFinite(updatedMs)) {
-        // Malformed timestamp — treat as stale and flip to error. Better to
-        // show a visible error than leave a row in a permanently-active
+        // Malformed timestamp — treat as stale and recover to idle. Better
+        // to unlock the composer than leave a row in a permanently-active
         // state we can't reason about.
-        this.forceWatchdogError(
+        this.recoverStaleSessionToIdle(
           row.id,
           "boot_sweep_unparseable_updated_at",
           ms,
@@ -260,7 +280,7 @@ export class SessionManager {
       }
       const age = now - updatedMs;
       if (age > ms) {
-        this.forceWatchdogError(row.id, "boot_sweep_stale", ms, age);
+        this.recoverStaleSessionToIdle(row.id, "boot_sweep_stale", ms, age);
       } else {
         // Re-arm for the remaining window so the row doesn't escape
         // supervision just because of a restart.
@@ -348,9 +368,11 @@ export class SessionManager {
 
   /**
    * Arm (or reset) the silence watchdog for a session. Called whenever we
-   * observe runner activity for that sessionId. If the timer fires, we stamp
-   * the session as `error` + broadcast a synthesized status so the WS bridge
-   * tells every subscribed tab.
+   * observe runner activity for that sessionId. If the timer fires we emit
+   * a pino warn line via `logWatchdogSilence` — **no** status change, **no**
+   * transcript event, **no** broadcast. Stop + Send stay available; if the
+   * runner is genuinely stuck the user drives `POST /api/sessions/:id/force-idle`
+   * (surfaced as "Reset to idle" in SessionSettingsSheet) to recover.
    */
   private startWatchdog(sessionId: string): void {
     this.armWatchdogFor(sessionId, this.watchdogWindowMs());
@@ -359,14 +381,16 @@ export class SessionManager {
   /**
    * Arm a watchdog timer for this session with an explicit timeout. Used by
    * both the normal `startWatchdog` path (full window) and the on-boot sweep
-   * (remaining-window re-arm after a restart).
+   * (remaining-window re-arm after a restart). The boot sweep is the only
+   * path that actually mutates state when a row is stale — the live timer
+   * only logs.
    */
   private armWatchdogFor(sessionId: string, ms: number): void {
     this.clearWatchdog(sessionId);
     const fullWindow = this.watchdogWindowMs();
     const timer = setTimeout(() => {
       this.watchdogs.delete(sessionId);
-      this.forceWatchdogError(sessionId, "watchdog_silence", fullWindow);
+      this.logWatchdogSilence(sessionId, "watchdog_silence", fullWindow);
     }, ms);
     // Don't hold the Node event loop open just for the watchdog; the process
     // should be able to exit cleanly on SIGTERM even if a session has an
@@ -377,13 +401,45 @@ export class SessionManager {
   }
 
   /**
-   * Force-transition a session to `error` because a watchdog condition was
-   * observed. Used by both the live silence watchdog and the on-boot sweep
-   * (stale row / unparseable timestamp). `reason` goes in the log line and
-   * the persisted error payload so production forensics can tell which path
-   * fired.
+   * Live silence watchdog fired — runner has been silent for the full
+   * window while the session is still in an active state. Deliberately
+   * side-effect-light: pino warn only. No status change (so Send / Stop
+   * stay available — long tool calls that run silent are legitimate), no
+   * transcript event (would render as a red error in Chat for what may
+   * turn out to be a perfectly-alive session), no client broadcast. Users
+   * who find themselves staring at a genuinely-stuck row reset it via
+   * SessionSettingsSheet's "Reset to idle" (which calls `forceIdle`).
    */
-  private forceWatchdogError(
+  private logWatchdogSilence(
+    sessionId: string,
+    reason: string,
+    windowMs: number,
+  ): void {
+    this.deps.logger?.warn?.(
+      { sessionId, reason, windowMs },
+      "session watchdog: runner silent past window — leaving status untouched",
+    );
+  }
+
+  /**
+   * On-boot sweep saw a row stamped `running` / `awaiting` whose
+   * `updated_at` is older than the watchdog window (or unparseable). The
+   * runner subprocess definitionally did not survive the server restart,
+   * so the only honest status is `idle`. We:
+   *
+   *   - flip the row to `idle` (composer unlocks, next user message
+   *     spawns a fresh runner),
+   *   - append a `watchdog_timeout` error event so the transcript shows
+   *     a visible marker of the recovery (red tone is appropriate — the
+   *     previous turn WAS interrupted, even if the session is now usable),
+   *   - broadcast `status: idle` so every subscribed tab re-renders,
+   *   - audit `session_watchdog_swept` for ops forensics.
+   *
+   * Does NOT broadcast a synthesized `error` RunnerEvent — that was the
+   * frame that drove the composer error-lockout on clients, and we
+   * specifically don't want that here.
+   */
+  private recoverStaleSessionToIdle(
     sessionId: string,
     reason: string,
     windowMs: number,
@@ -391,13 +447,13 @@ export class SessionManager {
   ): void {
     this.deps.logger?.warn?.(
       { sessionId, reason, windowMs, age },
-      "session watchdog: forcing error",
+      "session watchdog: recovering stale session to idle",
     );
     const message =
       age !== undefined
-        ? `Session watchdog fired — row was ${Math.round(age / 1000)}s old past a ${Math.round(windowMs / 1000)}s window`
-        : `Session watchdog fired — no runner activity for ${Math.round(windowMs / 1000)}s`;
-    this.transitionStatus(sessionId, "error", reason);
+        ? `Session recovered to idle — row was ${Math.round(age / 1000)}s old past a ${Math.round(windowMs / 1000)}s window (runner did not survive server restart)`
+        : `Session recovered to idle after ${Math.round(windowMs / 1000)}s of runner silence`;
+    this.transitionStatus(sessionId, "idle", reason);
     try {
       this.deps.sessions.appendEvent({
         sessionId,
@@ -410,13 +466,11 @@ export class SessionManager {
         "session watchdog: appendEvent failed",
       );
     }
-    // Synthesize the `error` RunnerEvent so the ws.ts bridge can translate
-    // it to the frame clients already handle.
-    this.deps.broadcast(sessionId, {
-      type: "error",
-      code: "watchdog_timeout",
-      message,
-    });
+    // Tell every subscribed tab the row is idle now so composers unlock.
+    // Intentionally NOT broadcasting a synthesized `error` RunnerEvent —
+    // the web client treats that as a hard runner error and locks the
+    // composer, which is the exact behaviour we're backing out of here.
+    this.broadcastStatus(sessionId, "idle");
     // Audit — boot sweeps especially should leave a visible trail ("we
     // cleaned up N stuck rows at startup").
     this.deps.audit?.append({
@@ -1057,9 +1111,10 @@ export class SessionManager {
     await runner.sendUserMessage(sdkPrompt);
     // Arm the silence watchdog. We start it here (not only on status=running)
     // because the SDK can take several seconds to emit its first event after
-    // a sendUserMessage — if that first event never arrives we want the
-    // watchdog to still fire and flip the row to `error` rather than leave
-    // the user staring at a permanently-"running" session.
+    // a sendUserMessage — if that first event never arrives the watchdog
+    // still fires so we get a pino warn line for ops forensics. (It no
+    // longer mutates status; the previous force-to-`error` behaviour locked
+    // the composer out on long-silent-but-still-alive turns.)
     this.startWatchdog(sessionId);
   }
 
