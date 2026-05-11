@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useContext, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import {
   AlertTriangle,
@@ -49,6 +49,7 @@ import type {
 import { effortSupportedOnModel } from "@claudex/shared";
 import { cn } from "@/lib/cn";
 import { timeAgoShort } from "@/lib/format";
+import { InsideToolGroupContext } from "@/lib/inside-tool-group";
 import { DiffView, toolCallToDiff } from "@/components/DiffView";
 import { diffForToolCall } from "@/lib/diff";
 import { SessionSettingsSheet } from "@/components/SessionSettingsSheet";
@@ -2780,11 +2781,13 @@ function ToolGroup({
               tone === "neutral" ? "bg-canvas" : "bg-canvas/60",
             )}
           >
-            {pieces.map((p) => (
-              <div key={p.id} data-tool-group-child>
-                {renderPiece(p)}
-              </div>
-            ))}
+            <InsideToolGroupContext.Provider value={true}>
+              {pieces.map((p) => (
+                <div key={p.id} data-tool-group-child>
+                  {renderPiece(p)}
+                </div>
+              ))}
+            </InsideToolGroupContext.Provider>
           </div>
         )}
       </div>
@@ -2825,6 +2828,8 @@ function ToolCallBlock({
   const running = resultContent === null;
   const rightHint = running ? null : summarizeResult(resultContent, isError);
   const ToolIcon = toolIcon(name);
+  const insideToolGroup = useContext(InsideToolGroupContext);
+  const enableSticky = showBody && !insideToolGroup;
 
   return (
     <div
@@ -2842,7 +2847,12 @@ function ToolCallBlock({
         // look. We now match SubagentRun's `ToolCallCard` — one
         // rounded+bordered container, with the expanded body sitting behind
         // a `border-t` divider. Color variants shift the whole frame.
-        "rounded-[10px] border overflow-clip",
+        // When we want the header to sticky to the Chat scroller (independent
+        // usage, not inside a ToolGroup), the outer must not clip — any
+        // overflow value other than visible makes the outer a scroll container
+        // on WebKit, which traps sticky inside the card.
+        "rounded-[10px] border",
+        !enableSticky && "overflow-clip",
         isError
           ? "bg-danger-wash/40 border-danger/30"
           : running
@@ -2857,6 +2867,13 @@ function ToolCallBlock({
           disabled={!canToggle}
           className={cn(
             "w-full flex items-center gap-2 py-1.5 pl-2 pr-3 max-w-full text-left overflow-hidden",
+            enableSticky && "sticky top-0 z-10 rounded-t-[9px]",
+            enableSticky &&
+              (isError
+                ? "bg-danger-wash"
+                : running
+                  ? "bg-klein-wash"
+                  : "bg-paper"),
             canToggle &&
               (running ? "hover:bg-indigo-wash/70 cursor-pointer" : "hover:bg-paper/60 cursor-pointer"),
           )}

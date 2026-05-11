@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useContext, useState } from "react";
 import { ChevronRight, FilePlus, PencilLine } from "lucide-react";
 import { diffForToolCall, type FileDiff } from "@/lib/diff";
 import { cn } from "@/lib/cn";
+import { InsideToolGroupContext } from "@/lib/inside-tool-group";
 
 /**
  * Diff card with a collapsible header. Default state is expanded (opens
@@ -87,11 +88,17 @@ export function DiffView({
   const KindIcon = diff.kind === "edit" ? PencilLine : FilePlus;
   const slash = diff.path.lastIndexOf("/");
   const basename = slash >= 0 ? diff.path.slice(slash + 1) : diff.path;
+  const insideToolGroup = useContext(InsideToolGroupContext);
+  const enableSticky = open && !insideToolGroup;
 
   return (
     <div
       className={cn(
-        "rounded-[10px] border border-line bg-canvas overflow-clip",
+        "rounded-[10px] border border-line bg-canvas",
+        // overflow-clip/hidden any value non-visible turns the card into a
+        // scroll container on WebKit, which freezes sticky inside the card.
+        // Only clip when the header isn't trying to sticky.
+        !enableSticky && "overflow-clip",
         open ? "w-full" : "w-fit max-w-full",
       )}
     >
@@ -99,7 +106,10 @@ export function DiffView({
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
-        className="flex w-full items-center gap-2 py-1.5 pl-2 pr-3 bg-paper border-b border-line text-left hover:bg-paper/80 max-w-full min-w-0"
+        className={cn(
+          "flex w-full items-center gap-2 py-1.5 pl-2 pr-3 bg-paper border-b border-line text-left hover:bg-paper/80 max-w-full min-w-0",
+          enableSticky && "sticky top-0 z-10 rounded-t-[9px] overflow-hidden",
+        )}
         title={diff.path}
       >
         <ChevronRight
