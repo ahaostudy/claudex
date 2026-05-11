@@ -192,10 +192,21 @@ export function reportClientError(input: ReportInput): void {
 
   window.addEventListener("unhandledrejection", (ev) => {
     const r = (ev as PromiseRejectionEvent).reason;
+    // Preserve the constructor name (e.g. "TypeError: Load failed") so that
+    // bare network failures are distinguishable from other rejections in the
+    // client-errors log. iOS Safari's `fetch()` rejects with a TypeError
+    // whose `name === "TypeError"` and whose `message === "Load failed"` —
+    // without the name prefix every such rejection fingerprints identically.
+    const msg =
+      r instanceof Error
+        ? r.name && r.name !== "Error" && !r.message.startsWith(r.name)
+          ? `${r.name}: ${r.message || ""}`
+          : r.message || r.name
+        : errorMessage(r);
     reportClientError({
       kind: "unhandledrejection",
       error: r instanceof Error ? r : undefined,
-      message: r instanceof Error ? r.message : errorMessage(r),
+      message: msg,
     });
   });
 

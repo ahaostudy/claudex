@@ -1369,6 +1369,13 @@ function NewSessionSheet({
   // the session. The card below captures the user's explicit confirmation
   // before we flip the trust bit and proceed. Null = no pending trust step.
   const [trustPending, setTrustPending] = useState<Project | null>(null);
+  // Refs for the bounded, scrollable project list and its currently-selected
+  // card. On mount (once projects load) we nudge the preselected card into
+  // view so the user doesn't stare at a list scrolled to the wrong spot.
+  const projectListRef = useRef<HTMLDivElement | null>(null);
+  const selectedProjectRef = useRef<HTMLLabelElement | null>(null);
+  const newProjectRef = useRef<HTMLLabelElement | null>(null);
+  const didInitialScroll = useRef(false);
 
   useEffect(() => {
     api.listProjects().then((r) => {
@@ -1376,6 +1383,29 @@ function NewSessionSheet({
       if (r.projects.length > 0) setSelected(r.projects[0].id);
     });
   }, []);
+
+  // Autoscroll the selected card into view inside the bounded list, but only
+  // the first time the projects actually arrive — after that the user owns
+  // the scroll position.
+  useEffect(() => {
+    if (didInitialScroll.current) return;
+    if (projects.length === 0) return;
+    const el = selectedProjectRef.current;
+    if (el && typeof el.scrollIntoView === "function") {
+      el.scrollIntoView({ block: "nearest" });
+    }
+    didInitialScroll.current = true;
+  }, [projects]);
+
+  // When the user switches to the "Add a new project" row, reveal the
+  // inline form (which expands the card vertically) inside the scroller.
+  useEffect(() => {
+    if (selected !== NEW_PROJECT) return;
+    const el = newProjectRef.current;
+    if (el && typeof el.scrollIntoView === "function") {
+      el.scrollIntoView({ block: "nearest" });
+    }
+  }, [selected]);
 
   /**
    * Resolve the project the user wants to spawn under — creating a new row
@@ -1487,10 +1517,14 @@ function NewSessionSheet({
             <div className="text-[12px] uppercase tracking-[0.14em] text-ink-muted mb-2">
               Project
             </div>
-            <div className="space-y-1.5">
+            <div
+              ref={projectListRef}
+              className="space-y-1.5 max-h-[280px] overflow-y-auto pr-1"
+            >
               {projects.map((p) => (
                 <label
                   key={p.id}
+                  ref={selected === p.id ? selectedProjectRef : undefined}
                   className={`flex items-center gap-3 px-3 py-2.5 border rounded-[8px] cursor-pointer ${
                     selected === p.id
                       ? "border-klein bg-klein-wash/30"
@@ -1512,6 +1546,7 @@ function NewSessionSheet({
                 </label>
               ))}
               <label
+                ref={newProjectRef}
                 className={`block border rounded-[8px] cursor-pointer ${
                   selected === NEW_PROJECT
                     ? "border-klein bg-klein-wash/30"

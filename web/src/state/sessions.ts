@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { api } from "@/api/client";
+import { api, ApiError } from "@/api/client";
 import { createWsClient, type WsClient, type WsDiagnostics } from "@/api/ws";
 import { toast } from "@/lib/toast";
 import { flashTitle } from "@/lib/title-flash";
@@ -1158,6 +1158,15 @@ export const useSessions = create<SessionState>((set, get) => {
         }
       }
       set({ sessions: res.sessions });
+    } catch (err) {
+      // Network flaps (iOS backgrounded-tab resume, WS reconnect) surface
+      // here as a `TypeError: Load failed` with no stack. These are fire-
+      // and-forget callers (Home mount, ws onAcked, rail refresh) so we
+      // must not let the rejection escape — it ends up as an unhandled
+      // `rejection` in the client-error log with no useful context.
+      // Real API errors (4xx/5xx) still propagate so UIs that await this
+      // can surface them.
+      if (err instanceof ApiError) throw err;
     } finally {
       set({ loadingSessions: false });
     }
