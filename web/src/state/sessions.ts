@@ -1174,9 +1174,19 @@ export const useSessions = create<SessionState>((set, get) => {
       if (piece) {
         // `frameToPiece` only returns non-null for frame types that carry a
         // required string `sessionId` (assistant_text_delta, thinking,
-        // tool_use, tool_result, permission_request, ask_user_question).
+        // tool_use, tool_result, permission_request, ask_user_question,
+        // plan_accept_request, and the five subagent_* lifecycle frames).
         // None of those allow a null sessionId, so a discriminant check
         // picks the correct narrowing without a cast.
+        //
+        // NOTE: the subagent_* entries below are load-bearing. Without
+        // them, live WS frames that carry the SDK's task lifecycle get
+        // dropped here even though frameToPiece mapped them to valid
+        // pieces — `computeSubagentRuns` then falls back to legacy
+        // synthesis for the parent Task tool_use and the live stream
+        // shows "0 events / Waiting for the first tool call…" until a
+        // page refresh replays the DB. Persisted events went through
+        // fine (manager.ts appends them), the gap was only in-memory.
         if (
           frame.type !== "assistant_text_delta" &&
           frame.type !== "thinking" &&
@@ -1184,7 +1194,12 @@ export const useSessions = create<SessionState>((set, get) => {
           frame.type !== "tool_result" &&
           frame.type !== "permission_request" &&
           frame.type !== "ask_user_question" &&
-          frame.type !== "plan_accept_request"
+          frame.type !== "plan_accept_request" &&
+          frame.type !== "subagent_start" &&
+          frame.type !== "subagent_progress" &&
+          frame.type !== "subagent_update" &&
+          frame.type !== "subagent_end" &&
+          frame.type !== "subagent_tool_progress"
         ) {
           return;
         }
