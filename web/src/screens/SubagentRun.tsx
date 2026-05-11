@@ -499,9 +499,9 @@ function ToolCallCard({
           expanded && "sticky top-0 z-10",
           expanded &&
             (inFlight
-              ? "bg-klein-wash/40"
+              ? "bg-klein-wash"
               : failed
-                ? "bg-danger-wash/30"
+                ? "bg-danger-wash"
                 : "bg-paper"),
         )}
       >
