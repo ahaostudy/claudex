@@ -49,6 +49,8 @@ import { QueueRunner } from "../queue/runner.js";
 import { QueueStore } from "../queue/store.js";
 import { registerQueueRoutes } from "../queue/routes.js";
 import { StatsRefresher } from "../sessions/stats-refresher.js";
+import { AppSettingsStore } from "../settings/store.js";
+import { registerAppSettingsRoutes } from "../settings/routes.js";
 import {
   createPushSender,
   registerPushRoutes,
@@ -161,6 +163,9 @@ export async function buildApp(
     attachments: new (await import("../uploads/store.js")).AttachmentStore(
       deps.db,
     ),
+    // Global claudex preferences (currently just `language`). Read by
+    // `getOrCreate` at runner-create to seed the SDK's `systemPrompt`.
+    appSettings: new AppSettingsStore(deps.db),
   });
 
   // Alerts — persistent queue keyed on session-status transitions. Wire
@@ -281,6 +286,13 @@ export async function buildApp(
     db: deps.db,
   });
   await registerAlertsRoutes(app, { alerts: alertStore, manager });
+
+  // Global claudex preferences (language override etc.). Separate store
+  // from SessionManager's `appSettings` ref so the route handler can patch
+  // the KV table directly; the manager re-reads on next `getOrCreate`.
+  await registerAppSettingsRoutes(app, {
+    store: new AppSettingsStore(deps.db),
+  });
 
   // Routines: periodic cron-driven session spawns. The scheduler owns a single
   // timer chained across all active routines and reloads itself on any CRUD.

@@ -11,6 +11,7 @@ import { ToolGrantStore, signatureFor } from "./grants.js";
 import { summarizePermission } from "./permission-summary.js";
 import type { AuditStore } from "../audit/store.js";
 import type { AttachmentStore } from "../uploads/store.js";
+import type { AppSettingsStore } from "../settings/store.js";
 import type {
   AskUserQuestionAnnotation,
   SessionStatus,
@@ -57,6 +58,13 @@ export interface SessionManagerDeps {
    * need uploads.
    */
   attachments?: AttachmentStore;
+  /**
+   * Optional global claudex preferences. Read once per runner-create to
+   * seed the SDK's `systemPrompt` with the user's language override, if
+   * any. Missing in tests / contexts that don't care — the runner falls
+   * back to the SDK default preset (= no override) when undefined.
+   */
+  appSettings?: AppSettingsStore;
 }
 
 interface SessionEntry {
@@ -519,6 +527,11 @@ export class SessionManager {
       // Resume the SDK-side conversation if we've seen one before. Null on
       // first ever spawn; set after the SDK's system/init echoes its id back.
       resumeSdkSessionId: session.sdkSessionId ?? undefined,
+      // Global claudex preference: override the output language for this
+      // session. Read once at runner-create — swapping systemPrompt on a
+      // live SDK handle is not supported, so UI changes only affect
+      // future/resumed sessions. Missing store (tests) → no override.
+      language: this.deps.appSettings?.get().language ?? null,
       logger: this.deps.logger,
     };
     const runner = this.deps.runnerFactory.create(opts);

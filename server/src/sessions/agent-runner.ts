@@ -96,6 +96,23 @@ export class AgentRunner implements Runner {
     if (this.sdkHandle) return;
     if (this.disposed) throw new Error("runner disposed");
 
+    // Claudex-global output-language override. When set, we append a single
+    // sentence to the Claude Code system preset so Claude answers in the
+    // requested language — matches what Claude Code's own `language` setting
+    // does in `~/.claude/settings.json`, but without writing to that file
+    // (claudex is barred from `~/.claude/`). Null / empty → omit
+    // `systemPrompt` entirely so the SDK uses its default preset, preserving
+    // the pre-feature behavior (including Claude Code's own `language` field
+    // via the default `settingSources`).
+    const language = (this.opts.language ?? "").trim();
+    const systemPromptOption: Options["systemPrompt"] | undefined = language
+      ? {
+          type: "preset",
+          preset: "claude_code",
+          append: `Please respond in ${language}.`,
+        }
+      : undefined;
+
     const sdkOptions: Options = {
       cwd: this.opts.cwd,
       permissionMode: mapPermissionMode(this.permissionMode),
@@ -103,6 +120,7 @@ export class AgentRunner implements Runner {
       // MUST merge — SDK replaces process.env otherwise.
       env: { ...process.env } as Record<string, string>,
       resume: this.opts.resumeSdkSessionId,
+      ...(systemPromptOption ? { systemPrompt: systemPromptOption } : {}),
       // Opus 4.7's default adaptive-thinking display is "omitted" — the model
       // thinks but the SDK never forwards the text. Explicitly ask for
       // summarized thinking so the UI's Verbose view-mode has something to

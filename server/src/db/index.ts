@@ -651,6 +651,28 @@ const MIGRATIONS: { id: number; name: string; up: string }[] = [
         ADD COLUMN stats_computed_seq INTEGER NOT NULL DEFAULT -1;
     `,
   },
+  {
+    id: 24,
+    name: "app_settings",
+    // Global user-preferences KV for claudex itself, backing
+    // `AppSettingsStore` (server/src/settings/store.ts). First row to land
+    // here is `language` — the optional "respond in <lang>" nudge appended
+    // to every new session's system preset. KV shape (rather than a
+    // single-row typed table) so future prefs (theme, text size, …) don't
+    // need a migration per field; the store's KNOWN_KEYS tuple is the
+    // read-side gate against unknown rows leaking into the typed view.
+    //
+    // Id skips 23 on purpose: a sibling branch reserved 23 for a session-
+    // level `effort` column. Migration runner is id-set based so the gap
+    // is benign — whichever branch lands first, the other's id still
+    // applies on next boot.
+    up: `
+      CREATE TABLE app_settings (
+        key TEXT PRIMARY KEY NOT NULL,
+        value TEXT NOT NULL
+      );
+    `,
+  },
 ];
 
 export function openDb(config: Config, log: Logger): ClaudexDb {

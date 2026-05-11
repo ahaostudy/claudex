@@ -35,6 +35,18 @@ export interface RunnerInitOptions {
   resumeSdkSessionId?: string;
   // Whether CLAUDE.md / settings files should be loaded. Default true.
   useProjectSettings?: boolean;
+  /**
+   * Optional claudex-global output language override (e.g. "chinese",
+   * "japanese"). When non-empty the runner appends "Please respond in
+   * <lang>." to the Claude Code system preset. `null` / `undefined` → no
+   * override (defer to Claude Code's own `~/.claude/settings.json` via the
+   * SDK's default `settingSources`).
+   *
+   * Sourced from `AppSettingsStore` in `SessionManager.getOrCreate`; read
+   * once at session start and baked into the SDK's `systemPrompt`. Changes
+   * made after a session starts only affect *future* sessions.
+   */
+  language?: string | null;
   // Optional pino-shaped logger for diagnostic breadcrumbs (e.g. raw SDK
   // usage on every turn_end). When absent the runner stays silent — tests
   // don't need to thread a logger through.

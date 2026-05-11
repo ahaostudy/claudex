@@ -1815,3 +1815,49 @@ export const AlertsListResponse = z.object({
   unseenCount: z.number().int().nonnegative(),
 });
 export type AlertsListResponse = z.infer<typeof AlertsListResponse>;
+
+// ============================================================================
+// App settings (global user preferences for claudex itself)
+// ============================================================================
+
+/**
+ * The 7 languages exposed in the Settings → Appearance picker plus "Auto"
+ * (represented as `null`). The zod schema deliberately stays a free-form
+ * `string` so we can add an "Other…" free-text field later without a schema
+ * bump — the server stores whatever string the client sends and appends
+ * `Please respond in <string>.` to the Claude Code system preset.
+ */
+export const SUPPORTED_LANGUAGES = [
+  "chinese",
+  "english",
+  "japanese",
+  "korean",
+  "spanish",
+  "french",
+  "german",
+] as const;
+export type SupportedLanguage = (typeof SUPPORTED_LANGUAGES)[number];
+
+/**
+ * Global claudex preferences, stored in the `app_settings` KV table
+ * (migration 24). `null` on a field means "no override" — for `language`
+ * that means defer to Claude Code's own `~/.claude/settings.json` (the
+ * pre-feature behavior).
+ */
+export const AppSettings = z.object({
+  language: z.string().nullable(),
+});
+export type AppSettings = z.infer<typeof AppSettings>;
+
+/**
+ * `PATCH /api/app-settings` body. Every field is optional (partial update);
+ * a field present with `null` clears that override.
+ */
+export const UpdateAppSettingsRequest = AppSettings.partial();
+export type UpdateAppSettingsRequest = z.infer<typeof UpdateAppSettingsRequest>;
+
+/** `GET /api/app-settings` response shape. */
+export const AppSettingsResponse = z.object({
+  settings: AppSettings,
+});
+export type AppSettingsResponse = z.infer<typeof AppSettingsResponse>;

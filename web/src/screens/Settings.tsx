@@ -24,7 +24,8 @@ import {
 } from "lucide-react";
 import { useAuth } from "@/state/auth";
 import { api, ApiError, type WorktreeSummary } from "@/api/client";
-import type { Project, PushDevice, UserEnvResponse, AuditEvent, ToolGrant, ImportAllResponse } from "@claudex/shared";
+import type { Project, PushDevice, UserEnvResponse, AuditEvent, ToolGrant, ImportAllResponse, SupportedLanguage } from "@claudex/shared";
+import { SUPPORTED_LANGUAGES } from "@claudex/shared";
 import { Logo } from "@/components/Logo";
 import { cn } from "@/lib/cn";
 import { timeAgoShort, timeAgoLong } from "@/lib/format";
@@ -1761,6 +1762,53 @@ function NotificationsPanel() {
 // ----------------------------------------------------------------------------
 
 function AppearancePanel() {
+  // Global language override for Claude Code's responses. `null` = Auto
+  // (defer to the user's own `~/.claude/settings.json` via the SDK's
+  // default settingSources). Applies to sessions started *after* the
+  // change — live sessions keep their current systemPrompt.
+  const [language, setLanguage] = useState<string | null>(null);
+  const [loaded, setLoaded] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const { settings } = await api.getAppSettings();
+        if (cancelled) return;
+        setLanguage(settings.language);
+      } catch (e) {
+        if (!cancelled) {
+          setError(e instanceof Error ? e.message : String(e));
+        }
+      } finally {
+        if (!cancelled) setLoaded(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const commit = async (next: string | null) => {
+    // Optimistic — snap the picker, roll back on error. The endpoint is
+    // cheap and local so the optimism is usually invisible.
+    const prev = language;
+    setLanguage(next);
+    setSaving(true);
+    setError(null);
+    try {
+      const { settings } = await api.updateAppSettings({ language: next });
+      setLanguage(settings.language);
+    } catch (e) {
+      setLanguage(prev);
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
     <Card>
       <Row
@@ -1776,6 +1824,37 @@ function AppearancePanel() {
             >
               Dark (soon)
             </span>
+          </div>
+        }
+      />
+      <Row
+        label="Language"
+        value={
+          <div className="flex flex-col items-start gap-1.5 min-w-0 w-full">
+            <select
+              value={language ?? ""}
+              disabled={!loaded || saving}
+              onChange={(e) => {
+                const v = e.target.value;
+                void commit(v === "" ? null : (v as SupportedLanguage));
+              }}
+              className="h-9 px-2 rounded-[6px] border border-line bg-canvas text-[13px] text-ink disabled:opacity-60 disabled:cursor-not-allowed w-full max-w-[260px]"
+            >
+              <option value="">Auto (defer to ~/.claude/settings.json)</option>
+              {SUPPORTED_LANGUAGES.map((lang) => (
+                <option key={lang} value={lang}>
+                  {LANGUAGE_LABELS[lang] ?? lang}
+                </option>
+              ))}
+            </select>
+            <div className="text-[11.5px] text-ink-muted">
+              Appended as &ldquo;Please respond in …&rdquo; to new sessions&rsquo; system
+              prompt. Live sessions keep their current language until next
+              resume.
+            </div>
+            {error && (
+              <div className="text-[11.5px] text-accent-danger">{error}</div>
+            )}
           </div>
         }
       />
@@ -1797,6 +1876,19 @@ function AppearancePanel() {
     </Card>
   );
 }
+
+// Display labels for the language picker. Values match SUPPORTED_LANGUAGES
+// (server-side stores these verbatim and uses them in the appended system-
+// prompt sentence, so the on-wire form stays English-lowercase).
+const LANGUAGE_LABELS: Record<string, string> = {
+  chinese: "Chinese (中文)",
+  english: "English",
+  japanese: "Japanese (日本語)",
+  korean: "Korean (한국어)",
+  spanish: "Spanish (Español)",
+  french: "French (Français)",
+  german: "German (Deutsch)",
+};
 
 // ----------------------------------------------------------------------------
 // MCP servers — empty state with a nudge toward the Plugins tab (adjacent

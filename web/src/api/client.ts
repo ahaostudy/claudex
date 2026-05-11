@@ -39,6 +39,8 @@ import type {
   FilesReadResponse,
   FilesStatusResponse,
   SessionDiffResponse,
+  AppSettings,
+  UpdateAppSettingsRequest,
 } from "@claudex/shared";
 
 export class ApiError extends Error {
@@ -724,6 +726,27 @@ export const api = {
       throw new ApiError(res.status, code);
     }
     return (await res.json()) as ImportAllResponse;
+  },
+
+  /**
+   * Read the global claudex preferences (language override, etc.) from
+   * `/api/app-settings`. `null` on a field means the user hasn't set an
+   * override — claudex defers to Claude Code's own settings for that knob.
+   */
+  getAppSettings() {
+    return request<{ settings: AppSettings }>("/api/app-settings");
+  },
+
+  /**
+   * Patch the global claudex preferences. `null` clears the override for
+   * that field (returns to "defer to Claude Code"). Omitting a field leaves
+   * it untouched (partial update).
+   */
+  updateAppSettings(body: UpdateAppSettingsRequest) {
+    return request<{ settings: AppSettings }>("/api/app-settings", {
+      method: "PATCH",
+      json: body,
+    });
   },
 };
 
