@@ -104,6 +104,7 @@
           <a href="#s-16" class="px-2 h-7 inline-flex items-center gap-1 rounded-[6px] hover:bg-paper text-[12px] text-ink-soft"><span class="mono text-[10px] text-ink-faint">16</span>Plan</a>
           <a href="#s-17" class="px-2 h-7 inline-flex items-center gap-1 rounded-[6px] hover:bg-paper text-[12px] text-ink-soft"><span class="mono text-[10px] text-ink-faint">17</span>Agents</a>
           <a href="#s-18" class="px-2 h-7 inline-flex items-center gap-1 rounded-[6px] hover:bg-paper text-[12px] text-ink-soft"><span class="mono text-[10px] text-ink-faint">18</span>Agents drawer</a>
+          <a href="#s-19" class="px-2 h-7 inline-flex items-center gap-1 rounded-[6px] hover:bg-paper text-[12px] text-ink-soft"><span class="mono text-[10px] text-ink-faint">19</span>Tool groups</a>
         </nav>
         <div class="ml-auto flex items-center gap-3 text-[12px] text-ink-muted">
           <span class="hidden sm:inline">High-fidelity mockup · 12 screens · mobile + desktop</span>
@@ -4830,6 +4831,457 @@
     </section>
 
     <!-- =========================================================
+      SCREEN 19 · COLLAPSIBLE TOOL GROUPS
+    ========================================================= -->
+    <section id="s-19" class="border-b border-line">
+      <div class="max-w-[1600px] mx-auto px-5 lg:px-10 pt-14">
+        <div class="flex items-baseline gap-4 mb-3">
+          <span class="mono text-[12px] text-ink-faint">screen · 19</span>
+          <h2 class="display text-[1.75rem] leading-tight">Collapsible tool groups</h2>
+          <span class="mono text-[11px] text-ink-muted">refines s-04 chat · same rules, less scroll</span>
+        </div>
+        <p class="max-w-[78ch] text-[15px] text-ink-muted mb-4">Long sessions stack 6–10 consecutive tool calls between every pair of claude sentences — <span class="mono text-[13px]">Read</span>, <span class="mono text-[13px]">Edit</span>, <span class="mono text-[13px]">Bash</span>, <span class="mono text-[13px]">PlanUpdate</span>, another <span class="mono text-[13px]">Bash</span> — and buries the actual text. s-19 folds each consecutive run of tool calls into a single summary row, so the thread reads like a conversation again. Only the <span class="font-medium">actively-running</span> group stays expanded; completed groups collapse the moment the final call settles, and can always be re-opened on tap.</p>
+        <ul class="text-[14px] text-ink-soft space-y-1.5 mb-10 max-w-[78ch]">
+          <li class="flex items-start gap-2"><span class="mono text-klein text-[12px] mt-[3px]">01</span><span><span class="font-medium">A <em>group</em> is a consecutive run of tool calls inside one claude turn</em>.</span> A user message, a text chunk, a permission prompt, or an indigo agent-pointer all break the group — so each group is bounded by the sentences that bracket it.</span></li>
+          <li class="flex items-start gap-2"><span class="mono text-klein text-[12px] mt-[3px]">02</span><span><span class="font-medium">Default state: collapsed = 1 row.</span> Shows a stack of tiny tool-type glyphs, a count ("4 steps"), the final status (✓ all ok / ! 1 failed), and total elapsed. The row keeps the same left gutter as an individual tool pill so the thread rhythm doesn't shift.</span></li>
+          <li class="flex items-start gap-2"><span class="mono text-klein text-[12px] mt-[3px]">03</span><span><span class="font-medium">Active group auto-expands</span> — while a tool in the group is still running, the group is open and streaming. The header changes to the klein <em>wash</em> and counts tick up live ("3/? steps · 4s"). When the last call completes the group folds itself up with a 200 ms ease and returns to the summary row.</span></li>
+          <li class="flex items-start gap-2"><span class="mono text-klein text-[12px] mt-[3px]">04</span><span><span class="font-medium">Manual pin.</span> Tap the summary row to toggle. A pinned group gets a small <span class="mono text-[12px]">pinned</span> chip and is exempted from the auto-collapse sweep — useful when you're comparing two consecutive Bash results.</span></li>
+          <li class="flex items-start gap-2"><span class="mono text-klein text-[12px] mt-[3px]">05</span><span><span class="font-medium">Failures stay loud.</span> If any tool in the group errored, the summary row carries a danger dot + "1 failed" and defaults to expanded on first render — you can fold it, but it won't auto-fold the way a green group does.</span></li>
+          <li class="flex items-start gap-2"><span class="mono text-klein text-[12px] mt-[3px]">06</span><span><span class="font-medium">Verbose mode overrides this.</span> The existing Views toggle (s-07 · Normal / Verbose) already exists — Verbose forces every group open and hides the summary row, preserving the current behavior for debugging.</span></li>
+        </ul>
+
+        <div class="flex flex-col xl:flex-row gap-10 items-start justify-center pb-16">
+
+          <!-- ==================== iPhone · collapsed groups interleaved with text ==================== -->
+          <div class="flex flex-col items-center gap-3">
+            <div class="caps text-ink-muted">iPhone · thread · 3 collapsed + 1 active</div>
+            <div class="iphone">
+              <div class="iphone-inner">
+                <div class="iphone-island"></div>
+                <div class="iphone-status"><span class="mono">9:41</span><span class="flex items-center gap-1"><span class="h-2 w-4 bg-ink rounded-sm"></span><span class="mono text-[11px]">5G</span><span class="h-2.5 w-5 border border-ink rounded-sm flex items-center justify-end pr-[1px]"><span class="h-1.5 w-3.5 bg-ink rounded-[1px]"></span></span></span></div>
+                <div class="iphone-home"></div>
+                <div class="iphone-content flex flex-col bg-canvas">
+                  <!-- top bar -->
+                  <div class="px-4 py-2.5 border-b border-line flex items-center gap-2 shrink-0">
+                    <button class="h-8 w-8 rounded-[8px] bg-paper border border-line flex items-center justify-center"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-4 h-4"><path d="M15 6l-6 6 6 6"/></svg></button>
+                    <div class="min-w-0 flex-1">
+                      <div class="flex items-center gap-1.5"><span class="h-2 w-2 rounded-full bg-warn animate-pulse"></span><div class="text-[14px] font-medium truncate">FEATURES.md pass · watchdog…</div></div>
+                      <div class="flex items-center gap-1.5 text-[11px] text-ink-muted mt-0.5"><span class="mono">claudex</span><span>·</span><span class="mono">opus-4.7</span><span>·</span><span>ask</span></div>
+                    </div>
+                    <svg width="22" height="22"><circle cx="11" cy="11" r="9" fill="none" stroke="#e8e4d8" stroke-width="2.5"/><circle cx="11" cy="11" r="9" fill="none" stroke="#cc785c" stroke-width="2.5" stroke-linecap="round" stroke-dasharray="56.55" stroke-dashoffset="42.40" transform="rotate(-90 11 11)"/></svg>
+                    <button class="h-8 w-8 rounded-[8px] bg-paper border border-line flex items-center justify-center"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-4 h-4"><circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/></svg></button>
+                  </div>
+
+                  <!-- messages -->
+                  <div class="flex-1 overflow-y-auto px-4 py-4 space-y-4">
+                    <!-- claude text -->
+                    <div>
+                      <div class="flex items-center gap-2 mb-1.5"><svg viewBox="0 0 32 32" class="w-4 h-4"><path d="M9 22 L16 8 L23 22 Z" fill="#cc785c"/><circle cx="16" cy="18" r="2.2" fill="#faf9f5"/></svg><span class="mono text-[11px] text-ink-muted">claude · 8m ago</span></div>
+                      <div class="text-[14px] leading-[1.6] text-ink">Now <span class="mono text-[13px]">FEATURES.md</span>. Two rows to rewrite:</div>
+
+                      <!-- GROUP · collapsed · done (2 steps) -->
+                      <div class="relative pl-4 mt-2">
+                        <span class="absolute left-[3px] top-3 bottom-3 w-px bg-line-strong"></span>
+                        <button class="w-full flex items-center gap-2 py-1.5 pl-2 pr-2 rounded-[8px] bg-paper border border-line active:bg-paper/70">
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-3 h-3 text-ink-muted shrink-0"><path d="M9 6l6 6-6 6"/></svg>
+                          <!-- stacked tool glyphs -->
+                          <span class="flex items-center -space-x-1 shrink-0">
+                            <span class="h-5 w-5 rounded-[5px] bg-canvas border border-line flex items-center justify-center"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-3 h-3 text-ink-soft"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6Z"/></svg></span>
+                            <span class="h-5 w-5 rounded-[5px] bg-canvas border border-line flex items-center justify-center"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-3 h-3 text-ink-soft"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 1 1 3 3L7 19l-4 1 1-4Z"/></svg></span>
+                          </span>
+                          <span class="text-[12.5px] text-ink font-medium shrink-0">2 steps</span>
+                          <span class="mono text-[11px] text-ink-muted truncate flex-1 text-left"><span class="mono text-ink-soft">FEATURES.md</span> · read + edit</span>
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" class="w-3.5 h-3.5 text-success shrink-0"><path d="M5 12l5 5 9-10"/></svg>
+                          <span class="mono text-[10.5px] text-ink-muted shrink-0 tabular-nums">1.2s</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    <!-- claude text 2 -->
+                    <div>
+                      <div class="flex items-center gap-2 mb-1.5"><svg viewBox="0 0 32 32" class="w-4 h-4"><path d="M9 22 L16 8 L23 22 Z" fill="#cc785c"/><circle cx="16" cy="18" r="2.2" fill="#faf9f5"/></svg><span class="mono text-[11px] text-ink-muted">claude · 7m ago</span></div>
+                      <div class="text-[14px] leading-[1.6] text-ink">And row 235 — the Chat errored-lockout blurb lists "watchdog timeout" as a trigger. Fix:</div>
+
+                      <!-- GROUP · collapsed · done (4 steps incl. PlanUpdate) -->
+                      <div class="relative pl-4 mt-2">
+                        <span class="absolute left-[3px] top-3 bottom-3 w-px bg-line-strong"></span>
+                        <button class="w-full flex items-center gap-2 py-1.5 pl-2 pr-2 rounded-[8px] bg-paper border border-line active:bg-paper/70">
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-3 h-3 text-ink-muted shrink-0"><path d="M9 6l6 6-6 6"/></svg>
+                          <span class="flex items-center -space-x-1 shrink-0">
+                            <span class="h-5 w-5 rounded-[5px] bg-canvas border border-line flex items-center justify-center"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-3 h-3 text-ink-soft"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 1 1 3 3L7 19l-4 1 1-4Z"/></svg></span>
+                            <span class="h-5 w-5 rounded-[5px] bg-canvas border border-line flex items-center justify-center"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-3 h-3 text-ink-soft"><path d="M3 6h18M6 6v14a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V6"/><path d="M9 11v6M15 11v6"/></svg></span>
+                            <span class="h-5 w-5 rounded-[5px] bg-canvas border border-line flex items-center justify-center"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-3 h-3 text-ink-soft"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M8 12l3 3 5-6"/></svg></span>
+                            <span class="h-5 w-5 rounded-full bg-canvas border border-line flex items-center justify-center mono text-[10px] text-ink-muted">+1</span>
+                          </span>
+                          <span class="text-[12.5px] text-ink font-medium shrink-0">4 steps</span>
+                          <span class="mono text-[11px] text-ink-muted truncate flex-1 text-left">edit · plan · typecheck · tests</span>
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" class="w-3.5 h-3.5 text-success shrink-0"><path d="M5 12l5 5 9-10"/></svg>
+                          <span class="mono text-[10.5px] text-ink-muted shrink-0 tabular-nums">1m 42s</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    <!-- claude text 3 -->
+                    <div>
+                      <div class="flex items-center gap-2 mb-1.5"><svg viewBox="0 0 32 32" class="w-4 h-4"><path d="M9 22 L16 8 L23 22 Z" fill="#cc785c"/><circle cx="16" cy="18" r="2.2" fill="#faf9f5"/></svg><span class="mono text-[11px] text-ink-muted">claude · now</span></div>
+                      <div class="text-[14px] leading-[1.6] text-ink">All 597 green. Now the web build.<span class="caret"></span></div>
+
+                      <!-- GROUP · expanded · ACTIVE (1 running step) -->
+                      <div class="relative pl-4 mt-2">
+                        <span class="absolute left-[3px] top-3 bottom-3 w-px bg-klein"></span>
+                        <!-- active summary header (open) -->
+                        <div class="flex items-center gap-2 py-1.5 pl-2 pr-2 rounded-t-[8px] bg-klein-wash/60 border border-klein/35 border-b-0">
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-3 h-3 text-klein rotate-90 shrink-0"><path d="M9 6l6 6-6 6"/></svg>
+                          <span class="flex items-center -space-x-1 shrink-0">
+                            <span class="h-5 w-5 rounded-[5px] bg-canvas border border-klein/30 flex items-center justify-center"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-3 h-3 text-klein-ink"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M8 12l3 3 5-6"/></svg></span>
+                          </span>
+                          <span class="text-[12.5px] text-klein-ink font-semibold shrink-0">1 step · running</span>
+                          <span class="mono text-[11px] text-ink-muted truncate flex-1 text-left">bun run build · web</span>
+                          <svg class="w-3.5 h-3.5 text-klein animate-spin shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.2-8.6"/></svg>
+                          <span class="mono text-[10.5px] text-klein-ink shrink-0 tabular-nums">0:18</span>
+                        </div>
+                        <!-- expanded body -->
+                        <div class="rounded-b-[8px] bg-klein-wash/25 border border-klein/30 border-t-0">
+                          <div class="flex items-center gap-2 py-1.5 pl-2 pr-3">
+                            <span class="h-3 w-3 shrink-0"></span>
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-3.5 h-3.5 text-klein-ink"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M8 12l3 3 5-6"/></svg>
+                            <span class="mono text-[12px] text-klein-ink">bash</span>
+                            <span class="mono text-[11px] text-ink-muted truncate flex-1">pnpm --filter @claudex/web build</span>
+                            <svg class="w-3.5 h-3.5 text-klein animate-spin shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.2-8.6"/></svg>
+                          </div>
+                          <div class="mono text-[11px] text-ink-muted px-3 pb-2 pl-10 leading-[1.5]">
+                            <div>vite v5.4.10 building for production…</div>
+                            <div>transforming (218)<span class="caret"></span></div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <!-- tiny legend card -->
+                    <div class="rounded-[8px] border border-dashed border-line-strong bg-paper/50 px-3 py-2 flex items-center gap-2 text-[11.5px] text-ink-muted">
+                      <span class="inline-flex items-center gap-1"><span class="h-1.5 w-1.5 rounded-full bg-klein"></span>active</span>
+                      <span>·</span>
+                      <span class="inline-flex items-center gap-1"><span class="h-1.5 w-1.5 rounded-full bg-success"></span>done, collapsed</span>
+                      <span>·</span>
+                      <span>tap to toggle</span>
+                    </div>
+                  </div>
+
+                  <!-- composer -->
+                  <div class="px-3 pt-2 pb-3 border-t border-line flex items-end gap-2 bg-canvas shrink-0">
+                    <div class="flex-1 min-w-0 rounded-[14px] border border-line bg-paper p-2">
+                      <div class="text-[13.5px] text-ink-muted px-2 py-1 leading-[1.5]">Reply to claudex…</div>
+                      <div class="flex items-center justify-between px-1 mt-1"><div class="flex items-center gap-2 text-ink-muted"><span class="mono text-[11px]">Opus 4.7 · ask</span></div><button class="h-7 w-7 rounded-full bg-klein text-canvas flex items-center justify-center shadow-card"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" class="w-3.5 h-3.5"><path d="M5 12l7-7 7 7M12 5v14"/></svg></button></div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="text-[11px] text-ink-muted max-w-[300px] text-center">Compare with the screenshot inline: three dense tool blocks become three one-line pills. The thread reads as four short claude sentences instead of five screens of JSON.</div>
+          </div>
+
+          <!-- ==================== Desktop · side-by-side · before vs after ==================== -->
+          <div class="flex-1 w-full min-w-0 flex flex-col items-center gap-3">
+            <div class="caps text-ink-muted">Desktop · before (today) &amp; after (s-19)</div>
+            <div class="desktop">
+              <div class="desktop-chrome"><span style="background:#ff5f57"></span><span style="background:#febc2e"></span><span style="background:#28c840"></span><span class="ml-4 mono text-[11px] text-canvas/70">claudex.local — FEATURES.md pass · watchdog timeout</span></div>
+              <div class="desktop-inner grid grid-cols-2">
+
+                <!-- LEFT · today (no collapse) -->
+                <section class="border-r border-line flex flex-col min-h-0 min-w-0">
+                  <div class="px-5 py-3 border-b border-line flex items-center gap-2 bg-paper/40">
+                    <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-[6px] border border-line bg-canvas text-ink-muted text-[10px] font-medium uppercase tracking-[0.12em]">today</span>
+                    <span class="text-[12.5px] text-ink-muted">every tool call in-line · 5 screens of JSON to find 4 sentences</span>
+                  </div>
+                  <div class="flex-1 overflow-y-auto px-5 py-4 space-y-4 text-[13.5px] leading-[1.55]">
+                    <div>
+                      <div class="flex items-center gap-2 mb-1"><svg viewBox="0 0 32 32" class="w-3.5 h-3.5"><path d="M9 22 L16 8 L23 22 Z" fill="#cc785c"/><circle cx="16" cy="18" r="2.2" fill="#faf9f5"/></svg><span class="mono text-[10.5px] text-ink-muted">claude · 8m ago</span></div>
+                      <div>Now <span class="mono text-[12px]">FEATURES.md</span>. Two rows to rewrite:</div>
+                    </div>
+                    <div class="border-2 border-klein/50 rounded-[8px] p-2 space-y-1.5">
+                      <div class="flex items-center gap-2 py-1 pl-2 pr-2 rounded-[6px] bg-paper border border-line"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-3 h-3 text-ink-soft"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6Z"/></svg><span class="mono text-[11.5px] text-ink-soft">read</span><span class="mono text-[10.5px] text-ink-muted truncate flex-1">docs/FEATURES.md</span><span class="mono text-[10.5px] text-ink-muted">3,356 chars</span></div>
+                      <div class="flex items-center gap-2 py-1 pl-2 pr-2 rounded-[6px] bg-paper border border-line"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-3 h-3 text-ink-soft"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 1 1 3 3L7 19l-4 1 1-4Z"/></svg><span class="mono text-[11.5px] text-ink-soft">edit</span><span class="mono text-[10.5px] text-ink-muted truncate flex-1">docs/FEATURES.md</span><span class="mono text-[10.5px] text-success">+1</span><span class="mono text-[10.5px] text-danger">−1</span></div>
+                    </div>
+                    <div>
+                      <div class="flex items-center gap-2 mb-1"><svg viewBox="0 0 32 32" class="w-3.5 h-3.5"><path d="M9 22 L16 8 L23 22 Z" fill="#cc785c"/><circle cx="16" cy="18" r="2.2" fill="#faf9f5"/></svg><span class="mono text-[10.5px] text-ink-muted">claude · 7m ago</span></div>
+                      <div>And row 235 — the Chat errored-lockout blurb lists "watchdog timeout" as a trigger. Fix:</div>
+                    </div>
+                    <div class="border-2 border-klein/50 rounded-[8px] p-2 space-y-1.5">
+                      <div class="flex items-center gap-2 py-1 pl-2 pr-2 rounded-[6px] bg-paper border border-line"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-3 h-3 text-ink-soft"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 1 1 3 3L7 19l-4 1 1-4Z"/></svg><span class="mono text-[11.5px] text-ink-soft">edit</span><span class="mono text-[10.5px] text-ink-muted truncate flex-1">docs/FEATURES.md</span><span class="mono text-[10.5px] text-success">+1</span><span class="mono text-[10.5px] text-danger">−1</span></div>
+                      <div class="flex items-center gap-2 py-1 pl-2 pr-2 rounded-[6px] bg-paper border border-line"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-3 h-3 text-ink-soft"><path d="M3 6h18M6 6v14a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V6"/><path d="M9 11v6M15 11v6"/></svg><span class="mono text-[11.5px] text-ink-soft">plan</span><span class="mono text-[10.5px] text-ink-muted truncate flex-1">6 items · 5 done → view</span></div>
+                      <div class="flex items-center gap-2 py-1 pl-2 pr-2 rounded-[6px] bg-paper border border-line"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-3 h-3 text-ink-soft"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M8 12l3 3 5-6"/></svg><span class="mono text-[11.5px] text-ink-soft">bash</span><span class="mono text-[10.5px] text-ink-muted truncate flex-1">Run typecheck across workspace</span><span class="mono text-[10.5px] text-ink-muted">7 lines</span></div>
+                      <div class="flex items-center gap-2 py-1 pl-2 pr-2 rounded-[6px] bg-paper border border-line"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-3 h-3 text-ink-soft"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M8 12l3 3 5-6"/></svg><span class="mono text-[11.5px] text-ink-soft">bash</span><span class="mono text-[10.5px] text-ink-muted truncate flex-1">Run server tests</span><span class="mono text-[10.5px] text-ink-muted">79 lines</span></div>
+                    </div>
+                    <div>
+                      <div class="flex items-center gap-2 mb-1"><svg viewBox="0 0 32 32" class="w-3.5 h-3.5"><path d="M9 22 L16 8 L23 22 Z" fill="#cc785c"/><circle cx="16" cy="18" r="2.2" fill="#faf9f5"/></svg><span class="mono text-[10.5px] text-ink-muted">claude · 5m ago</span></div>
+                      <div>All 597 green. Now the web build.</div>
+                    </div>
+                    <div class="border-2 border-klein/50 rounded-[8px] p-2 space-y-1.5">
+                      <div class="flex items-center gap-2 py-1 pl-2 pr-2 rounded-[6px] bg-paper border border-line"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-3 h-3 text-ink-soft"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M8 12l3 3 5-6"/></svg><span class="mono text-[11.5px] text-ink-soft">bash</span><span class="mono text-[10.5px] text-ink-muted truncate flex-1">Build web bundle</span><span class="mono text-[10.5px] text-ink-muted">20 lines</span></div>
+                    </div>
+                    <div>
+                      <div class="flex items-center gap-2 mb-1"><svg viewBox="0 0 32 32" class="w-3.5 h-3.5"><path d="M9 22 L16 8 L23 22 Z" fill="#cc785c"/><circle cx="16" cy="18" r="2.2" fill="#faf9f5"/></svg><span class="mono text-[10.5px] text-ink-muted">claude · now</span></div>
+                      <div>All three gates pass. Now commit + push.<span class="caret"></span></div>
+                    </div>
+                  </div>
+                </section>
+
+                <!-- RIGHT · after (s-19 collapse) -->
+                <section class="flex flex-col min-h-0 min-w-0 bg-canvas">
+                  <div class="px-5 py-3 border-b border-line flex items-center gap-2">
+                    <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-[6px] border border-klein/30 bg-klein-wash text-klein-ink text-[10px] font-medium uppercase tracking-[0.12em]"><span class="h-1.5 w-1.5 rounded-full bg-klein"></span>s-19</span>
+                    <span class="text-[12.5px] text-ink-muted">consecutive tools folded · active group stays open</span>
+                    <span class="ml-auto text-[11px] text-ink-muted">Normal view</span>
+                  </div>
+                  <div class="flex-1 overflow-y-auto px-5 py-4 space-y-4 text-[13.5px] leading-[1.55]">
+                    <!-- turn 1 -->
+                    <div>
+                      <div class="flex items-center gap-2 mb-1"><svg viewBox="0 0 32 32" class="w-3.5 h-3.5"><path d="M9 22 L16 8 L23 22 Z" fill="#cc785c"/><circle cx="16" cy="18" r="2.2" fill="#faf9f5"/></svg><span class="mono text-[10.5px] text-ink-muted">claude · 8m ago</span></div>
+                      <div>Now <span class="mono text-[12px]">FEATURES.md</span>. Two rows to rewrite:</div>
+                      <div class="relative pl-4 mt-2">
+                        <span class="absolute left-[3px] top-3 bottom-3 w-px bg-line-strong"></span>
+                        <button class="w-full flex items-center gap-2 py-1.5 pl-2 pr-2 rounded-[8px] bg-paper border border-line hover:bg-paper/70">
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-3 h-3 text-ink-muted shrink-0"><path d="M9 6l6 6-6 6"/></svg>
+                          <span class="flex items-center -space-x-1 shrink-0">
+                            <span class="h-5 w-5 rounded-[5px] bg-canvas border border-line flex items-center justify-center"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-3 h-3 text-ink-soft"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6Z"/></svg></span>
+                            <span class="h-5 w-5 rounded-[5px] bg-canvas border border-line flex items-center justify-center"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-3 h-3 text-ink-soft"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 1 1 3 3L7 19l-4 1 1-4Z"/></svg></span>
+                          </span>
+                          <span class="text-[12.5px] text-ink font-medium shrink-0">2 steps</span>
+                          <span class="mono text-[11px] text-ink-muted truncate flex-1 text-left">read → edit <span class="text-ink-soft">FEATURES.md</span> · +1 −1</span>
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" class="w-3.5 h-3.5 text-success shrink-0"><path d="M5 12l5 5 9-10"/></svg>
+                          <span class="mono text-[10.5px] text-ink-muted shrink-0 tabular-nums">1.2s</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    <!-- turn 2 -->
+                    <div>
+                      <div class="flex items-center gap-2 mb-1"><svg viewBox="0 0 32 32" class="w-3.5 h-3.5"><path d="M9 22 L16 8 L23 22 Z" fill="#cc785c"/><circle cx="16" cy="18" r="2.2" fill="#faf9f5"/></svg><span class="mono text-[10.5px] text-ink-muted">claude · 7m ago</span></div>
+                      <div>And row 235 — the Chat errored-lockout blurb lists "watchdog timeout" as a trigger. Fix:</div>
+                      <div class="relative pl-4 mt-2">
+                        <span class="absolute left-[3px] top-3 bottom-3 w-px bg-line-strong"></span>
+                        <button class="w-full flex items-center gap-2 py-1.5 pl-2 pr-2 rounded-[8px] bg-paper border border-line hover:bg-paper/70">
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-3 h-3 text-ink-muted shrink-0"><path d="M9 6l6 6-6 6"/></svg>
+                          <span class="flex items-center -space-x-1 shrink-0">
+                            <span class="h-5 w-5 rounded-[5px] bg-canvas border border-line flex items-center justify-center"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-3 h-3 text-ink-soft"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 1 1 3 3L7 19l-4 1 1-4Z"/></svg></span>
+                            <span class="h-5 w-5 rounded-[5px] bg-canvas border border-line flex items-center justify-center"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-3 h-3 text-ink-soft"><path d="M3 6h18M6 6v14a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V6"/><path d="M9 11v6M15 11v6"/></svg></span>
+                            <span class="h-5 w-5 rounded-[5px] bg-canvas border border-line flex items-center justify-center"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-3 h-3 text-ink-soft"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M8 12l3 3 5-6"/></svg></span>
+                            <span class="h-5 w-5 rounded-full bg-canvas border border-line flex items-center justify-center mono text-[10px] text-ink-muted">+1</span>
+                          </span>
+                          <span class="text-[12.5px] text-ink font-medium shrink-0">4 steps</span>
+                          <span class="mono text-[11px] text-ink-muted truncate flex-1 text-left">edit · plan · typecheck · tests <span class="text-success">597 pass</span></span>
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" class="w-3.5 h-3.5 text-success shrink-0"><path d="M5 12l5 5 9-10"/></svg>
+                          <span class="mono text-[10.5px] text-ink-muted shrink-0 tabular-nums">1m 42s</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    <!-- turn 3 · active (expanded) -->
+                    <div>
+                      <div class="flex items-center gap-2 mb-1"><svg viewBox="0 0 32 32" class="w-3.5 h-3.5"><path d="M9 22 L16 8 L23 22 Z" fill="#cc785c"/><circle cx="16" cy="18" r="2.2" fill="#faf9f5"/></svg><span class="mono text-[10.5px] text-ink-muted">claude · now</span></div>
+                      <div>All 597 green. Now the web build.</div>
+                      <div class="relative pl-4 mt-2">
+                        <span class="absolute left-[3px] top-3 bottom-3 w-px bg-klein"></span>
+                        <div class="rounded-[8px] overflow-hidden border border-klein/35">
+                          <div class="flex items-center gap-2 py-1.5 pl-2 pr-2 bg-klein-wash/60">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-3 h-3 text-klein rotate-90 shrink-0"><path d="M9 6l6 6-6 6"/></svg>
+                            <span class="flex items-center -space-x-1 shrink-0">
+                              <span class="h-5 w-5 rounded-[5px] bg-canvas border border-klein/30 flex items-center justify-center"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-3 h-3 text-klein-ink"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M8 12l3 3 5-6"/></svg></span>
+                            </span>
+                            <span class="text-[12.5px] text-klein-ink font-semibold shrink-0">1 step · running</span>
+                            <span class="mono text-[11px] text-ink-muted truncate flex-1 text-left">pnpm --filter @claudex/web build</span>
+                            <svg class="w-3.5 h-3.5 text-klein animate-spin shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.2-8.6"/></svg>
+                            <span class="mono text-[10.5px] text-klein-ink shrink-0 tabular-nums">0:18</span>
+                          </div>
+                          <div class="bg-klein-wash/20 border-t border-klein/25 px-3 py-2 mono text-[11px] text-ink-muted leading-[1.55]">
+                            <div>vite v5.4.10 building for production…</div>
+                            <div>✓ 218 modules transformed</div>
+                            <div>rendering chunks<span class="caret"></span></div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="px-5 py-2 border-t border-line bg-paper/40 flex items-center gap-2 text-[11px] text-ink-muted">
+                    <span>4 text lines · 3 groups · ~½ the scroll of the left pane</span>
+                    <button class="ml-auto h-6 px-2 rounded-[6px] border border-line bg-canvas mono text-[11px]">Expand all</button>
+                    <button class="h-6 px-2 rounded-[6px] border border-line bg-canvas mono text-[11px]">Verbose</button>
+                  </div>
+                </section>
+
+              </div>
+            </div>
+            <div class="text-[11px] text-ink-muted max-w-[720px] text-center">Side-by-side from the same transcript the screenshot captured. Left: today — every Read / Edit / Bash / PlanUpdate sits inline between the sentences you care about. Right: s-19 — each run of tools folds into one pill, only the live <em class="not-italic">bun build</em> group stays expanded. The two left-border colors (line-strong for done, klein for active) match s-04's existing tool gutter so nothing else in the UI has to change.</div>
+          </div>
+        </div>
+
+        <!-- ==================== State gallery ==================== -->
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5 pb-16 max-w-[1280px] mx-auto">
+          <!-- STATE · done (default collapsed) -->
+          <div class="rounded-[10px] border border-line bg-canvas p-4 shadow-card">
+            <div class="caps text-ink-muted mb-2">State · done (default)</div>
+            <div class="relative pl-4">
+              <span class="absolute left-[3px] top-3 bottom-3 w-px bg-line-strong"></span>
+              <button class="w-full flex items-center gap-2 py-1.5 pl-2 pr-2 rounded-[8px] bg-paper border border-line">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-3 h-3 text-ink-muted shrink-0"><path d="M9 6l6 6-6 6"/></svg>
+                <span class="flex items-center -space-x-1 shrink-0">
+                  <span class="h-5 w-5 rounded-[5px] bg-canvas border border-line flex items-center justify-center"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-3 h-3 text-ink-soft"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6Z"/></svg></span>
+                  <span class="h-5 w-5 rounded-[5px] bg-canvas border border-line flex items-center justify-center"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-3 h-3 text-ink-soft"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 1 1 3 3L7 19l-4 1 1-4Z"/></svg></span>
+                </span>
+                <span class="text-[12.5px] text-ink font-medium shrink-0">3 steps</span>
+                <span class="mono text-[11px] text-ink-muted truncate flex-1 text-left">read · grep · edit</span>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" class="w-3.5 h-3.5 text-success shrink-0"><path d="M5 12l5 5 9-10"/></svg>
+                <span class="mono text-[10.5px] text-ink-muted shrink-0 tabular-nums">2.4s</span>
+              </button>
+            </div>
+            <p class="mt-3 text-[11.5px] text-ink-muted leading-[1.5]">All green → auto-collapse on the last <span class="mono text-[11px]">tool_result</span>. Chevron right, neutral gutter. Tap to re-open.</p>
+          </div>
+
+          <!-- STATE · running (expanded) -->
+          <div class="rounded-[10px] border border-klein/30 bg-klein-wash/20 p-4 shadow-card">
+            <div class="caps text-klein-ink mb-2">State · running (expanded)</div>
+            <div class="relative pl-4">
+              <span class="absolute left-[3px] top-3 bottom-3 w-px bg-klein"></span>
+              <div class="rounded-[8px] overflow-hidden border border-klein/35">
+                <div class="flex items-center gap-2 py-1.5 pl-2 pr-2 bg-klein-wash/70">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-3 h-3 text-klein rotate-90 shrink-0"><path d="M9 6l6 6-6 6"/></svg>
+                  <span class="flex items-center -space-x-1 shrink-0">
+                    <span class="h-5 w-5 rounded-[5px] bg-canvas border border-klein/30 flex items-center justify-center"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-3 h-3 text-klein-ink"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg></span>
+                    <span class="h-5 w-5 rounded-[5px] bg-canvas border border-klein/30 flex items-center justify-center"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-3 h-3 text-klein-ink"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M8 12l3 3 5-6"/></svg></span>
+                  </span>
+                  <span class="text-[12.5px] text-klein-ink font-semibold shrink-0">2/? · running</span>
+                  <span class="mono text-[11px] text-ink-muted truncate flex-1 text-left">bash · tests</span>
+                  <svg class="w-3.5 h-3.5 text-klein animate-spin shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.2-8.6"/></svg>
+                  <span class="mono text-[10.5px] text-klein-ink shrink-0 tabular-nums">0:07</span>
+                </div>
+                <div class="bg-klein-wash/20 border-t border-klein/25 px-3 py-1.5 flex items-center gap-2">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" class="w-3 h-3 text-success"><path d="M5 12l5 5 9-10"/></svg>
+                  <span class="mono text-[11px] text-ink-soft">grep</span>
+                  <span class="mono text-[10.5px] text-ink-muted truncate flex-1">"watchdog" server/src</span>
+                  <span class="mono text-[10.5px] text-ink-muted">3 hits</span>
+                </div>
+                <div class="bg-klein-wash/30 border-t border-klein/25 px-3 py-1.5 flex items-center gap-2">
+                  <svg class="w-3 h-3 text-klein animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.2-8.6"/></svg>
+                  <span class="mono text-[11px] text-klein-ink">bash</span>
+                  <span class="mono text-[10.5px] text-ink-muted truncate flex-1">pnpm test --filter server</span>
+                </div>
+              </div>
+            </div>
+            <p class="mt-3 text-[11.5px] text-klein-ink/80 leading-[1.5]">Klein gutter + wash header. Count ticks up live. Folds itself on the group's last <span class="mono text-[11px]">tool_result</span> (unless pinned).</p>
+          </div>
+
+          <!-- STATE · failed (sticky open) -->
+          <div class="rounded-[10px] border border-danger/30 bg-danger-wash/30 p-4 shadow-card">
+            <div class="caps text-danger mb-2">State · failed (sticky open)</div>
+            <div class="relative pl-4">
+              <span class="absolute left-[3px] top-3 bottom-3 w-px bg-danger"></span>
+              <div class="rounded-[8px] overflow-hidden border border-danger/30">
+                <div class="flex items-center gap-2 py-1.5 pl-2 pr-2 bg-danger-wash/80">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-3 h-3 text-danger rotate-90 shrink-0"><path d="M9 6l6 6-6 6"/></svg>
+                  <span class="flex items-center -space-x-1 shrink-0">
+                    <span class="h-5 w-5 rounded-[5px] bg-canvas border border-line flex items-center justify-center"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-3 h-3 text-ink-soft"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6Z"/></svg></span>
+                    <span class="h-5 w-5 rounded-[5px] bg-canvas border border-danger/40 flex items-center justify-center"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-3 h-3 text-danger"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M8 12l3 3 5-6"/></svg></span>
+                  </span>
+                  <span class="text-[12.5px] text-danger font-semibold shrink-0">2 steps · 1 failed</span>
+                  <span class="mono text-[11px] text-ink-muted truncate flex-1 text-left">tests exited with 1</span>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" class="w-3.5 h-3.5 text-danger shrink-0"><path d="M18 6L6 18M6 6l12 12"/></svg>
+                  <span class="mono text-[10.5px] text-danger shrink-0 tabular-nums">12.8s</span>
+                </div>
+                <div class="bg-canvas border-t border-danger/25 px-3 py-1.5 flex items-center gap-2">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" class="w-3 h-3 text-success"><path d="M5 12l5 5 9-10"/></svg>
+                  <span class="mono text-[11px] text-ink-soft">read</span>
+                  <span class="mono text-[10.5px] text-ink-muted truncate flex-1">watchdog.test.ts</span>
+                </div>
+                <div class="bg-danger-wash/40 border-t border-danger/25 px-3 py-1.5 flex items-center gap-2">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" class="w-3 h-3 text-danger"><path d="M18 6L6 18M6 6l12 12"/></svg>
+                  <span class="mono text-[11px] text-danger">bash</span>
+                  <span class="mono text-[10.5px] text-ink-muted truncate flex-1">pnpm test — 1 failing</span>
+                  <span class="mono text-[10.5px] text-danger">exit 1</span>
+                </div>
+              </div>
+            </div>
+            <p class="mt-3 text-[11.5px] text-danger/90 leading-[1.5]">Danger gutter. <span class="font-medium">Never auto-collapses</span> — stays open until you manually fold it. Keeps the failing call in view without a hunt.</p>
+          </div>
+
+          <!-- STATE · pinned -->
+          <div class="rounded-[10px] border border-line bg-canvas p-4 shadow-card">
+            <div class="caps text-ink-muted mb-2">State · pinned (done, kept open)</div>
+            <div class="relative pl-4">
+              <span class="absolute left-[3px] top-3 bottom-3 w-px bg-line-strong"></span>
+              <div class="rounded-[8px] overflow-hidden border border-line">
+                <div class="flex items-center gap-2 py-1.5 pl-2 pr-2 bg-paper">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-3 h-3 text-ink-muted rotate-90 shrink-0"><path d="M9 6l6 6-6 6"/></svg>
+                  <span class="flex items-center -space-x-1 shrink-0">
+                    <span class="h-5 w-5 rounded-[5px] bg-canvas border border-line flex items-center justify-center"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-3 h-3 text-ink-soft"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M8 12l3 3 5-6"/></svg></span>
+                    <span class="h-5 w-5 rounded-[5px] bg-canvas border border-line flex items-center justify-center"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-3 h-3 text-ink-soft"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M8 12l3 3 5-6"/></svg></span>
+                  </span>
+                  <span class="text-[12.5px] text-ink font-medium shrink-0">2 steps</span>
+                  <span class="inline-flex items-center gap-1 px-1.5 h-5 rounded-[4px] border border-klein/30 bg-klein-wash mono text-[10px] text-klein-ink uppercase tracking-[0.08em]"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-3 h-3"><path d="M12 17v5M9 2h6l1 6-4 4-4-4 1-6Z"/></svg>pinned</span>
+                  <span class="ml-auto mono text-[10.5px] text-ink-muted tabular-nums">8.2s</span>
+                </div>
+                <div class="bg-canvas border-t border-line px-3 py-1.5 flex items-center gap-2">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" class="w-3 h-3 text-success"><path d="M5 12l5 5 9-10"/></svg>
+                  <span class="mono text-[11px] text-ink-soft">bash</span>
+                  <span class="mono text-[10.5px] text-ink-muted truncate flex-1">pnpm -r typecheck</span>
+                </div>
+                <div class="bg-canvas border-t border-line px-3 py-1.5 flex items-center gap-2">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" class="w-3 h-3 text-success"><path d="M5 12l5 5 9-10"/></svg>
+                  <span class="mono text-[11px] text-ink-soft">bash</span>
+                  <span class="mono text-[10.5px] text-ink-muted truncate flex-1">pnpm --filter server test</span>
+                </div>
+              </div>
+            </div>
+            <p class="mt-3 text-[11.5px] text-ink-muted leading-[1.5]">Long-press the summary (or <span class="mono text-[11px]">⌥-click</span> desktop) to pin — this group is then exempt from the auto-collapse sweep. The <span class="mono text-[11px]">pinned</span> chip doubles as the un-pin button.</p>
+          </div>
+
+          <!-- STATE · single tool (no grouping) -->
+          <div class="rounded-[10px] border border-line bg-canvas p-4 shadow-card">
+            <div class="caps text-ink-muted mb-2">State · single call · no group</div>
+            <div class="relative pl-4">
+              <span class="absolute left-[3px] top-3 bottom-3 w-px bg-line-strong"></span>
+              <div class="flex items-center gap-2 py-1.5 pl-2 pr-3 rounded-[8px] bg-paper border border-line">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-3 h-3 text-ink-muted"><path d="M9 6l6 6-6 6"/></svg>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-3.5 h-3.5 text-ink-soft"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6Z"/></svg>
+                <span class="mono text-[12px] text-ink-soft">read</span>
+                <span class="mono text-[11px] text-ink-muted truncate flex-1">server/src/ws/handler.ts</span>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" class="w-3.5 h-3.5 text-success"><path d="M5 12l5 5 9-10"/></svg>
+              </div>
+            </div>
+            <p class="mt-3 text-[11.5px] text-ink-muted leading-[1.5]">A lone tool call renders as-is — grouping only kicks in at <span class="mono text-[11px]">count ≥ 2</span>, so the summary row never adds chrome that isn't earning its keep.</p>
+          </div>
+
+          <!-- STATE · group broken by text chunk -->
+          <div class="rounded-[10px] border border-line bg-canvas p-4 shadow-card">
+            <div class="caps text-ink-muted mb-2">Rule · text chunk splits the group</div>
+            <div class="space-y-1.5">
+              <div class="relative pl-4">
+                <span class="absolute left-[3px] top-3 bottom-3 w-px bg-line-strong"></span>
+                <div class="flex items-center gap-2 py-1 pl-2 pr-2 rounded-[8px] bg-paper border border-line">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-3 h-3 text-ink-muted"><path d="M9 6l6 6-6 6"/></svg>
+                  <span class="text-[12px] text-ink font-medium">2 steps</span>
+                  <span class="mono text-[10.5px] text-ink-muted truncate flex-1">read · grep</span>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" class="w-3 h-3 text-success"><path d="M5 12l5 5 9-10"/></svg>
+                </div>
+              </div>
+              <div class="text-[12.5px] text-ink leading-[1.55] pl-4 italic">"Found it — <span class="mono text-[11px] not-italic">lib/date.ts:12</span> pins locale."</div>
+              <div class="relative pl-4">
+                <span class="absolute left-[3px] top-3 bottom-3 w-px bg-line-strong"></span>
+                <div class="flex items-center gap-2 py-1 pl-2 pr-2 rounded-[8px] bg-paper border border-line">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-3 h-3 text-ink-muted"><path d="M9 6l6 6-6 6"/></svg>
+                  <span class="text-[12px] text-ink font-medium">3 steps</span>
+                  <span class="mono text-[10.5px] text-ink-muted truncate flex-1">edit · typecheck · tests</span>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" class="w-3 h-3 text-success"><path d="M5 12l5 5 9-10"/></svg>
+                </div>
+              </div>
+            </div>
+            <p class="mt-3 text-[11.5px] text-ink-muted leading-[1.5]">Any text chunk, user message, permission prompt, or indigo agent-pointer terminates the current group and starts a new one — groups are always scoped to one stretch of tool-only turns.</p>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- =========================================================
       FOOTER
     ========================================================= -->
     <footer class="border-t border-line bg-paper/40">
@@ -4859,6 +5311,7 @@
             <a class="text-ink-soft hover:text-ink" href="#s-16">16 · Plan</a>
             <a class="text-ink-soft hover:text-ink" href="#s-17">17 · Live agents</a>
             <a class="text-ink-soft hover:text-ink" href="#s-18">18 · Agents drawer</a>
+            <a class="text-ink-soft hover:text-ink" href="#s-19">19 · Tool groups</a>
           </div>
           <div class="ml-auto text-[12px] text-ink-muted mono self-end">v0.1 · mockup</div>
         </div>
