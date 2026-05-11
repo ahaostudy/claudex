@@ -2905,7 +2905,7 @@ function PermissionCard({
           </div>
           <div className="mt-3 text-[11px] text-ink-muted flex items-center justify-between">
             <span>
-              Saved in <span className="mono">claudex</span>
+              Saved in <span className="mono">Claudex</span>
             </span>
           </div>
         </div>

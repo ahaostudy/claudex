@@ -214,7 +214,7 @@ export function SettingsScreen() {
           <aside className="hidden md:flex md:flex-col border-r border-line bg-paper/40 overflow-y-auto min-h-0 shrink-0">
             <div className="p-4 flex items-center gap-2">
               <Logo className="w-4 h-4" />
-              <span className="mono text-[13px]">claudex</span>
+              <span className="mono text-[13px]">Claudex</span>
             </div>
             <div className="px-4 caps text-ink-muted mb-2">Settings</div>
             <nav className="px-3 space-y-0.5 text-[13px]">

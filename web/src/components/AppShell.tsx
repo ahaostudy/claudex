@@ -189,7 +189,7 @@ function DesktopSidebar({ tab, alertCount }: { tab: ShellTab; alertCount: number
         className="p-4 flex items-center gap-2 rounded-[6px] hover:bg-canvas/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-klein/40"
       >
         <Logo className="w-5 h-5" />
-        <span className="mono text-[13px]">claudex</span>
+        <span className="mono text-[13px]">Claudex</span>
       </Link>
 
       <div className="px-3 space-y-1">

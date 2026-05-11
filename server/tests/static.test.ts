@@ -74,13 +74,13 @@ describe("static web serving", () => {
 
   it("serves index.html at /", async () => {
     const dist = makeTmpDist({
-      "index.html": "<!doctype html><title>claudex</title>",
+      "index.html": "<!doctype html><title>Claudex</title>",
     });
     const ctx = await bootstrap(dist);
     disposers.push(ctx.cleanup);
     const res = await ctx.app.inject({ method: "GET", url: "/" });
     expect(res.statusCode).toBe(200);
-    expect(res.body).toContain("claudex");
+    expect(res.body).toContain("Claudex");
     expect(res.headers["content-type"]).toMatch(/text\/html/);
   });
 

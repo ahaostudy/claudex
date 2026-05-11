@@ -31,9 +31,9 @@ async function handlePush(event) {
   try {
     payload = event.data ? event.data.json() : {};
   } catch {
-    payload = { title: "claudex", body: "You have a new notification." };
+    payload = { title: "Claudex", body: "You have a new notification." };
   }
-  const title = payload.title || "claudex";
+  const title = payload.title || "Claudex";
   const body = payload.body || "";
   const data = payload.data || {};
   // `tag` collapses duplicate notifications for the same session so the user

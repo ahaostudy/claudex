@@ -297,7 +297,7 @@ async function main(): Promise<void> {
   const out = process.stdout;
 
   // --- header -------------------------------------------------------------
-  out.write(bold("claudex") + dim(" · ") + "status\n");
+  out.write(bold("Claudex") + dim(" · ") + "status\n");
   out.write(dim("━".repeat(32)) + "\n\n");
 
   // --- server -------------------------------------------------------------
