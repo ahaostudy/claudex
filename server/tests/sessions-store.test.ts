@@ -166,6 +166,131 @@ describe("SessionStore", () => {
     expect(after.stats.contextPct).toBeCloseTo(0.42);
   });
 
+  it("setStats absolutely overwrites file/line stats and leaves messages alone", () => {
+    const { sessions, project } = bootstrap();
+    const s = sessions.create({
+      title: "t",
+      projectId: project.id,
+      model: "claude-opus-4-7",
+      mode: "default",
+    });
+    // Pre-populate so we can confirm the overwrite is absolute, not additive.
+    sessions.bumpStats(s.id, {
+      messages: 5,
+      filesChanged: 99,
+      linesAdded: 999,
+      linesRemoved: 123,
+    });
+    sessions.setStats(s.id, {
+      filesChanged: 2,
+      linesAdded: 7,
+      linesRemoved: 1,
+      computedSeq: 42,
+    });
+    const after = sessions.findById(s.id)!;
+    expect(after.stats.filesChanged).toBe(2);
+    expect(after.stats.linesAdded).toBe(7);
+    expect(after.stats.linesRemoved).toBe(1);
+    // messages untouched — it's bumpStats territory.
+    expect(after.stats.messages).toBe(5);
+
+    // Re-setting replaces again (not additive).
+    sessions.setStats(s.id, {
+      filesChanged: 0,
+      linesAdded: 0,
+      linesRemoved: 0,
+      computedSeq: 100,
+    });
+    const after2 = sessions.findById(s.id)!;
+    expect(after2.stats.filesChanged).toBe(0);
+    expect(after2.stats.linesAdded).toBe(0);
+    expect(after2.stats.linesRemoved).toBe(0);
+  });
+
+  it("listStaleStats surfaces sessions whose event log is ahead of their stats cursor", () => {
+    const { sessions, project } = bootstrap();
+    // Session with no events — should never appear (maxSeq = -1 == cursor).
+    const empty = sessions.create({
+      title: "empty",
+      projectId: project.id,
+      model: "claude-opus-4-7",
+      mode: "default",
+    });
+    // Session with one event but stats never refreshed (cursor still -1).
+    const a = sessions.create({
+      title: "a",
+      projectId: project.id,
+      model: "claude-opus-4-7",
+      mode: "default",
+    });
+    sessions.appendEvent({
+      sessionId: a.id,
+      kind: "user_message",
+      payload: { text: "hi" },
+    });
+    // Session already caught up.
+    const b = sessions.create({
+      title: "b",
+      projectId: project.id,
+      model: "claude-opus-4-7",
+      mode: "default",
+    });
+    sessions.appendEvent({
+      sessionId: b.id,
+      kind: "user_message",
+      payload: { text: "ok" },
+    });
+    sessions.setStats(b.id, {
+      filesChanged: 0,
+      linesAdded: 0,
+      linesRemoved: 0,
+      computedSeq: 0,
+    });
+
+    const stale = sessions.listStaleStats(10);
+    const ids = stale.map((r) => r.id);
+    expect(ids).toContain(a.id);
+    expect(ids).not.toContain(b.id);
+    expect(ids).not.toContain(empty.id);
+    const row = stale.find((r) => r.id === a.id)!;
+    expect(row.maxSeq).toBe(0); // first event's seq
+
+    // After setStats advances the cursor, `a` drops out.
+    sessions.setStats(a.id, {
+      filesChanged: 0,
+      linesAdded: 0,
+      linesRemoved: 0,
+      computedSeq: row.maxSeq,
+    });
+    expect(sessions.listStaleStats(10).map((r) => r.id)).not.toContain(a.id);
+
+    // A new event on `a` makes it stale again.
+    sessions.appendEvent({
+      sessionId: a.id,
+      kind: "user_message",
+      payload: { text: "again" },
+    });
+    expect(sessions.listStaleStats(10).map((r) => r.id)).toContain(a.id);
+  });
+
+  it("listStaleStats excludes archived sessions", () => {
+    const { sessions, project } = bootstrap();
+    const s = sessions.create({
+      title: "arc",
+      projectId: project.id,
+      model: "claude-opus-4-7",
+      mode: "default",
+    });
+    sessions.appendEvent({
+      sessionId: s.id,
+      kind: "user_message",
+      payload: { text: "hi" },
+    });
+    expect(sessions.listStaleStats(10).map((r) => r.id)).toContain(s.id);
+    sessions.archive(s.id);
+    expect(sessions.listStaleStats(10).map((r) => r.id)).not.toContain(s.id);
+  });
+
   it("event seq is monotonic per session and independent across sessions", () => {
     const { sessions, project } = bootstrap();
     const s1 = sessions.create({

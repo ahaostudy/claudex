@@ -635,6 +635,22 @@ const MIGRATIONS: { id: number; name: string; up: string }[] = [
       SELECT 1;
     `,
   },
+  {
+    id: 22,
+    name: "session_stats_computed_seq",
+    // Per-session "we last recomputed the file/line stats columns based on
+    // events up through this seq". The background StatsRefresher worker
+    // (server/src/sessions/stats-refresher.ts) compares this against the
+    // session's max session_events.seq to decide whether to re-aggregate
+    // via aggregateSessionDiff and overwrite stats_files_changed /
+    // stats_lines_added / stats_lines_removed. -1 = never computed yet;
+    // session_events.seq starts at 0 so the sentinel can't collide with a
+    // real seq.
+    up: `
+      ALTER TABLE sessions
+        ADD COLUMN stats_computed_seq INTEGER NOT NULL DEFAULT -1;
+    `,
+  },
 ];
 
 export function openDb(config: Config, log: Logger): ClaudexDb {

@@ -960,7 +960,12 @@ function SessionRow({
   const dotTone = STATUS_DOT[s.status] ?? "bg-ink-faint";
   const dotGlow = DOT_GLOW[s.status] ?? "";
   const rel = formatRel(s.lastMessageAt ?? s.updatedAt);
-  const branch = s.branch ?? "main";
+  // Branch: null comes back from the server for non-git projects or when
+  // git rev-parse failed at session-creation time. Historical rows
+  // (pre-migration 22 era) were always null for non-worktree sessions.
+  // Render an em-dash placeholder in muted ink so the column clearly means
+  // "no branch captured" rather than lying with a hard-coded "main".
+  const branch = s.branch;
   const { linesAdded, linesRemoved, filesChanged, contextPct } = s.stats;
   // Inline delete confirm. Opened by the trailing trash button on the row;
   // anchored to the row itself (NOT a modal) so the user stays oriented in
@@ -1123,6 +1128,16 @@ function SessionRow({
             )}
           </span>
         </div>
+        {/* Last sent user message — single line, ellipsis-truncated.
+            Server seeds it in SESSION_SELECT_COLS; web store mirrors it
+            optimistically on `user_message` WS frames so the list stays
+            live as the user types across tabs. Rendered only when the
+            session actually has a prior user message. */}
+        {s.lastUserMessage && (
+          <div className="text-[12px] text-ink-muted truncate mt-0.5">
+            {s.lastUserMessage}
+          </div>
+        )}
         {hasDiffs && (
           <div className="mono text-[12px] text-ink-muted truncate mt-0.5">
             <span className="text-success">+{linesAdded}</span>{" "}
@@ -1133,7 +1148,7 @@ function SessionRow({
         <div className="mt-1 flex items-center gap-2 text-[11px] text-ink-muted">
           <span className="mono inline-flex items-center gap-1 truncate">
             <GitBranch className="w-3 h-3 shrink-0" />
-            {branch}
+            {branch ?? <span className="text-ink-faint">—</span>}
           </span>
           <span>·</span>
           <span className="mono shrink-0">{shortModel(s.model)}</span>
@@ -1193,10 +1208,22 @@ function SessionRow({
                 </span>
               )}
             </div>
+            {/* Desktop: last sent user message preview, one line under the
+                title. Same source as the mobile row — kept in sync via
+                `previewUserMessage` on `user_message` WS frames. */}
+            {s.lastUserMessage && (
+              <div className="text-[12px] text-ink-muted truncate mt-0.5">
+                {s.lastUserMessage}
+              </div>
+            )}
           </div>
           <div className="mono text-[12px] text-ink-soft truncate flex items-center gap-1.5">
             <GitBranch className="w-3 h-3 text-ink-faint shrink-0" />
-            <span className="truncate">{branch}</span>
+            {branch ? (
+              <span className="truncate">{branch}</span>
+            ) : (
+              <span className="text-ink-faint truncate">—</span>
+            )}
           </div>
           <div className="mono text-[12px] text-ink-muted truncate">
             {hasDiffs ? (

@@ -32,9 +32,50 @@ interface SessionRow {
   stats_lines_added: number;
   stats_lines_removed: number;
   stats_context_pct: number;
+  stats_computed_seq: number;
   cli_jsonl_seq: number;
   tags: string;
   pinned: number;
+  // Not a physical column — populated by the correlated subquery wrapped
+  // into every SELECT via `SESSION_SELECT_COLS`. Raw `payload.$.text` from
+  // the most recent user_message event on this session, or NULL if the
+  // session has no user messages yet. Trimmed + truncated in JS by
+  // `toSession`. Optional because the `create` path constructs a row
+  // literal before the event exists and passes it to `INSERT` — better-
+  // sqlite3 would reject the extra param if we always set it here.
+  last_user_message?: string | null;
+}
+
+/**
+ * Columns we append to every `SELECT ... FROM sessions` so the Session DTO
+ * has a `lastUserMessage` preview without requiring a separate round-trip
+ * (or a denormalised column that would need its own sync path). The
+ * correlated subquery uses `idx_events_session_seq` (session_id, seq) and
+ * short-circuits on the first matching row — cheap even with thousands of
+ * events per session.
+ */
+const SESSION_SELECT_COLS = `sessions.*, (
+    SELECT json_extract(payload, '$.text')
+      FROM session_events
+     WHERE session_id = sessions.id AND kind = 'user_message'
+     ORDER BY seq DESC
+     LIMIT 1
+  ) AS last_user_message`;
+
+/**
+ * Trim + truncate a raw user_message payload string into the single-line
+ * preview we ship to clients. Collapses whitespace so multi-line prompts
+ * render as one line in the Home list, and caps length at 200 chars with
+ * an ellipsis. Returns null when the input is null/empty — keeps the
+ * Session DTO's `lastUserMessage: string | null` honest.
+ */
+function toPreview(raw: string | null | undefined): string | null {
+  if (raw == null) return null;
+  const collapsed = String(raw).replace(/\s+/g, " ").trim();
+  if (collapsed.length === 0) return null;
+  return collapsed.length > 200
+    ? `${collapsed.slice(0, 200)}…`
+    : collapsed;
 }
 
 function parseTags(raw: string | null | undefined): string[] {
@@ -71,6 +112,7 @@ function toSession(row: SessionRow): Session {
     cliJsonlSeq: row.cli_jsonl_seq ?? 0,
     tags: parseTags(row.tags),
     pinned: row.pinned === 1,
+    lastUserMessage: toPreview(row.last_user_message),
     stats: {
       messages: row.stats_messages,
       filesChanged: row.stats_files_changed,
@@ -124,6 +166,8 @@ export class SessionStore {
     archive: Statement | null;
     deleteById: Statement | null;
     bumpStats: Statement | null;
+    setStats: Statement | null;
+    listStaleStats: Statement | null;
     nextSeq: Statement | null;
     appendEvent: Statement | null;
     countEvents: Statement | null;
@@ -154,6 +198,8 @@ export class SessionStore {
     archive: null,
     deleteById: null,
     bumpStats: null,
+    setStats: null,
+    listStaleStats: null,
     nextSeq: null,
     appendEvent: null,
     countEvents: null,
@@ -186,7 +232,7 @@ export class SessionStore {
   list(opts?: { includeArchived?: boolean; includeSideChats?: boolean }): Session[] {
     const rows = this.lazyStmt(
       "listAll",
-      `SELECT * FROM sessions
+      `SELECT ${SESSION_SELECT_COLS} FROM sessions
          WHERE (? = 1 OR archived_at IS NULL)
            AND (? = 1 OR parent_session_id IS NULL)
          ORDER BY updated_at DESC`,
@@ -200,7 +246,7 @@ export class SessionStore {
   listByProject(projectId: string): Session[] {
     const rows = this.lazyStmt(
       "listByProject",
-      `SELECT * FROM sessions
+      `SELECT ${SESSION_SELECT_COLS} FROM sessions
          WHERE project_id = ? AND parent_session_id IS NULL
          ORDER BY updated_at DESC`,
     ).all(projectId) as SessionRow[];
@@ -211,7 +257,7 @@ export class SessionStore {
   listChildren(parentId: string): Session[] {
     const rows = this.lazyStmt(
       "listChildren",
-      `SELECT * FROM sessions
+      `SELECT ${SESSION_SELECT_COLS} FROM sessions
          WHERE parent_session_id = ?
          ORDER BY created_at DESC`,
     ).all(parentId) as SessionRow[];
@@ -221,7 +267,7 @@ export class SessionStore {
   findById(id: string): Session | null {
     const row = this.lazyStmt(
       "findById",
-      "SELECT * FROM sessions WHERE id = ?",
+      `SELECT ${SESSION_SELECT_COLS} FROM sessions WHERE id = ?`,
     ).get(id) as SessionRow | undefined;
     return row ? toSession(row) : null;
   }
@@ -234,7 +280,7 @@ export class SessionStore {
   findBySdkSessionId(sdkSessionId: string): Session | null {
     const row = this.lazyStmt(
       "findBySdkSessionId",
-      "SELECT * FROM sessions WHERE sdk_session_id = ?",
+      `SELECT ${SESSION_SELECT_COLS} FROM sessions WHERE sdk_session_id = ?`,
     ).get(sdkSessionId) as SessionRow | undefined;
     return row ? toSession(row) : null;
   }
@@ -257,7 +303,7 @@ export class SessionStore {
     const placeholders = statuses.map(() => "?").join(", ");
     const rows = this.db
       .prepare(
-        `SELECT * FROM sessions WHERE status IN (${placeholders}) ORDER BY updated_at DESC`,
+        `SELECT ${SESSION_SELECT_COLS} FROM sessions WHERE status IN (${placeholders}) ORDER BY updated_at DESC`,
       )
       .all(...statuses) as SessionRow[];
     return rows.map(toSession);
@@ -286,6 +332,7 @@ export class SessionStore {
       stats_lines_added: 0,
       stats_lines_removed: 0,
       stats_context_pct: 0,
+      stats_computed_seq: -1,
       cli_jsonl_seq: 0,
       tags: "[]",
       pinned: 0,
@@ -297,14 +344,14 @@ export class SessionStore {
            created_at, updated_at, last_message_at, archived_at, sdk_session_id,
            parent_session_id, forked_from_session_id,
            stats_messages, stats_files_changed, stats_lines_added,
-           stats_lines_removed, stats_context_pct,
+           stats_lines_removed, stats_context_pct, stats_computed_seq,
            cli_jsonl_seq, tags, pinned
          ) VALUES (
            @id, @title, @project_id, @branch, @worktree_path, @status, @model, @mode,
            @created_at, @updated_at, @last_message_at, @archived_at, @sdk_session_id,
            @parent_session_id, @forked_from_session_id,
            @stats_messages, @stats_files_changed, @stats_lines_added,
-           @stats_lines_removed, @stats_context_pct,
+           @stats_lines_removed, @stats_context_pct, @stats_computed_seq,
            @cli_jsonl_seq, @tags, @pinned
          )`,
     ).run(row);
@@ -566,6 +613,81 @@ export class SessionStore {
       new Date().toISOString(),
       id,
     );
+  }
+
+  /**
+   * Absolute overwrite of the file/line diff stats derived from the event
+   * log. Called by `StatsRefresher` after it re-runs `aggregateSessionDiff`
+   * for a session whose max event seq has moved past `stats_computed_seq`.
+   *
+   * Deliberately does NOT touch `stats_messages` (owned by `bumpStats`),
+   * `stats_context_pct` (owned by the streaming path), or `updated_at`
+   * (stats is a derived projection — a background refresh must not bump
+   * the session to the top of the list and disturb the user's ordering).
+   *
+   * `computedSeq` must be the max seq observed at the moment the caller
+   * started aggregating. If the session has since received a new event,
+   * the next tick will see `MAX(seq) > computedSeq` and re-aggregate. No
+   * locking required.
+   */
+  setStats(
+    id: string,
+    stats: {
+      filesChanged: number;
+      linesAdded: number;
+      linesRemoved: number;
+      computedSeq: number;
+    },
+  ): void {
+    this.lazyStmt(
+      "setStats",
+      `UPDATE sessions SET
+           stats_files_changed = ?,
+           stats_lines_added = ?,
+           stats_lines_removed = ?,
+           stats_computed_seq = ?
+         WHERE id = ?`,
+    ).run(
+      stats.filesChanged,
+      stats.linesAdded,
+      stats.linesRemoved,
+      stats.computedSeq,
+      id,
+    );
+  }
+
+  /**
+   * Return up to `limit` sessions whose stats projection is behind their
+   * event log — i.e. `MAX(session_events.seq) > stats_computed_seq`.
+   * Ordered by `updated_at DESC` so actively-used sessions refresh first.
+   *
+   * `maxSeq` is returned alongside `id` so the caller can thread it through
+   * `setStats({ computedSeq })` without re-querying. -1 means "no events";
+   * such rows are filtered out by the `>` comparison (default
+   * stats_computed_seq is -1) so they never appear here.
+   *
+   * Archived sessions are excluded — they can't receive new events, and
+   * once the refresher has caught up once (stats_computed_seq == max) they
+   * stop being candidates anyway, but skipping them in the WHERE clause
+   * keeps the query cheap on large history dumps.
+   */
+  listStaleStats(limit: number): Array<{ id: string; maxSeq: number }> {
+    return this.lazyStmt(
+      "listStaleStats",
+      `SELECT s.id AS id,
+              COALESCE(
+                (SELECT MAX(seq) FROM session_events WHERE session_id = s.id),
+                -1
+              ) AS maxSeq
+         FROM sessions s
+         WHERE s.archived_at IS NULL
+           AND COALESCE(
+                 (SELECT MAX(seq) FROM session_events WHERE session_id = s.id),
+                 -1
+               ) > s.stats_computed_seq
+         ORDER BY s.updated_at DESC
+         LIMIT ?`,
+    ).all(limit) as Array<{ id: string; maxSeq: number }>;
   }
 
   // ---- events ------------------------------------------------------------

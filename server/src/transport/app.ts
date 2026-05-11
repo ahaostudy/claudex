@@ -48,6 +48,7 @@ import { registerRoutineRoutes } from "../routines/routes.js";
 import { QueueRunner } from "../queue/runner.js";
 import { QueueStore } from "../queue/store.js";
 import { registerQueueRoutes } from "../queue/routes.js";
+import { StatsRefresher } from "../sessions/stats-refresher.js";
 import {
   createPushSender,
   registerPushRoutes,
@@ -115,6 +116,7 @@ export async function buildApp(
   manager: SessionManager;
   scheduler: RoutineScheduler;
   queueRunner: QueueRunner;
+  statsRefresher: StatsRefresher;
 }> {
   const app =
     deps.logger === false
@@ -317,6 +319,22 @@ export async function buildApp(
   }
   await registerQueueRoutes(app, { db: deps.db, manager, queue: queueStore });
 
+  // Stats refresher: background sweeper that keeps each session's
+  // stats_files_changed / stats_lines_added / stats_lines_removed columns
+  // in sync with its event log. Without this the Home list forever shows
+  // "no changes" for every session — the stats columns had no writer prior
+  // to this worker. See server/src/sessions/stats-refresher.ts.
+  //
+  // Auto-start gated on NODE_ENV to match QueueRunner/tests; the refresher
+  // is otherwise safe to run from boot (first tick is one interval away).
+  const statsRefresher = new StatsRefresher({
+    sessions: new SessionStore(deps.db),
+    logger: deps.logger === false ? undefined : deps.logger,
+  });
+  if (process.env.NODE_ENV !== "test") {
+    statsRefresher.start();
+  }
+
   await registerWsRoute(app, {
     manager,
     db: deps.db,
@@ -360,7 +378,7 @@ export async function buildApp(
     await registerWebStatic(app, deps.webDist);
   }
 
-  return { app, manager, scheduler, queueRunner };
+  return { app, manager, scheduler, queueRunner, statsRefresher };
 }
 
 async function registerWebStatic(

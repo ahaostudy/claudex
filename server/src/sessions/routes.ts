@@ -28,6 +28,7 @@ import {
   removeWorktree,
   WorktreeError,
 } from "./worktree.js";
+import { resolveCurrentBranch } from "./git-branch.js";
 import { getRequestCtx } from "../lib/req.js";
 
 export interface SessionsRoutesDeps {
@@ -382,6 +383,12 @@ export async function registerSessionRoutes(
           }
           throw err;
         }
+      } else {
+        // No worktree: capture the project's current git branch so the Home
+        // list shows something real. Best-effort — a non-git project or a
+        // detached HEAD both return null and the UI falls back to a "no
+        // branch" placeholder rather than the old `?? "main"` lie.
+        branch = await resolveCurrentBranch(project.path);
       }
 
       const session = sessions.create({
