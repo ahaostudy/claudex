@@ -256,6 +256,14 @@ async function onExistingChange(
   session: Session,
   absPath: string,
 ): Promise<void> {
+  // Native claudex sessions (adopted_from_cli=0) write the same `<sdk>.jsonl`
+  // via the SDK as a side-effect of turns claudex already owns. Touching it
+  // here — even just bumping cli_jsonl_seq — is what got native sessions
+  // caught in migration 25's `cli_jsonl_seq > 0` sweep and lost their
+  // user_message.attachments. Leave native rows completely alone; the
+  // runner / manager is authoritative for both transcript and status.
+  if (session.adoptedFromCli !== true) return;
+
   if (deps.manager.hasRunner(session.id)) {
     // Claudex is the one driving — any growth in the JSONL is the SDK
     // echoing back events we've already appended through AgentRunner.
@@ -335,6 +343,11 @@ async function backfillStatuses(
   const all = deps.sessions.list({ includeArchived: false, includeSideChats: true });
   for (const s of all) {
     if (!s.sdkSessionId) continue;
+    // Skip native claudex sessions outright — same rationale as
+    // `onExistingChange`: their JSONL is a downstream artifact, not a
+    // source of truth, so the mtime-based heuristic can't say anything
+    // useful about them and could clobber states set by the runner.
+    if (s.adoptedFromCli !== true) continue;
     // Runner-driven sessions: skip status backfill for the same reason
     // `onExistingChange` skips — the AgentRunner is the source of truth and
     // the JSONL heuristic can't produce `awaiting`, so it would clobber.

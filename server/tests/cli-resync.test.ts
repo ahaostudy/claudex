@@ -42,6 +42,10 @@ function setup() {
     mode: "default",
   });
   sessions.setSdkSessionId(session.id, sdkId);
+  // resync-on-open now only runs against sessions that were actually
+  // adopted from a CLI JSONL (native rows are held safe). These fixtures
+  // simulate CLI-adopted sessions.
+  sessions.setAdoptedFromCli(session.id, true);
 
   return {
     sessions,
