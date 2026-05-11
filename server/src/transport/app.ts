@@ -363,6 +363,11 @@ export async function buildApp(
   // directly against a freshly-constructed manager without the full app.
   if (process.env.NODE_ENV !== "test") {
     manager.sweepStuckOnBoot();
+    // One-shot backfill of `stats_context_pct` for sessions whose last
+    // turn_end predates the runtime change that stamps the column. Without
+    // this pass, every pre-existing session on the list renders an empty
+    // ring until the user sends another turn.
+    manager.backfillContextPctOnBoot();
     // Resolve any pending_restart_results rows left by a prior
     // POST /api/admin/restart with {sessionId, toolUseId}. Runs AFTER
     // sweepStuckOnBoot (which re-arms watchdogs) so the force-idle here

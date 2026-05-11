@@ -175,6 +175,7 @@ export class SessionStore {
     deleteById: Statement | null;
     bumpStats: Statement | null;
     setStats: Statement | null;
+    setContextPctRaw: Statement | null;
     listStaleStats: Statement | null;
     nextSeq: Statement | null;
     appendEvent: Statement | null;
@@ -208,6 +209,7 @@ export class SessionStore {
     deleteById: null,
     bumpStats: null,
     setStats: null,
+    setContextPctRaw: null,
     listStaleStats: null,
     nextSeq: null,
     appendEvent: null,
@@ -316,6 +318,35 @@ export class SessionStore {
       )
       .all(...statuses) as SessionRow[];
     return rows.map(toSession);
+  }
+
+  /**
+   * Non-archived sessions whose `stats_context_pct` was never populated but
+   * which have at least one `turn_end` recorded. Used by the boot-time
+   * backfill to seed the context ring for sessions whose most recent turn
+   * predates the runtime that stamps the field on each `turn_end`.
+   */
+  listSessionsNeedingContextBackfill(): Array<{ id: string; model: string }> {
+    return this.db
+      .prepare(
+        `SELECT id, model FROM sessions
+           WHERE stats_context_pct = 0
+             AND stats_messages > 0
+             AND archived = 0`,
+      )
+      .all() as Array<{ id: string; model: string }>;
+  }
+
+  /**
+   * Overwrite `stats_context_pct` without touching `updated_at`. Used by the
+   * boot backfill — a derived projection must not disturb the session list's
+   * recency ordering (same reasoning as `setStats`).
+   */
+  setContextPctRaw(id: string, pct: number): void {
+    this.lazyStmt(
+      "setContextPctRaw",
+      `UPDATE sessions SET stats_context_pct = ? WHERE id = ?`,
+    ).run(pct, id);
   }
 
   create(input: SessionCreateInput): Session {

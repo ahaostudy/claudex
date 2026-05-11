@@ -304,6 +304,61 @@ export class SessionManager {
   }
 
   /**
+   * One-shot boot pass that seeds `stats_context_pct` for sessions whose
+   * most recent `turn_end` predates the runtime change that stamps the
+   * column on each turn. Without this, every pre-existing session renders
+   * an empty context ring on the list until the user sends another turn.
+   *
+   * Cheap: scoped to sessions where the column is still 0, and only reads
+   * the last `turn_end` event per row (LIMIT 1), not the full event log.
+   * Skips rows with no usable usage payload (older turns before cache
+   * fields were emitted — the ring stays empty, matching `lastTurnContextKnown`).
+   */
+  backfillContextPctOnBoot(): void {
+    let scanned = 0;
+    let updated = 0;
+    try {
+      const candidates = this.deps.sessions.listSessionsNeedingContextBackfill();
+      for (const { id, model } of candidates) {
+        scanned += 1;
+        const ev = this.deps.sessions.findLastEventByKind(id, "turn_end");
+        if (!ev) continue;
+        const usage = (ev.payload as Record<string, unknown>).usage as
+          | {
+              inputTokens?: number;
+              outputTokens?: number;
+              cacheReadInputTokens?: number;
+              cacheCreationInputTokens?: number;
+            }
+          | null
+          | undefined;
+        if (!usage) continue;
+        const inp = Number(usage.inputTokens ?? 0) | 0;
+        const cacheRead = Number(usage.cacheReadInputTokens ?? 0) | 0;
+        const cacheCreate = Number(usage.cacheCreationInputTokens ?? 0) | 0;
+        const body = inp + cacheRead + cacheCreate;
+        if (body < HISTORICAL_TURN_THRESHOLD) continue;
+        const windowSize = contextWindowTokens(model ?? "");
+        const pct = Math.max(0, Math.min(1, body / windowSize));
+        this.deps.sessions.setContextPctRaw(id, pct);
+        updated += 1;
+      }
+    } catch (err) {
+      this.deps.logger?.error?.(
+        { err },
+        "context_pct backfill: unexpected error",
+      );
+      return;
+    }
+    if (scanned > 0) {
+      this.deps.logger?.info?.(
+        { scanned, updated },
+        "context_pct backfill: boot pass complete",
+      );
+    }
+  }
+
+  /**
    * Route every status mutation through this wrapper so we get a single
    * place that emits the `session status transition` log line (from / to /
    * reason). Callers should not invoke `sessions.setStatus` directly.
