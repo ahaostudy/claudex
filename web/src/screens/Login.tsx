@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { Lock, User as UserIcon } from "lucide-react";
 import { useAuth } from "@/state/auth";
+import { Logo } from "@/components/Logo";
 import { cn } from "@/lib/cn";
 
 /**
@@ -118,10 +119,7 @@ export function LoginScreen() {
           />
           <div className="relative z-10 w-full p-10 flex flex-col">
             <div className="flex items-center gap-2">
-              <svg viewBox="0 0 32 32" className="w-6 h-6">
-                <path d="M9 22 L16 8 L23 22 Z" fill="#cc785c" />
-                <circle cx="16" cy="18" r="2.2" fill="#faf9f5" />
-              </svg>
+              <Logo className="w-6 h-6" />
               <span className="mono text-[13px]">claudex</span>
               <span className="ml-2 inline-flex items-center gap-1.5 px-2 py-0.5 rounded-[6px] border border-klein/30 bg-klein-wash text-klein-ink text-[10px] font-medium uppercase tracking-[0.12em]">
                 <span className="h-1.5 w-1.5 rounded-full bg-klein" />
@@ -148,10 +146,7 @@ export function LoginScreen() {
           <div className="w-full max-w-[420px]">
             {/* Compact mobile wordmark — desktop gets it in the left panel */}
             <div className="flex items-center gap-2 mb-8 md:hidden">
-              <svg viewBox="0 0 32 32" className="w-6 h-6">
-                <path d="M9 22 L16 8 L23 22 Z" fill="#cc785c" />
-                <circle cx="16" cy="18" r="2.2" fill="#faf9f5" />
-              </svg>
+              <Logo className="w-6 h-6" />
               <span className="mono text-[13px]">claudex</span>
             </div>
 

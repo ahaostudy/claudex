@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Plus, X } from "lucide-react";
 import type { PermissionMode, Session } from "@claudex/shared";
+import { Logo } from "@/components/Logo";
 import { useSessions } from "@/state/sessions";
 import { api, ApiError } from "@/api/client";
 import { cn } from "@/lib/cn";
@@ -201,10 +202,7 @@ export function ChatSessionsRail({ currentId }: { currentId: string }) {
           aria-label="Go to sessions"
           className="flex items-center gap-2 flex-1 min-w-0 -mx-1 px-1 py-0.5 rounded-[6px] hover:bg-canvas/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-klein/40"
         >
-          <svg viewBox="0 0 32 32" className="w-5 h-5 shrink-0">
-            <path d="M9 22 L16 8 L23 22 Z" fill="#cc785c" />
-            <circle cx="16" cy="18" r="2.2" fill="#faf9f5" />
-          </svg>
+          <Logo className="w-5 h-5 shrink-0" />
           <span className="mono text-[13px] truncate">claudex</span>
         </Link>
         <span className="ml-auto text-[11px] mono text-ink-muted">

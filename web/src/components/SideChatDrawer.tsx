@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Send, X } from "lucide-react";
 import { api, ApiError } from "@/api/client";
+import { Logo } from "@/components/Logo";
 import { useSessions, type UIPiece } from "@/state/sessions";
 import type { Session } from "@claudex/shared";
 import { cn } from "@/lib/cn";
@@ -257,10 +258,7 @@ function SidePiece({ p }: { p: UIPiece }) {
       return (
         <div>
           <div className="flex items-center gap-2 mb-1">
-            <svg viewBox="0 0 32 32" className="w-3.5 h-3.5">
-              <path d="M9 22 L16 8 L23 22 Z" fill="#cc785c" />
-              <circle cx="16" cy="18" r="2.2" fill="#faf9f5" />
-            </svg>
+            <Logo className="w-3.5 h-3.5" />
             <span className="mono text-[11px] text-ink-muted">claude · side</span>
           </div>
           <div className="leading-[1.55] whitespace-pre-wrap">{p.text}</div>

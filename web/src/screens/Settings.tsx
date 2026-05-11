@@ -25,9 +25,11 @@ import {
 import { useAuth } from "@/state/auth";
 import { api, ApiError, type WorktreeSummary } from "@/api/client";
 import type { Project, PushDevice, UserEnvResponse, AuditEvent, ToolGrant, ImportAllResponse } from "@claudex/shared";
+import { Logo } from "@/components/Logo";
 import { cn } from "@/lib/cn";
 import { timeAgoShort, timeAgoLong } from "@/lib/format";
 import { copyText } from "@/lib/clipboard";
+import { forceReload as doForceReload, restartServer } from "@/lib/admin-actions";
 import { AppShell } from "@/components/AppShell";
 import {
   deviceLabel,
@@ -211,10 +213,7 @@ export function SettingsScreen() {
               area off-screen. */}
           <aside className="hidden md:flex md:flex-col border-r border-line bg-paper/40 overflow-y-auto min-h-0 shrink-0">
             <div className="p-4 flex items-center gap-2">
-              <svg viewBox="0 0 32 32" className="w-4 h-4">
-                <path d="M9 22 L16 8 L23 22 Z" fill="#cc785c" />
-                <circle cx="16" cy="18" r="2.2" fill="#faf9f5" />
-              </svg>
+              <Logo className="w-4 h-4" />
               <span className="mono text-[13px]">claudex</span>
             </div>
             <div className="px-4 caps text-ink-muted mb-2">Settings</div>
@@ -2021,26 +2020,7 @@ function AppVersionCard() {
 
   async function forceReload() {
     setIsReloading(true);
-    // Opportunistic: purge any Cache API stores the browser may have
-    // against this origin. `caches` may be undefined on plain HTTP in
-    // some browsers (secure-context-only variants), so guard it.
-    try {
-      if (typeof caches !== "undefined") {
-        const names = await caches.keys();
-        await Promise.all(names.map((n) => caches.delete(n)));
-      }
-    } catch {
-      /* ignore — best effort */
-    }
-    // Append a cache-busting query param and `replace()` into it so the
-    // browser treats this as a fresh URL and bypasses its HTTP cache for
-    // index.html. The server's SPA fallback ignores query strings, so the
-    // path still resolves to the current index.html — which references
-    // the latest hashed /assets bundle. Preserves the pathname and hash
-    // so deep links like `/session/abc#seq-5` don't lose state.
-    const url = new URL(window.location.href);
-    url.searchParams.set("_r", Date.now().toString(36));
-    window.location.replace(url.toString());
+    await doForceReload();
   }
 
   return (
@@ -2067,22 +2047,13 @@ function AppVersionCard() {
   );
 }
 
-// Restart-the-running-server button. POST /api/admin/restart spawns a
-// detached worker, replies 200, then SIGTERMs itself — the worker waits
-// for the port to drain and execs `pnpm exec tsx src/index.ts`. Because
-// the server dies ~150ms after responding, the browser's fetch may or
-// may not receive the body; we treat any post-send error as "restart is
-// underway" and show the same polling UI regardless.
-//
-// After triggering we poll GET /api/health until a successful response,
-// then force-reload the page so the UI re-connects to the fresh server.
-// Health polls are cheap and give the user a countdown instead of a
-// blank "please wait"; cap at ~30s (matches the detach worker's
-// port-drain ceiling) before surfacing a failure hint.
-function sleep(ms: number): Promise<void> {
-  return new Promise((r) => setTimeout(r, ms));
-}
-
+// Restart-the-running-server button. Delegates to `restartServer` in
+// lib/admin-actions — the helper POSTs /api/admin/restart (the server
+// spawns a detached worker, replies 200, then SIGTERMs itself), polls
+// /api/health until the new process responds, and then hard-reloads the
+// page so the UI re-connects to the fresh server. The Home header's
+// overflow menu uses the same helper, so behaviour stays consistent
+// wherever we expose the button.
 function RestartServerCard() {
   const [status, setStatus] = useState<
     "idle" | "confirming" | "restarting" | "waiting" | "done" | "failed"
@@ -2093,39 +2064,19 @@ function RestartServerCard() {
     setStatus("restarting");
     setErr(null);
     try {
-      await api.adminRestart();
-    } catch {
-      // Expected: the server usually drops the TCP connection before the
-      // JSON body flushes. Silent-ok — we'll verify via /api/health.
+      await restartServer({ onProgress: () => setStatus("waiting") });
+      // `restartServer` only returns after calling `window.location.replace`,
+      // so in practice we never hit the next line — but if the reload is
+      // blocked for any reason, flipping to "done" avoids a stuck button.
+      setStatus("done");
+    } catch (e) {
+      setStatus("failed");
+      setErr(
+        e instanceof Error
+          ? e.message
+          : "Timed out waiting for the server to come back up.",
+      );
     }
-    setStatus("waiting");
-    await waitForHealth();
-  }
-
-  async function waitForHealth() {
-    const deadline = Date.now() + 35_000;
-    // Give the old server a beat to tear down before the first poll so
-    // we don't race a 200 from the dying process.
-    await sleep(500);
-    while (Date.now() < deadline) {
-      try {
-        const res = await fetch("/api/health", { cache: "no-store" });
-        if (res.ok) {
-          setStatus("done");
-          // Force a fresh bundle in case the deploy included new assets.
-          await sleep(400);
-          const url = new URL(window.location.href);
-          url.searchParams.set("_r", Date.now().toString(36));
-          window.location.replace(url.toString());
-          return;
-        }
-      } catch {
-        /* server is still coming up; keep polling */
-      }
-      await sleep(800);
-    }
-    setStatus("failed");
-    setErr("Timed out waiting for the server to come back up.");
   }
 
   const busy = status === "restarting" || status === "waiting";

@@ -26,6 +26,7 @@ import {
   X,
 } from "lucide-react";
 import { ChatSessionsRail } from "@/components/ChatSessionsRail";
+import { Logo } from "@/components/Logo";
 import { ChatTasksRail } from "@/components/ChatTasksRail";
 import { TasksDrawer } from "@/components/TasksDrawer";
 import { PlanStrip } from "@/components/PlanStrip";
@@ -1589,10 +1590,7 @@ function Piece({
           }}
         >
           <div className="flex items-center gap-2 mb-1.5">
-            <svg viewBox="0 0 32 32" className="w-3.5 h-3.5">
-              <path d="M9 22 L16 8 L23 22 Z" fill="#cc785c" />
-              <circle cx="16" cy="18" r="2.2" fill="#faf9f5" />
-            </svg>
+            <Logo className="w-3.5 h-3.5" />
             <span className="mono text-[11px] text-ink-muted">claude</span>
           </div>
           <div className="md:[&_.markdown]:text-[15px] md:[&_.markdown]:leading-[1.65]">
