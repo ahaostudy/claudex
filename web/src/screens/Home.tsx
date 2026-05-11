@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { Plus, GitBranch, Pencil, Pin, Trash2, FolderOpen, Settings2, X, Download, Search, BarChart3, MoreHorizontal } from "lucide-react";
+import { Plus, GitBranch, Pencil, Pin, Trash2, FolderOpen, Settings2, X, Download, Search, BarChart3, MoreHorizontal, ChevronDown, ChevronUp } from "lucide-react";
 import { useAuth } from "@/state/auth";
 import { useSessions } from "@/state/sessions";
 import { api, ApiError } from "@/api/client";
@@ -131,6 +131,22 @@ export function HomeScreen() {
   // comments — which meant a broken API looked identical to "no rows". Surface
   // them as a thin dismissible banner so the user can tell the difference.
   const [loadErr, setLoadErr] = useState<string | null>(null);
+  // Per-group expand/collapse state. Groups collapsed by default — each
+  // group shows "all non-idle + up to 3 most-recent idle" rows so long
+  // lists don't dominate the screen, while rows that need the user's
+  // attention (awaiting / running / error) are always in view. The set
+  // holds the projectIds that the user has explicitly expanded.
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(
+    () => new Set<string>(),
+  );
+  const toggleGroup = (projectId: string) => {
+    setExpandedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(projectId)) next.delete(projectId);
+      else next.add(projectId);
+      return next;
+    });
+  };
 
   // Cmd+K / Ctrl+K opens the global search sheet (full-text across session
   // titles AND message bodies) from anywhere on the page. preventDefault so
@@ -536,6 +552,8 @@ export function HomeScreen() {
                 project={g.project}
                 projectId={g.projectId}
                 sessions={g.sessions}
+                expanded={expandedGroups.has(g.projectId)}
+                onToggleExpanded={() => toggleGroup(g.projectId)}
                 onPickTag={(name) => setTag(name)}
               />
             ))}
@@ -666,11 +684,15 @@ function ProjectGroup({
   project,
   projectId,
   sessions,
+  expanded,
+  onToggleExpanded,
   onPickTag,
 }: {
   project: Project | null;
   projectId: string;
   sessions: Session[];
+  expanded: boolean;
+  onToggleExpanded: () => void;
   onPickTag: (name: string) => void;
 }) {
   // Each group is its own block so its header `sticky top-0` is scoped to
@@ -678,6 +700,35 @@ function ProjectGroup({
   // header takes over. The parent `<section>` is the scroll container.
   const displayName = project?.name ?? projectId.slice(0, 8);
   const path = project?.path ?? "";
+
+  // Default-collapsed view: every non-idle session (awaiting / running /
+  // error / cli_running) is always rendered regardless of count, plus the
+  // top 3 most-recent idle sessions so the user still gets quick access
+  // to recent work. The rest live behind "Show all". Iterates in sort
+  // order (already pinned-first + updatedAt desc) so the resulting list
+  // preserves the group's ordering.
+  const { visibleSessions, hiddenCount } = useMemo(() => {
+    if (expanded) {
+      return { visibleSessions: sessions, hiddenCount: 0 };
+    }
+    const IDLE_BUDGET = 3;
+    const visible: Session[] = [];
+    let idleShown = 0;
+    for (const s of sessions) {
+      const isIdle = s.status === "idle";
+      if (!isIdle) {
+        visible.push(s);
+      } else if (idleShown < IDLE_BUDGET) {
+        visible.push(s);
+        idleShown++;
+      }
+    }
+    return {
+      visibleSessions: visible,
+      hiddenCount: sessions.length - visible.length,
+    };
+  }, [sessions, expanded]);
+
   return (
     <div>
       {/* Chip rail is the first sticky at top-0 z-20 (see FilterChipRail).
@@ -697,12 +748,38 @@ function ProjectGroup({
         </span>
       </div>
       <ul>
-        {sessions.map((s) => (
+        {visibleSessions.map((s) => (
           <li key={s.id}>
             <SessionRow session={s} onPickTag={onPickTag} />
           </li>
         ))}
       </ul>
+      {(hiddenCount > 0 || (expanded && sessions.length > 3)) && (
+        <div className="px-4 md:px-6 py-2 border-b border-line bg-paper/40">
+          <button
+            type="button"
+            onClick={onToggleExpanded}
+            className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-full border border-line bg-canvas text-[12px] text-ink-soft hover:bg-paper"
+            aria-expanded={expanded}
+            aria-controls={`project-group-${projectId}`}
+          >
+            {expanded ? (
+              <>
+                <ChevronUp className="w-3.5 h-3.5" />
+                <span>Show less</span>
+              </>
+            ) : (
+              <>
+                <ChevronDown className="w-3.5 h-3.5" />
+                <span>
+                  Show {hiddenCount} more idle session
+                  {hiddenCount === 1 ? "" : "s"}
+                </span>
+              </>
+            )}
+          </button>
+        </div>
+      )}
     </div>
   );
 }
