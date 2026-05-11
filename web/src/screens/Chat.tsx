@@ -2057,15 +2057,15 @@ function ToolPayloadPane({
   return (
     <div
       className={cn(
-        "w-full max-w-[min(80ch,100%)] rounded-[10px] border bg-ink/95",
-        isError ? "border-danger/40" : "border-ink-soft/40",
+        "w-full max-w-[min(80ch,100%)] rounded-[10px] border bg-paper/70",
+        isError ? "border-danger/40" : "border-line",
       )}
     >
       <div className="flex items-center gap-2 px-3 pt-2 pb-1">
         <span
           className={cn(
             "caps text-[10px] tracking-wider",
-            isError ? "text-danger" : "text-canvas/55",
+            isError ? "text-danger" : "text-ink-muted",
           )}
         >
           {isError && label === "output" ? (
@@ -2078,14 +2078,14 @@ function ToolPayloadPane({
         <button
           type="button"
           onClick={onCopy}
-          className="ml-auto inline-flex items-center gap-1 px-1.5 h-5 rounded-[4px] border border-canvas/15 bg-ink-soft/60 mono text-[10px] text-canvas/70 hover:bg-ink-soft"
+          className="ml-auto inline-flex items-center gap-1 px-1.5 h-5 rounded-[4px] border border-line bg-canvas mono text-[10px] text-ink-soft hover:bg-paper"
           title={`Copy ${label}`}
         >
           <Copy className="w-2.5 h-2.5" aria-hidden />
           copy
         </button>
       </div>
-      <pre className="mono text-[12px] leading-[1.55] text-canvas/90 px-3 pb-3 pt-0.5 max-h-[320px] overflow-auto whitespace-pre-wrap [overflow-wrap:anywhere] break-words dark-scroll">
+      <pre className="mono text-[12px] leading-[1.55] text-ink-soft px-3 pb-3 pt-0.5 max-h-[320px] overflow-auto whitespace-pre-wrap [overflow-wrap:anywhere] break-words">
         {text}
       </pre>
     </div>
@@ -2620,15 +2620,18 @@ function UserBubble({
             <Pencil className="h-3 w-3" />
           </button>
         )}
-        {images.length > 0 && (
-          <ImageThumbs
-            images={images}
-            onOpen={(i) => onOpenLightbox(images, i)}
-            tone="dark"
-          />
+        {remainingText.trim() && (
+          <div className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{remainingText}</div>
         )}
         {attachmentFiles.length > 0 && (
-          <div className="flex flex-wrap gap-1.5 mb-2">
+          <div
+            className={cn(
+              "flex flex-wrap gap-1.5",
+              // Only add top margin when there's text above; otherwise the
+              // chips sit flush against the bubble top.
+              remainingText.trim() ? "mt-2" : "",
+            )}
+          >
             {attachmentFiles.map((a) => (
               <a
                 key={a.id}
@@ -2648,8 +2651,15 @@ function UserBubble({
             ))}
           </div>
         )}
-        {remainingText.trim() && (
-          <div className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{remainingText}</div>
+        {images.length > 0 && (
+          <ImageThumbs
+            images={images}
+            onOpen={(i) => onOpenLightbox(images, i)}
+            tone="dark"
+            topMargin={
+              remainingText.trim().length > 0 || attachmentFiles.length > 0
+            }
+          />
         )}
       </div>
       {(() => {
@@ -2700,13 +2710,23 @@ function ImageThumbs({
   images,
   onOpen,
   tone,
+  topMargin,
 }: {
   images: ImageRef[];
   onOpen: (index: number) => void;
   tone: "dark" | "light";
+  // When true, adds a top margin so the strip sits below preceding content
+  // (text or attachment chips). Callers that already place ImageThumbs inside
+  // a `space-y-*` container can leave this unset.
+  topMargin?: boolean;
 }) {
   return (
-    <div className="flex gap-2 mb-2 overflow-x-auto no-scrollbar items-start">
+    <div
+      className={cn(
+        "flex gap-2 overflow-x-auto no-scrollbar items-start",
+        topMargin ? "mt-2" : "",
+      )}
+    >
       {images.map((img, i) => (
         <button
           key={i}
@@ -3394,12 +3414,16 @@ function Composer({
   keyboardOffset?: number;
 }) {
   const isArchived = session?.status === "archived";
-  // Session errored (SDK crashed mid-turn, watchdog fired, hard runner error)
-  // — composer is locked out the same way archived sessions are, but with a
-  // different banner + placeholder. The user's next move is to start a new
-  // session; trying to queue messages into a dead runner would silently
-  // fail. Archived still takes precedence visually if somehow both are true
-  // (archived is the final state).
+  // Session errored — a hard runner error the SDK surfaced (exception
+  // before turn_end, agent-runner init failure, etc). Composer is locked
+  // out the same way archived sessions are, but with a different banner +
+  // placeholder. The user's next move is to start a new session; trying to
+  // queue messages into a dead runner would silently fail. Archived still
+  // takes precedence visually if somehow both are true (archived is the
+  // final state). The silence watchdog no longer lands here — it's
+  // log-only now, and the on-boot sweep recovers stale rows to `idle`
+  // instead of flipping to `error`, so a restart doesn't eat in-flight
+  // work.
   const isErrored = session?.status === "error";
   const isLocked = isArchived || isErrored;
   const [text, setText] = useState("");
