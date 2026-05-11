@@ -2063,7 +2063,13 @@ function ToolCallBlock({
   return (
     <div
       className={cn(
-        showBody ? "w-full max-w-full" : "w-fit max-w-full",
+        // Expanded: cap at 80ch so desktop doesn't render the whole card
+        // edge-to-edge of the chat column (matches the ToolPayloadPane cap
+        // inside — before the single-frame refactor, the inner panes had
+        // this cap while the header chip was intrinsically sized, so the
+        // visual width was naturally ≤ 80ch). Mobile viewports fall back to
+        // 100% via the min(). Collapsed: intrinsic width as before.
+        showBody ? "w-full max-w-[min(80ch,100%)]" : "w-fit max-w-full",
         // Single outer frame wrapping header + expanded body. Previously the
         // header chip and the input/result panes floated as separate bordered
         // siblings, which looked loose next to the subagent page's framed
