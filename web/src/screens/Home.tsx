@@ -1849,22 +1849,32 @@ function NewSessionSheet({
               and let the server be the source of truth. */}
           <div>
             <label
-              className={`flex items-start gap-3 p-3 border rounded-[8px] ${
+              className={`flex items-start gap-3 p-3 border rounded-[8px] transition-colors ${
                 selectedIsGitRepo
                   ? "border-line cursor-pointer hover:bg-canvas"
                   : "border-line bg-paper opacity-60 cursor-not-allowed"
               }`}
             >
-              <input
-                type="checkbox"
-                className="mt-0.5"
-                checked={worktree && selectedIsGitRepo}
-                disabled={!selectedIsGitRepo}
-                onChange={(e) => {
-                  setUserTouchedWorktree(true);
-                  setWorktree(e.target.checked);
-                }}
-              />
+              <span className="relative inline-flex shrink-0 items-center mt-0.5">
+                <input
+                  type="checkbox"
+                  className="peer sr-only"
+                  checked={worktree && selectedIsGitRepo}
+                  disabled={!selectedIsGitRepo}
+                  onChange={(e) => {
+                    setUserTouchedWorktree(true);
+                    setWorktree(e.target.checked);
+                  }}
+                />
+                <span
+                  aria-hidden
+                  className="block h-5 w-9 rounded-full bg-line-strong transition-colors peer-checked:bg-klein peer-focus-visible:ring-2 peer-focus-visible:ring-klein/40 peer-focus-visible:ring-offset-1 peer-focus-visible:ring-offset-canvas"
+                />
+                <span
+                  aria-hidden
+                  className="pointer-events-none absolute top-1/2 left-0.5 -translate-y-1/2 h-4 w-4 rounded-full bg-canvas shadow-card ring-1 ring-black/5 transition-transform peer-checked:translate-x-4"
+                />
+              </span>
               <div className="min-w-0 flex-1">
                 <div className="text-[14px] font-medium">
                   Use git worktree

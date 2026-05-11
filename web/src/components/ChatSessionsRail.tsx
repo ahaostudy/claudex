@@ -485,16 +485,26 @@ export function QuickCreateForm({
             : "Spawn on a new claude/<slug> branch so this peer session stays off the main checkout."
         }
       >
-        <input
-          type="checkbox"
-          checked={worktree && projectIsGit !== false}
-          disabled={busy || projectIsGit === false}
-          onChange={(e) => {
-            setUserTouchedWorktree(true);
-            setWorktree(e.target.checked);
-          }}
-          className="h-3 w-3"
-        />
+        <span className="relative inline-flex shrink-0 items-center">
+          <input
+            type="checkbox"
+            checked={worktree && projectIsGit !== false}
+            disabled={busy || projectIsGit === false}
+            onChange={(e) => {
+              setUserTouchedWorktree(true);
+              setWorktree(e.target.checked);
+            }}
+            className="peer sr-only"
+          />
+          <span
+            aria-hidden
+            className="block h-4 w-7 rounded-full bg-line-strong transition-colors peer-checked:bg-klein peer-focus-visible:ring-2 peer-focus-visible:ring-klein/40 peer-focus-visible:ring-offset-1 peer-focus-visible:ring-offset-canvas"
+          />
+          <span
+            aria-hidden
+            className="pointer-events-none absolute top-1/2 left-0.5 -translate-y-1/2 h-3 w-3 rounded-full bg-canvas shadow-card ring-1 ring-black/5 transition-transform peer-checked:translate-x-3"
+          />
+        </span>
         <span className={projectIsGit === false ? "text-ink-faint" : "text-ink-soft"}>
           Use git worktree
         </span>
