@@ -15,7 +15,7 @@ import type { SubagentRun } from "@/state/sessions";
  *     instead of covering it — the live transcript keeps streaming next
  *     to the panel. `hidden md:flex` so mobile never renders this path.
  *
- * Opens from the SubagentsStrip, the in-thread indigo "Agent started →
+ * Opens from the SubagentsStrip, the in-thread purple "Agent started →
  * view" pointer, and a `Users` icon in the session header. Tasks rail
  * stays tools-only; this is the only surface that renders subagent runs.
  *
@@ -85,11 +85,11 @@ export function SubagentsSheet({
     <div className="px-4 md:px-5 pt-3 md:pt-4 pb-3 border-b border-line flex items-start gap-3 shrink-0">
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 flex-wrap">
-          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-[6px] border border-indigo/30 bg-indigo-wash text-indigo text-[10px] font-medium uppercase tracking-[0.1em]">
+          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-[6px] border border-purple/30 bg-purple-wash text-purple text-[10px] font-medium uppercase tracking-[0.1em]">
             <span
               className={cn(
                 "h-1.5 w-1.5 rounded-full",
-                hasRunning ? "bg-indigo animate-pulse" : "bg-indigo/50",
+                hasRunning ? "bg-purple animate-pulse" : "bg-purple/50",
               )}
               aria-hidden
             />
@@ -115,7 +115,7 @@ export function SubagentsSheet({
             <span
               className={cn(
                 "h-3 w-6 rounded-full relative transition-colors",
-                follow ? "bg-indigo" : "bg-line-strong",
+                follow ? "bg-purple" : "bg-line-strong",
               )}
               aria-hidden
             >

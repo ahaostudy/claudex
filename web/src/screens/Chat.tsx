@@ -138,7 +138,7 @@ type RenderEntry =
 /** True when a tool_use should fold into an adjacent group. Only two
  * kinds of tool_use opt out: pieces owned by a subagent (filtered by
  * applyViewMode upstream — guard defensively here), and the Task/Agent/
- * Explore dispatches that render as indigo pointers + have their own
+ * Explore dispatches that render as purple pointers + have their own
  * drawer. Everything else groups, including Edit/Write/MultiEdit (diff
  * cards) and TodoWrite (plan pointer) — when expanded, each child still
  * renders its existing rich surface inside the group body. */
@@ -292,7 +292,7 @@ export function ChatScreen() {
   // PlanSheet for the responsive DOM.
   const [showPlanSheet, setShowPlanSheet] = useState(false);
   // Subagents drawer (mockup s-18) — twin of PlanSheet. Opens from the
-  // SubagentsStrip, the indigo "Agent started" pointer inside the
+  // SubagentsStrip, the purple "Agent started" pointer inside the
   // thread, and the Bot icon in the chat header.
   const [showSubagentsSheet, setShowSubagentsSheet] = useState(false);
   // Click-to-expand image overlay. Populated by the thumbnail click handlers
@@ -898,14 +898,14 @@ export function ChatScreen() {
             className={cn(
               "relative h-9 w-9 rounded-[8px] border flex items-center justify-center shrink-0 disabled:opacity-40",
               showSubagentsSheet
-                ? "bg-indigo-wash/60 border-indigo/40 text-indigo"
+                ? "bg-purple-wash/60 border-purple/40 text-purple"
                 : "bg-paper border-line text-ink-soft hover:bg-paper",
             )}
           >
             <Bot className="w-4 h-4" />
             {subagentRuns.some((r) => r.status === "running") && (
               <span
-                className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-indigo animate-pulse border border-canvas"
+                className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-purple animate-pulse border border-canvas"
                 aria-hidden
               />
             )}
@@ -1041,14 +1041,14 @@ export function ChatScreen() {
               className={cn(
                 "relative h-8 w-8 rounded-[6px] border flex items-center justify-center hover:bg-paper shrink-0",
                 showSubagentsSheet
-                  ? "bg-indigo-wash/60 border-indigo/40 text-indigo"
+                  ? "bg-purple-wash/60 border-purple/40 text-purple"
                   : "border-line bg-canvas text-ink-soft",
               )}
             >
               <Bot className="w-4 h-4" />
               {subagentRuns.some((r) => r.status === "running") && (
                 <span
-                  className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-indigo animate-pulse border border-canvas"
+                  className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-purple animate-pulse border border-canvas"
                   aria-hidden
                 />
               )}
@@ -2058,18 +2058,19 @@ function Piece({
             : typeof inputObj.subagent_type === "string"
               ? (inputObj.subagent_type as string)
               : p.name;
-        // All three non-error states share the indigo wash so the row
+        // All three non-error states share the purple wash so the row
         // reads "this is a subagent pointer" at a glance and is visually
-        // distinct from main-agent tool chips (which use klein/neutral).
+        // distinct from main-agent tool chips (which use indigo when
+        // running, neutral when done).
         // Only the status icon color differentiates running / done. Solid
         // border + slightly heavier bg than the mockup so the pointer
         // stands out from surrounding prose instead of blending in.
         const pillClass = resultIsError
           ? "bg-danger-wash/50 border-danger/40 hover:bg-danger-wash/70"
-          : "bg-indigo-wash/60 border-indigo/40 hover:bg-indigo-wash/80";
+          : "bg-purple-wash/60 border-purple/40 hover:bg-purple-wash/80";
         const captionClass = resultIsError
           ? "text-danger"
-          : "text-indigo";
+          : "text-purple";
         return (
           <div data-tool-use-id={p.id} data-event-seq={p.seq}>
             <button
@@ -2103,7 +2104,7 @@ function Piece({
                 </svg>
               ) : (
                 <svg
-                  className="w-3.5 h-3.5 text-indigo animate-spin shrink-0"
+                  className="w-3.5 h-3.5 text-purple animate-spin shrink-0"
                   viewBox="0 0 24 24"
                   fill="none"
                   stroke="currentColor"
@@ -2123,7 +2124,7 @@ function Piece({
               <span className="text-[12.5px] text-ink font-medium flex-1 min-w-0 truncate">
                 {label}
               </span>
-              <span className="mono text-[11px] text-indigo/80 shrink-0">
+              <span className="mono text-[11px] text-purple/80 shrink-0">
                 → view
               </span>
             </button>
@@ -2490,40 +2491,40 @@ function ToolGroup({
   // rather see a running spinner than a red X while things are still
   // landing. Once the group is fully at rest, tone reflects the *last*
   // completed piece's state, not any-error aggregated over the history.
-  const tone: "danger" | "klein" | "neutral" = isLive
-    ? "klein"
+  const tone: "danger" | "indigo" | "neutral" = isLive
+    ? "indigo"
     : meta.lastError
       ? "danger"
       : "neutral";
   const frameClass =
     tone === "danger"
       ? "border-danger/35 bg-danger-wash/10"
-      : tone === "klein"
-        ? "border-klein/40 bg-klein-wash/10"
+      : tone === "indigo"
+        ? "border-indigo/40 bg-indigo-wash/10"
         : "border-line bg-paper";
   const headerBg =
     tone === "danger"
       ? "bg-danger-wash/70"
-      : tone === "klein"
-        ? "bg-klein-wash/55"
+      : tone === "indigo"
+        ? "bg-indigo-wash/55"
         : "bg-paper";
   const chipBg =
     tone === "danger"
       ? "bg-danger-wash"
-      : tone === "klein"
-        ? "bg-klein-wash/80"
+      : tone === "indigo"
+        ? "bg-indigo-wash/80"
         : "bg-canvas";
   const borderX =
     tone === "danger"
       ? "border-danger/30"
-      : tone === "klein"
-        ? "border-klein/30"
+      : tone === "indigo"
+        ? "border-indigo/30"
         : "border-line";
   const statusBandClass =
     tone === "danger"
       ? "bg-danger-wash border-l border-danger/30"
-      : tone === "klein"
-        ? "bg-klein-wash border-l border-klein/30"
+      : tone === "indigo"
+        ? "bg-indigo-wash border-l border-indigo/30"
         : "bg-success-wash border-l border-success/30";
 
   // Summary text: consecutive-collapsed tool names joined by " · ".
@@ -2611,8 +2612,8 @@ function ToolGroup({
             open &&
               (tone === "danger"
                 ? "bg-danger-wash"
-                : tone === "klein"
-                  ? "bg-klein-wash"
+                : tone === "indigo"
+                  ? "bg-indigo-wash"
                   : "bg-paper"),
           )}
         >
@@ -2624,8 +2625,8 @@ function ToolGroup({
               <ChevronDown
                 className={cn(
                   "w-3 h-3",
-                  tone === "klein"
-                    ? "text-klein-ink"
+                  tone === "indigo"
+                    ? "text-indigo-ink"
                     : tone === "danger"
                       ? "text-danger"
                       : "text-ink-muted",
@@ -2635,8 +2636,8 @@ function ToolGroup({
               <ChevronRight
                 className={cn(
                   "w-3 h-3 group-hover:text-ink-soft",
-                  tone === "klein"
-                    ? "text-klein-ink"
+                  tone === "indigo"
+                    ? "text-indigo-ink"
                     : tone === "danger"
                       ? "text-danger"
                       : "text-ink-muted",
@@ -2655,14 +2656,14 @@ function ToolGroup({
             {iconStrip.shown.map((name, i) => {
               const Icon = toolIcon(name);
               const chipBorder =
-                tone === "klein"
-                  ? "border-klein/30"
+                tone === "indigo"
+                  ? "border-indigo/30"
                   : tone === "danger"
                     ? "border-danger/30"
                     : "border-line";
               const chipTone =
-                tone === "klein"
-                  ? "text-klein-ink"
+                tone === "indigo"
+                  ? "text-indigo-ink"
                   : tone === "danger"
                     ? "text-danger"
                     : "text-ink-soft";
@@ -2684,8 +2685,8 @@ function ToolGroup({
               <span
                 className={cn(
                   "h-5 min-w-[20px] px-1 rounded-[4px] border flex items-center justify-center mono text-[9.5px]",
-                  tone === "klein"
-                    ? "bg-canvas border-klein/30 text-klein-ink"
+                  tone === "indigo"
+                    ? "bg-canvas border-indigo/30 text-indigo-ink"
                     : tone === "danger"
                       ? "bg-canvas border-danger/30 text-danger"
                       : "bg-paper border-line text-ink-muted",
@@ -2705,8 +2706,8 @@ function ToolGroup({
             <span
               className={cn(
                 "mono text-[12px] font-semibold tabular-nums",
-                tone === "klein"
-                  ? "text-klein-ink"
+                tone === "indigo"
+                  ? "text-indigo-ink"
                   : tone === "danger"
                     ? "text-danger"
                     : "text-ink",
@@ -2717,8 +2718,8 @@ function ToolGroup({
             <span
               className={cn(
                 "text-[10px] uppercase tracking-[0.12em]",
-                tone === "klein"
-                  ? "text-klein-ink"
+                tone === "indigo"
+                  ? "text-indigo-ink"
                   : tone === "danger"
                     ? "text-danger"
                     : "text-ink-muted",
@@ -2737,9 +2738,9 @@ function ToolGroup({
               statusBandClass,
             )}
           >
-            {tone === "klein" ? (
+            {tone === "indigo" ? (
               <Loader2
-                className="w-3.5 h-3.5 text-klein animate-spin"
+                className="w-3.5 h-3.5 text-indigo animate-spin"
                 aria-label="running"
               />
             ) : tone === "danger" ? (
@@ -2759,8 +2760,8 @@ function ToolGroup({
               <span
                 className={cn(
                   "mono text-[10.5px] tabular-nums font-semibold",
-                  tone === "klein"
-                    ? "text-klein-ink"
+                  tone === "indigo"
+                    ? "text-indigo-ink"
                     : tone === "danger"
                       ? "text-danger"
                       : "text-success",
@@ -2845,7 +2846,7 @@ function ToolCallBlock({
         isError
           ? "bg-danger-wash/40 border-danger/30"
           : running
-            ? "bg-klein-wash/50 border-klein/30"
+            ? "bg-indigo-wash/50 border-indigo/30"
             : "bg-paper border-line",
       )}
     >
@@ -2857,7 +2858,7 @@ function ToolCallBlock({
           className={cn(
             "w-full flex items-center gap-2 py-1.5 pl-2 pr-3 max-w-full text-left overflow-hidden",
             canToggle &&
-              (running ? "hover:bg-klein-wash/70 cursor-pointer" : "hover:bg-paper/60 cursor-pointer"),
+              (running ? "hover:bg-indigo-wash/70 cursor-pointer" : "hover:bg-paper/60 cursor-pointer"),
           )}
           aria-expanded={showBody}
         >
@@ -2866,14 +2867,14 @@ function ToolCallBlock({
               <ChevronDown
                 className={cn(
                   "w-3 h-3 shrink-0",
-                  running ? "text-klein" : "text-ink-muted",
+                  running ? "text-indigo" : "text-ink-muted",
                 )}
               />
             ) : (
               <ChevronRight
                 className={cn(
                   "w-3 h-3 shrink-0",
-                  running ? "text-klein" : "text-ink-muted",
+                  running ? "text-indigo" : "text-ink-muted",
                 )}
               />
             )
@@ -2881,7 +2882,7 @@ function ToolCallBlock({
             <ChevronDown
               className={cn(
                 "w-3 h-3 shrink-0",
-                running ? "text-klein" : "text-ink-muted",
+                running ? "text-indigo" : "text-ink-muted",
               )}
             />
           )}
@@ -2892,7 +2893,7 @@ function ToolCallBlock({
             <ToolIcon
               className={cn(
                 "w-3.5 h-3.5",
-                running ? "text-klein-ink" : "text-ink-soft",
+                running ? "text-indigo-ink" : "text-ink-soft",
               )}
               aria-label={name}
             />
@@ -2900,7 +2901,7 @@ function ToolCallBlock({
           <span
             className={cn(
               "mono text-[12px]",
-              running ? "text-klein-ink" : "text-ink-soft",
+              running ? "text-indigo-ink" : "text-ink-soft",
             )}
           >
             {name}
@@ -2910,7 +2911,7 @@ function ToolCallBlock({
           </span>
           {running ? (
             <Loader2
-              className="w-3.5 h-3.5 text-klein animate-spin shrink-0"
+              className="w-3.5 h-3.5 text-indigo animate-spin shrink-0"
               aria-label={`${name} running`}
             />
           ) : rightHint ? (

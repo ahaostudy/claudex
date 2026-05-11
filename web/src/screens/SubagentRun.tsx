@@ -208,7 +208,7 @@ function StatusLabel({ run }: { run: SubagentRun | null }) {
   if (run.status === "running") {
     return (
       <span className="inline-flex items-center gap-1 mono whitespace-nowrap shrink-0">
-        <Loader2 className="w-3 h-3 animate-spin text-indigo" aria-hidden />
+        <Loader2 className="w-3 h-3 animate-spin text-purple" aria-hidden />
         running · {formatElapsedClock(run.startedAt)}
       </span>
     );
@@ -247,7 +247,7 @@ function formatElapsedClock(startedAtIso: string | null | undefined): string {
 function statusTint(status: SubagentRun["status"]): { chip: string } {
   if (status === "running") {
     return {
-      chip: "border-indigo/40 text-indigo bg-indigo-wash/60",
+      chip: "border-purple/40 text-purple bg-purple-wash/60",
     };
   }
   if (status === "failed") {
@@ -369,7 +369,7 @@ function StreamList({ run }: { run: SubagentRun }) {
   if (renderable.length === 0) {
     return (
       <section>
-        <div className="uppercase tracking-[0.12em] text-[10px] font-medium text-indigo mb-1.5">
+        <div className="uppercase tracking-[0.12em] text-[10px] font-medium text-purple mb-1.5">
           {isLive ? "Live stream" : "Transcript"}
         </div>
         {run.summary ? (
@@ -392,7 +392,7 @@ function StreamList({ run }: { run: SubagentRun }) {
 
   return (
     <section>
-      <div className="uppercase tracking-[0.12em] text-[10px] font-medium text-indigo mb-1.5 flex items-center gap-2">
+      <div className="uppercase tracking-[0.12em] text-[10px] font-medium text-purple mb-1.5 flex items-center gap-2">
         {isLive ? "Live stream" : "Transcript"}
         <span className="mono text-[10px] text-ink-muted">
           · {renderable.length} {renderable.length === 1 ? "event" : "events"}
@@ -680,7 +680,7 @@ function InlineCaret() {
   return (
     <span
       aria-hidden
-      className="inline-block w-[2px] h-[0.95em] align-[-0.1em] ml-[3px] bg-indigo animate-pulse"
+      className="inline-block w-[2px] h-[0.95em] align-[-0.1em] ml-[3px] bg-purple animate-pulse"
     />
   );
 }
