@@ -400,10 +400,11 @@ export function QuickCreateForm({
       const res = await api.createSession({
         projectId: current.projectId,
         // Title is secondary in the quick-create flow — users almost never
-        // type one here. Derive from the first prompt when present, otherwise
-        // "Untitled"; the server/UI will still show a friendly name based on
-        // the first message anyway.
-        title: trimmed ? trimmed.slice(0, 60) : "Untitled",
+        // type one here. Derive from the first prompt when present; omit
+        // when the prompt is blank so the server applies its own "Untitled"
+        // display default AND the worktree branch falls back to sessionId
+        // instead of colliding on `claude/untitled`.
+        ...(trimmed ? { title: trimmed.slice(0, 60) } : {}),
         model: current.model,
         mode,
         worktree: worktree && projectIsGit !== false,

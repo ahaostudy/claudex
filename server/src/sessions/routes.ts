@@ -367,7 +367,8 @@ export async function registerSessionRoutes(
           .send({ error: "project_not_trusted", projectId: project.id });
       }
 
-      const title = parsed.data.title ?? "Untitled";
+      const rawTitle = parsed.data.title?.trim() || undefined;
+      const title = rawTitle ?? "Untitled";
       let worktreePath: string | null = null;
       let branch: string | null = null;
       let sessionId: string | undefined;
@@ -386,7 +387,12 @@ export async function registerSessionRoutes(
           const wt = await createWorktree({
             projectPath: project.path,
             sessionId,
-            title,
+            // Pass the RAW user-supplied title, not the "Untitled" default.
+            // If the user didn't name the session, we'd rather the branch
+            // fall back to the sessionId (globally unique, readable) than
+            // spray the repo with `claude/untitled`, `claude/untitled-<nano>`
+            // collisions every time a blank-title session is spawned.
+            title: rawTitle,
           });
           worktreePath = wt.path;
           branch = wt.branch;

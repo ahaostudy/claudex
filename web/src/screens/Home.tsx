@@ -1598,9 +1598,15 @@ function NewSessionSheet({
   }
 
   async function spawnSession(projectId: string) {
+    const trimmedTitle = title.trim();
     const res = await api.createSession({
       projectId,
-      title: title || "Untitled",
+      // Send the raw trimmed title or omit entirely — the server applies the
+      // "Untitled" display default itself, and omitting here keeps the blank
+      // title from bleeding into the worktree branch name (which would turn
+      // every no-title session into a `claude/untitled` / `claude/untitled-…`
+      // collision chain).
+      ...(trimmedTitle ? { title: trimmedTitle } : {}),
       model,
       mode,
       effort,
