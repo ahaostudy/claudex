@@ -105,6 +105,7 @@
           <a href="#s-17" class="px-2 h-7 inline-flex items-center gap-1 rounded-[6px] hover:bg-paper text-[12px] text-ink-soft"><span class="mono text-[10px] text-ink-faint">17</span>Agents</a>
           <a href="#s-18" class="px-2 h-7 inline-flex items-center gap-1 rounded-[6px] hover:bg-paper text-[12px] text-ink-soft"><span class="mono text-[10px] text-ink-faint">18</span>Agents drawer</a>
           <a href="#s-19" class="px-2 h-7 inline-flex items-center gap-1 rounded-[6px] hover:bg-paper text-[12px] text-ink-soft"><span class="mono text-[10px] text-ink-faint">19</span>Tool groups</a>
+          <a href="#s-20" class="px-2 h-7 inline-flex items-center gap-1 rounded-[6px] hover:bg-paper text-[12px] text-ink-soft"><span class="mono text-[10px] text-ink-faint">20</span>Ask · collapsed</a>
         </nav>
         <div class="ml-auto flex items-center gap-3 text-[12px] text-ink-muted">
           <span class="hidden sm:inline">High-fidelity mockup · 12 screens · mobile + desktop</span>
@@ -5346,6 +5347,311 @@
     </section>
 
     <!-- =========================================================
+      SCREEN 20 · ASK · COLLAPSED ANSWERS
+    ========================================================= -->
+    <section id="s-20" class="border-b border-line bg-paper/30">
+      <div class="max-w-[1600px] mx-auto px-5 lg:px-10 pt-14">
+        <div class="flex items-baseline gap-4 mb-3">
+          <span class="mono text-[12px] text-ink-faint">screen · 20</span>
+          <h2 class="display text-[1.75rem] leading-tight">Ask · collapsed answers</h2>
+        </div>
+        <p class="max-w-[72ch] text-[15px] text-ink-muted mb-10">
+          Once the last radio lands, the multi-question card folds itself into a typed-up receipt:
+          every question and its chosen answer on one line, in the same klein-wash frame that collected them.
+          The Q1/Q2/Q3/Q4 tab strip gives way to a compact <span class="mono text-[13px]">Q · answer</span> ledger —
+          no re-reading option lists to remember what you picked. A single caret expands any row; the
+          <span class="mono text-[13px]">Expand all</span> button rolls the full card back if you need to revise.
+        </p>
+
+        <div class="flex flex-col xl:flex-row gap-10 items-start justify-center pb-12">
+          <!-- iPhone · in-thread collapsed -->
+          <div class="flex flex-col items-center gap-3">
+            <div class="caps text-ink-muted">iPhone · in-thread receipt</div>
+            <div class="iphone">
+              <div class="iphone-inner">
+                <div class="iphone-island"></div>
+                <div class="iphone-status"><span class="mono">9:41</span><span class="flex items-center gap-1"><span class="h-2 w-4 bg-ink rounded-sm"></span><span class="mono text-[11px]">5G</span><span class="h-2.5 w-5 border border-ink rounded-sm flex items-center justify-end pr-[1px]"><span class="h-1.5 w-3.5 bg-ink rounded-[1px]"></span></span></span></div>
+                <div class="iphone-home"></div>
+                <div class="iphone-content flex flex-col bg-canvas">
+                  <!-- top bar -->
+                  <div class="px-4 py-2.5 border-b border-line flex items-center gap-2">
+                    <button class="h-8 w-8 rounded-[8px] bg-paper border border-line flex items-center justify-center"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-4 h-4"><path d="M15 6l-6 6 6 6"/></svg></button>
+                    <div class="min-w-0 flex-1">
+                      <div class="flex items-center gap-1.5"><span class="h-2 w-2 rounded-full bg-success"></span><div class="text-[14px] font-medium truncate">Draft install.sh</div></div>
+                      <div class="flex items-center gap-1.5 text-[11px] text-ink-muted mt-0.5"><span class="mono">claudex</span><span>·</span><span class="mono">opus-4.7</span><span>·</span><span>ask</span></div>
+                    </div>
+                    <svg width="22" height="22"><circle cx="11" cy="11" r="9" fill="none" stroke="#e8e4d8" stroke-width="2.5"/><circle cx="11" cy="11" r="9" fill="none" stroke="#cc785c" stroke-width="2.5" stroke-linecap="round" stroke-dasharray="56.55" stroke-dashoffset="28.28" transform="rotate(-90 11 11)"/></svg>
+                  </div>
+
+                  <!-- thread -->
+                  <div class="flex-1 overflow-y-auto px-3.5 py-4 space-y-4">
+                    <!-- claude preface -->
+                    <div>
+                      <div class="flex items-center gap-2 mb-1.5"><svg viewBox="0 0 32 32" class="w-4 h-4"><path d="M9 22 L16 8 L23 22 Z" fill="#cc785c"/><circle cx="16" cy="18" r="2.2" fill="#faf9f5"/></svg><span class="mono text-[11px] text-ink-muted">claude · 14:02</span></div>
+                      <div class="text-[13.5px] leading-[1.55] text-ink">Four shape questions before I draft the installer — pick once and I'll stop interrupting.</div>
+                    </div>
+
+                    <!-- COLLAPSED ASK RECEIPT -->
+                    <div class="rounded-[12px] border border-klein/30 bg-klein-wash/30 p-2.5">
+                      <div class="flex items-center gap-2">
+                        <span class="h-6 w-6 rounded-[7px] bg-klein-wash border border-klein/40 flex items-center justify-center text-klein">
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-3.5 h-3.5"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/></svg>
+                        </span>
+                        <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-[6px] border border-klein/30 bg-klein-wash/60 text-klein-ink text-[10px] font-medium uppercase tracking-[0.1em]">question · claude</span>
+                        <span class="ml-auto mono text-[10.5px] text-ink-muted">4 answered</span>
+                      </div>
+
+                      <ol class="mt-2.5 divide-y divide-klein/15">
+                        <li class="py-2 px-1 grid grid-cols-[36px_1fr_auto] items-start gap-2">
+                          <span class="mono text-[10px] text-klein tabular-nums pt-[3px]">Q1·4</span>
+                          <div class="min-w-0">
+                            <div class="text-[12.5px] text-ink-soft leading-snug truncate">安装脚本默认把仓库克隆到哪个目录？</div>
+                            <div class="flex items-center gap-1.5 mt-1"><span class="h-1 w-1 rounded-full bg-klein"></span><span class="mono text-[12.5px] text-ink font-medium">~/claudex</span><span class="text-[11px] text-ink-muted">推荐</span></div>
+                          </div>
+                          <button class="h-5 w-5 flex items-center justify-center text-ink-faint"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-3.5 h-3.5"><path d="M6 9l6 6 6-6"/></svg></button>
+                        </li>
+                        <!-- Q2 row, peeked open to show in-place preview -->
+                        <li class="py-2 px-1 grid grid-cols-[36px_1fr_auto] items-start gap-2 bg-klein-wash/40 -mx-1.5 rounded-[6px] px-2.5">
+                          <span class="mono text-[10px] text-klein tabular-nums pt-[3px]">Q2·4</span>
+                          <div class="min-w-0">
+                            <div class="text-[12.5px] text-ink leading-snug">安装流程是否交互式选择 mirror？</div>
+                            <div class="mt-1.5 rounded-[6px] border border-klein/30 bg-canvas p-2">
+                              <div class="text-[12px] font-medium text-ink">跟随 CLAUDEX_MIRROR</div>
+                              <div class="text-[11px] text-ink-muted leading-snug mt-0.5">环境变量优先，其次 ~/.claudexrc；未配置时退回官方源</div>
+                            </div>
+                          </div>
+                          <button class="h-5 w-5 flex items-center justify-center text-klein"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-3.5 h-3.5"><path d="M18 15l-6-6-6 6"/></svg></button>
+                        </li>
+                        <li class="py-2 px-1 grid grid-cols-[36px_1fr_auto] items-start gap-2">
+                          <span class="mono text-[10px] text-klein tabular-nums pt-[3px]">Q3·4</span>
+                          <div class="min-w-0">
+                            <div class="text-[12.5px] text-ink-soft leading-snug truncate">默认从 <span class="mono text-[11px] text-ink">main</span> 还是 <span class="mono text-[11px] text-ink">dev</span> 拉取？</div>
+                            <div class="flex items-center gap-1.5 mt-1"><span class="h-1 w-1 rounded-full bg-klein"></span><span class="mono text-[12.5px] text-ink font-medium">main</span></div>
+                          </div>
+                          <button class="h-5 w-5 flex items-center justify-center text-ink-faint"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-3.5 h-3.5"><path d="M6 9l6 6 6-6"/></svg></button>
+                        </li>
+                        <li class="py-2 px-1 grid grid-cols-[36px_1fr_auto] items-start gap-2">
+                          <span class="mono text-[10px] text-klein tabular-nums pt-[3px]">Q4·4</span>
+                          <div class="min-w-0">
+                            <div class="text-[12.5px] text-ink-soft leading-snug truncate">自动生成 <span class="mono text-[11px] text-ink">~/.claudex</span> 骨架？</div>
+                            <div class="flex items-start gap-1.5 mt-1 flex-wrap">
+                              <span class="h-1 w-1 rounded-full bg-klein mt-[7px] shrink-0"></span>
+                              <span class="text-[12.5px] text-ink font-medium italic">Other</span>
+                              <span class="text-[11.5px] text-ink-muted">→</span>
+                              <span class="mono text-[11.5px] text-ink bg-canvas border border-line rounded-[4px] px-1.5 py-[1px]">/opt/claudex/state</span>
+                            </div>
+                          </div>
+                          <button class="h-5 w-5 flex items-center justify-center text-ink-faint"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-3.5 h-3.5"><path d="M6 9l6 6 6-6"/></svg></button>
+                        </li>
+                      </ol>
+
+                      <div class="mt-2.5 pt-2 border-t border-klein/15 flex items-center gap-2">
+                        <span class="mono text-[10.5px] text-ink-muted flex items-center gap-1.5"><span class="inline-block h-1.5 w-1.5 rounded-full bg-klein/70"></span>Sent</span>
+                        <button class="ml-auto h-6 px-2 rounded-[6px] border border-klein/30 bg-canvas text-klein-ink text-[11px] mono hover:bg-klein-wash/60">Expand all</button>
+                      </div>
+                    </div>
+
+                    <!-- claude continues -->
+                    <div>
+                      <div class="flex items-center gap-2 mb-1.5"><svg viewBox="0 0 32 32" class="w-4 h-4"><path d="M9 22 L16 8 L23 22 Z" fill="#cc785c"/><circle cx="16" cy="18" r="2.2" fill="#faf9f5"/></svg><span class="mono text-[11px] text-ink-muted">claude · working…</span></div>
+                      <div class="text-[13.5px] leading-[1.55] text-ink">Drafting <span class="mono text-[12px]">scripts/install.sh</span> with those choices — preview in 30s.<span class="caret"></span></div>
+                    </div>
+                  </div>
+
+                  <!-- composer locked while drafting -->
+                  <div class="px-3 pt-2 pb-3 border-t border-line bg-canvas">
+                    <div class="rounded-[14px] border border-line bg-paper/60 p-2 flex items-center gap-2">
+                      <span class="h-1.5 w-1.5 rounded-full bg-klein animate-pulse"></span>
+                      <span class="text-[13px] text-ink-faint">claude is drafting…</span>
+                      <span class="ml-auto mono text-[11px] text-ink-muted">Opus 4.7</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Desktop · expanded ↔ collapsed diptych -->
+          <div class="flex-1 w-full min-w-0 flex flex-col items-center gap-3">
+            <div class="caps text-ink-muted">Desktop · expanded → collapsed</div>
+            <div class="desktop">
+              <div class="desktop-chrome"><span style="background:#ff5f57"></span><span style="background:#febc2e"></span><span style="background:#28c840"></span><span class="ml-4 mono text-[11px] text-canvas/70">claudex.local — ask auto-collapse</span></div>
+              <div class="desktop-inner p-7 grid grid-cols-2 gap-6 overflow-y-auto">
+                <!-- BEFORE -->
+                <div class="flex flex-col gap-2 min-w-0">
+                  <div class="flex items-center gap-2">
+                    <span class="mono text-[10.5px] tabular-nums px-1.5 py-0.5 rounded-[4px] bg-ink text-canvas">A</span>
+                    <span class="caps text-ink-muted">Before · last question focused</span>
+                  </div>
+                  <div class="rounded-[12px] border border-klein/30 bg-klein-wash/30 p-3.5">
+                    <div class="flex items-center gap-2 mb-3">
+                      <span class="h-7 w-7 rounded-[8px] bg-klein-wash border border-klein/40 flex items-center justify-center text-klein">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-3.5 h-3.5"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/></svg>
+                      </span>
+                      <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-[6px] border border-klein/30 bg-klein-wash/60 text-klein-ink text-[10px] font-medium uppercase tracking-[0.1em]">question · claude</span>
+                    </div>
+                    <div class="flex items-center gap-1 mb-3 flex-wrap">
+                      <span class="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-[6px] mono text-[10px] uppercase tracking-[0.1em] border border-line bg-canvas/60 text-ink-muted">Q1/4 <span class="h-1.5 w-1.5 rounded-full bg-klein"></span></span>
+                      <span class="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-[6px] mono text-[10px] uppercase tracking-[0.1em] border border-line bg-canvas/60 text-ink-muted">Q2/4 <span class="h-1.5 w-1.5 rounded-full bg-klein"></span></span>
+                      <span class="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-[6px] mono text-[10px] uppercase tracking-[0.1em] border border-line bg-canvas/60 text-ink-muted">Q3/4 <span class="h-1.5 w-1.5 rounded-full bg-klein"></span></span>
+                      <span class="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-[6px] mono text-[10px] uppercase tracking-[0.1em] bg-klein text-canvas border border-klein">Q4/4</span>
+                    </div>
+                    <div class="flex items-baseline justify-between gap-2 mb-2">
+                      <div class="display text-[15px] leading-snug text-ink">自动生成 <span class="mono text-[13px] not-italic">~/.claudex</span> 配置骨架？</div>
+                      <span class="mono text-[10px] text-ink-muted uppercase tracking-[0.08em] shrink-0">骨架</span>
+                    </div>
+                    <div class="space-y-1.5">
+                      <div class="rounded-[8px] border border-line bg-canvas/60 p-2.5 opacity-80">
+                        <div class="flex items-start gap-2">
+                          <span class="mt-[3px] h-3 w-3 rounded-full border-2 border-line-strong"></span>
+                          <div>
+                            <div class="text-[13.5px]">写入默认骨架</div>
+                            <div class="text-[12px] text-ink-muted leading-snug">在 <span class="mono text-[11px]">~/.claudex/</span> 下生成 config.toml + db 目录</div>
+                          </div>
+                        </div>
+                      </div>
+                      <div class="rounded-[8px] border border-line bg-canvas/60 p-2.5 opacity-80">
+                        <div class="flex items-start gap-2">
+                          <span class="mt-[3px] h-3 w-3 rounded-full border-2 border-line-strong"></span>
+                          <div>
+                            <div class="text-[13.5px]">不生成，首次启动自动初始化</div>
+                            <div class="text-[12px] text-ink-muted leading-snug">保持安装脚本幂等，服务端自理</div>
+                          </div>
+                        </div>
+                      </div>
+                      <!-- Other selected, with free-text -->
+                      <div class="rounded-[8px] border border-klein bg-klein-wash/60 ring-1 ring-klein/40 p-2.5">
+                        <div class="flex items-start gap-2">
+                          <span class="mt-[3px] h-3 w-3 rounded-full border-2 border-klein flex items-center justify-center"><span class="h-1.5 w-1.5 rounded-full bg-klein"></span></span>
+                          <div class="flex-1 min-w-0">
+                            <div class="text-[13.5px] font-medium">Other</div>
+                            <div class="text-[12px] text-ink-muted leading-snug">Something else — type below.</div>
+                            <input value="/opt/claudex/state" class="mt-1.5 w-full bg-canvas border border-klein/60 rounded-[6px] px-2 py-1 mono text-[12.5px] text-ink focus-ring" />
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                    <div class="mt-3 flex items-center">
+                      <span class="mono text-[11px] text-ink-muted">Q4/4 · ready</span>
+                      <button class="ml-auto h-9 px-4 rounded-[8px] bg-klein text-canvas text-[13px] font-medium hover:bg-klein/90">Send</button>
+                    </div>
+                  </div>
+                  <div class="text-[11.5px] text-ink-muted leading-[1.5]">~560 px tall. Every question still has to be reopened via the tab strip; the thread beneath the card is hidden until the user lands the last answer.</div>
+                </div>
+
+                <!-- AFTER -->
+                <div class="flex flex-col gap-2 min-w-0">
+                  <div class="flex items-center gap-2">
+                    <span class="mono text-[10.5px] tabular-nums px-1.5 py-0.5 rounded-[4px] bg-klein text-canvas">B</span>
+                    <span class="caps text-ink-muted">After · auto-collapsed</span>
+                    <span class="ml-auto mono text-[10.5px] text-ink-muted">fold · 240ms ease-out</span>
+                  </div>
+                  <div class="rounded-[12px] border border-klein/30 bg-klein-wash/30 p-3">
+                    <div class="flex items-center gap-2">
+                      <span class="h-7 w-7 rounded-[8px] bg-klein-wash border border-klein/40 flex items-center justify-center text-klein">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-3.5 h-3.5"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/></svg>
+                      </span>
+                      <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-[6px] border border-klein/30 bg-klein-wash/60 text-klein-ink text-[10px] font-medium uppercase tracking-[0.1em]">question · claude</span>
+                      <span class="ml-auto mono text-[11px] text-ink-muted">4 answered · 22:14</span>
+                    </div>
+
+                    <ol class="mt-3 divide-y divide-klein/15">
+                      <li class="py-2.5 px-1 grid grid-cols-[46px_1fr_auto] items-start gap-3">
+                        <span class="mono text-[11px] text-klein tabular-nums pt-[3px]">Q1·4</span>
+                        <div class="min-w-0">
+                          <div class="text-[13px] text-ink-soft leading-snug">安装脚本默认把仓库克隆到哪个目录？</div>
+                          <div class="flex items-center gap-1.5 mt-1"><span class="h-1.5 w-1.5 rounded-full bg-klein"></span><span class="mono text-[13px] text-ink font-medium">~/claudex</span><span class="text-[11.5px] text-ink-muted">推荐</span></div>
+                        </div>
+                        <button class="h-6 w-6 flex items-center justify-center text-ink-faint hover:text-klein rounded-[4px]" aria-label="expand"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-3.5 h-3.5"><path d="M6 9l6 6 6-6"/></svg></button>
+                      </li>
+                      <li class="py-2.5 px-1 grid grid-cols-[46px_1fr_auto] items-start gap-3">
+                        <span class="mono text-[11px] text-klein tabular-nums pt-[3px]">Q2·4</span>
+                        <div class="min-w-0">
+                          <div class="text-[13px] text-ink-soft leading-snug">安装流程是否交互式选择 mirror？</div>
+                          <div class="flex items-center gap-1.5 mt-1"><span class="h-1.5 w-1.5 rounded-full bg-klein"></span><span class="text-[13px] text-ink font-medium">跟随 CLAUDEX_MIRROR</span></div>
+                        </div>
+                        <button class="h-6 w-6 flex items-center justify-center text-ink-faint hover:text-klein rounded-[4px]" aria-label="expand"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-3.5 h-3.5"><path d="M6 9l6 6 6-6"/></svg></button>
+                      </li>
+                      <li class="py-2.5 px-1 grid grid-cols-[46px_1fr_auto] items-start gap-3">
+                        <span class="mono text-[11px] text-klein tabular-nums pt-[3px]">Q3·4</span>
+                        <div class="min-w-0">
+                          <div class="text-[13px] text-ink-soft leading-snug">默认从 <span class="mono text-[12px] text-ink">main</span> 还是 <span class="mono text-[12px] text-ink">dev</span> 拉取？</div>
+                          <div class="flex items-center gap-1.5 mt-1"><span class="h-1.5 w-1.5 rounded-full bg-klein"></span><span class="mono text-[13px] text-ink font-medium">main</span></div>
+                        </div>
+                        <button class="h-6 w-6 flex items-center justify-center text-ink-faint hover:text-klein rounded-[4px]" aria-label="expand"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-3.5 h-3.5"><path d="M6 9l6 6 6-6"/></svg></button>
+                      </li>
+                      <li class="py-2.5 px-1 grid grid-cols-[46px_1fr_auto] items-start gap-3">
+                        <span class="mono text-[11px] text-klein tabular-nums pt-[3px]">Q4·4</span>
+                        <div class="min-w-0">
+                          <div class="text-[13px] text-ink-soft leading-snug">自动生成 <span class="mono text-[12px] text-ink">~/.claudex</span> 骨架？</div>
+                          <div class="flex items-center gap-1.5 mt-1 flex-wrap">
+                            <span class="h-1.5 w-1.5 rounded-full bg-klein"></span>
+                            <span class="text-[13px] text-ink font-medium italic">Other</span>
+                            <span class="text-[12px] text-ink-muted">→</span>
+                            <span class="mono text-[12px] text-ink bg-canvas border border-line rounded-[4px] px-1.5 py-[1px]">/opt/claudex/state</span>
+                          </div>
+                        </div>
+                        <button class="h-6 w-6 flex items-center justify-center text-ink-faint hover:text-klein rounded-[4px]" aria-label="expand"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-3.5 h-3.5"><path d="M6 9l6 6 6-6"/></svg></button>
+                      </li>
+                    </ol>
+
+                    <div class="mt-3 pt-2 border-t border-klein/15 flex items-center gap-2">
+                      <span class="mono text-[11px] text-ink-muted flex items-center gap-1.5"><span class="inline-block h-1.5 w-1.5 rounded-full bg-klein/70"></span>Sent</span>
+                      <span class="ml-auto flex items-center gap-1.5">
+                        <button class="h-7 px-2.5 rounded-[6px] border border-klein/30 bg-canvas text-klein-ink text-[11.5px] mono hover:bg-klein-wash/60">Expand all</button>
+                      </span>
+                    </div>
+                  </div>
+                  <div class="text-[11.5px] text-ink-muted leading-[1.5]">~220 px. Same klein-wash chrome, same <span class="mono">question · claude</span> chip — the card never leaves, just folds. Every row keeps its own caret; tap to peek at the description/preview that option shipped with.</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- States strip -->
+            <div class="w-full grid md:grid-cols-3 gap-4 mt-6">
+              <div class="rounded-[10px] border border-line bg-canvas p-3.5 shadow-card">
+                <div class="caps text-ink-muted mb-2">State · fresh (just collapsed)</div>
+                <div class="rounded-[10px] border border-klein/30 bg-klein-wash/30 p-2.5">
+                  <div class="flex items-center gap-2"><span class="h-5 w-5 rounded-[6px] bg-klein-wash border border-klein/40 flex items-center justify-center text-klein"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-3 h-3"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/></svg></span><span class="mono text-[10px] uppercase tracking-[0.1em] text-klein-ink">question</span><span class="ml-auto mono text-[10px] text-ink-muted">just now</span></div>
+                  <div class="mt-2 space-y-1">
+                    <div class="flex items-center gap-1.5 text-[11.5px]"><span class="mono text-[10px] text-klein w-9">Q1·4</span><span class="truncate text-ink-soft flex-1">仓库克隆目录…</span><span class="mono text-[11px] text-ink">~/claudex</span></div>
+                    <div class="flex items-center gap-1.5 text-[11.5px]"><span class="mono text-[10px] text-klein w-9">Q2·4</span><span class="truncate text-ink-soft flex-1">mirror 选择…</span><span class="text-[11px] text-ink">跟随 env</span></div>
+                  </div>
+                </div>
+                <p class="mt-3 text-[11.5px] text-ink-muted leading-[1.5]">The transition lasts 240&#8239;ms — long enough for "my answers landed" to register, short enough that the next claude message isn't waiting on it.</p>
+              </div>
+
+              <div class="rounded-[10px] border border-line bg-canvas p-3.5 shadow-card">
+                <div class="caps text-ink-muted mb-2">State · one row peeked</div>
+                <div class="rounded-[10px] border border-klein/30 bg-klein-wash/30 p-2.5">
+                  <div class="flex items-center gap-1.5 text-[11.5px]"><span class="mono text-[10px] text-klein w-9">Q2·4</span><span class="truncate text-ink flex-1">mirror…</span><span class="text-klein"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="w-3 h-3"><path d="M18 15l-6-6-6 6"/></svg></span></div>
+                  <div class="mt-1.5 rounded-[6px] border border-klein/30 bg-canvas p-2">
+                    <div class="text-[11.5px] font-medium">跟随 CLAUDEX_MIRROR</div>
+                    <div class="text-[11px] text-ink-muted leading-snug mt-0.5">环境变量优先，其次 ~/.claudexrc</div>
+                    <pre class="mono text-[10.5px] text-canvas bg-ink rounded-[4px] mt-1.5 px-1.5 py-1 overflow-x-auto whitespace-pre-wrap">$ export CLAUDEX_MIRROR=https://…</pre>
+                  </div>
+                </div>
+                <p class="mt-3 text-[11.5px] text-ink-muted leading-[1.5]">Caret on any row inlines the option's description and its <span class="mono text-[11px]">preview</span> block. Other rows stay collapsed — no accordion-of-accordions.</p>
+              </div>
+
+              <div class="rounded-[10px] border border-line bg-canvas p-3.5 shadow-card">
+                <div class="caps text-ink-muted mb-2">Rule · chrome never changes</div>
+                <div class="space-y-1.5">
+                  <div class="rounded-[8px] border border-klein/30 bg-klein-wash/30 px-2 py-1.5 flex items-center gap-2"><span class="h-3 w-3 rounded-[4px] bg-klein-wash border border-klein/40"></span><span class="mono text-[10px] uppercase tracking-[0.1em] text-klein-ink">question · claude</span><span class="ml-auto mono text-[10px] text-ink-muted">answering</span></div>
+                  <div class="pl-2 text-[11px] text-ink-muted leading-[1.5]">same chip</div>
+                  <div class="rounded-[8px] border border-klein/30 bg-klein-wash/30 px-2 py-1.5 flex items-center gap-2"><span class="h-3 w-3 rounded-[4px] bg-klein-wash border border-klein/40"></span><span class="mono text-[10px] uppercase tracking-[0.1em] text-klein-ink">question · claude</span><span class="ml-auto mono text-[10px] text-ink-muted">collapsed · 4 ans</span></div>
+                  <div class="pl-2 text-[11px] text-ink-muted leading-[1.5]">same chip, answered</div>
+                </div>
+                <p class="mt-3 text-[11.5px] text-ink-muted leading-[1.5]">Border, icon, chip wording are identical in both states. A reader scrolling back through a long thread doesn't have to re-learn what kind of block they're looking at.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- =========================================================
       FOOTER
     ========================================================= -->
     <footer class="border-t border-line bg-paper/40">
@@ -5376,6 +5682,7 @@
             <a class="text-ink-soft hover:text-ink" href="#s-17">17 · Live agents</a>
             <a class="text-ink-soft hover:text-ink" href="#s-18">18 · Agents drawer</a>
             <a class="text-ink-soft hover:text-ink" href="#s-19">19 · Tool groups</a>
+            <a class="text-ink-soft hover:text-ink" href="#s-20">20 · Ask · collapsed</a>
           </div>
           <div class="ml-auto text-[12px] text-ink-muted mono self-end">v0.1 · mockup</div>
         </div>

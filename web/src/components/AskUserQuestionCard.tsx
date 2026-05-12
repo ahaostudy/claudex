@@ -1,5 +1,5 @@
-import { useMemo, useState } from "react";
-import { MessageCircle } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { ChevronDown, MessageCircle } from "lucide-react";
 import { cn } from "@/lib/cn";
 import type { AskUserQuestionItem } from "@claudex/shared";
 
@@ -31,8 +31,11 @@ const OTHER_LABEL = "Other";
  *     revealed in a mono <pre> when the option is focused or hovered
  *   - an "Other" option is appended client-side with a free-text input
  *   - submit button is klein-filled, disabled until every question is
- *     answered; after submit the card becomes read-only with the chosen
- *     label highlighted and a muted "Sent" footer
+ *     answered; after submit the card defaults to a collapsed "receipt" that
+ *     lists every question and its chosen answer on one line. A per-row
+ *     caret peeks the chosen option's description/preview; "Expand all" in
+ *     the footer flips back to the full read-only card (tab strip + option
+ *     cards) for anyone who wants to re-read the raw options.
  */
 export function AskUserQuestionCard({
   askId,
@@ -55,6 +58,24 @@ export function AskUserQuestionCard({
   // strip entirely and look identical to the old layout.
   const [activeIdx, setActiveIdx] = useState(0);
   const safeIdx = Math.min(activeIdx, Math.max(0, questions.length - 1));
+
+  // After-submit UX. By default the answered card collapses into a one-line
+  // receipt per question (`expandedOverride=false`); clicking "Expand all"
+  // flips back to the full tab-strip + option-card read-only view so the
+  // reader can re-study the raw options. `peeked` tracks which collapsed
+  // rows have been individually un-folded to show their chosen option's
+  // description/preview inline — independent of the global flag.
+  const [expandedOverride, setExpandedOverride] = useState(false);
+  const [peeked, setPeeked] = useState<Set<string>>(() => new Set());
+  // On transition into the answered state, reset view to collapsed so an
+  // expand/collapse the user did on a previous answered card instance
+  // doesn't leak into the fresh receipt.
+  useEffect(() => {
+    if (isAnswered) {
+      setExpandedOverride(false);
+      setPeeked(new Set());
+    }
+  }, [isAnswered]);
 
   // Per-question readiness — used both for the global submit gate and for
   // the "done" dots on each tab.
@@ -110,6 +131,36 @@ export function AskUserQuestionCard({
     onSubmit(out);
   }
 
+  // Parses a stored answer back into the concrete label(s) the user picked
+  // and whether it was the free-text "Other" branch. Multi-select answers
+  // are comma-joined by the submit path above.
+  function parseAnswer(q: AskUserQuestionItem, raw: string) {
+    const rawLabels = q.multiSelect
+      ? raw.split(",").map((s) => s.trim()).filter(Boolean)
+      : [raw];
+    return rawLabels.map((label) => {
+      const matched = q.options.find((o) => o.label === label);
+      if (matched) return { kind: "option" as const, option: matched };
+      if (label === OTHER_LABEL)
+        return { kind: "other" as const, text: OTHER_LABEL };
+      // Free-text Other answer — the user typed something that doesn't
+      // match any of the canned options, which is how the submit path
+      // encodes the OTHER_LABEL branch.
+      return { kind: "other" as const, text: label };
+    });
+  }
+
+  const showCollapsedReceipt = isAnswered && !expandedOverride;
+
+  function togglePeek(question: string) {
+    setPeeked((prev) => {
+      const next = new Set(prev);
+      if (next.has(question)) next.delete(question);
+      else next.add(question);
+      return next;
+    });
+  }
+
   return (
     <div
       data-ask-id={askId}
@@ -122,9 +173,24 @@ export function AskUserQuestionCard({
         <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-[6px] border border-klein/30 bg-klein-wash/60 text-klein-ink text-[10px] font-medium uppercase tracking-[0.1em]">
           question · claude
         </span>
+        {showCollapsedReceipt ? (
+          <span className="ml-auto mono text-[11px] text-ink-muted tabular-nums">
+            {questions.length} answered
+          </span>
+        ) : null}
       </div>
 
-      {questions.length > 1 ? (
+      {showCollapsedReceipt ? (
+        <CollapsedReceipt
+          questions={questions}
+          answers={answersProp ?? {}}
+          peeked={peeked}
+          onTogglePeek={togglePeek}
+          parseAnswer={parseAnswer}
+        />
+      ) : (
+        <>
+          {questions.length > 1 ? (
         <div className="flex items-center gap-1 mb-3 overflow-x-auto -mx-1 px-1 pb-1">
           {questions.map((q, idx) => {
             const active = idx === safeIdx;
@@ -344,11 +410,22 @@ export function AskUserQuestionCard({
           );
         })()}
       </div>
+        </>
+      )}
 
       {isAnswered ? (
-        <div className="mt-3 text-[11px] mono text-ink-muted flex items-center gap-1.5">
-          <span className="inline-block h-1.5 w-1.5 rounded-full bg-klein/70" />
-          Sent
+        <div className="mt-3 pt-2 border-t border-klein/15 flex items-center gap-2">
+          <span className="mono text-[11px] text-ink-muted flex items-center gap-1.5">
+            <span className="inline-block h-1.5 w-1.5 rounded-full bg-klein/70" />
+            Sent
+          </span>
+          <button
+            type="button"
+            onClick={() => setExpandedOverride((v) => !v)}
+            className="ml-auto h-7 px-2.5 rounded-[6px] border border-klein/30 bg-canvas text-klein-ink text-[11.5px] mono hover:bg-klein-wash/60 transition-colors"
+          >
+            {expandedOverride ? "Collapse" : "Expand all"}
+          </button>
         </div>
       ) : (
         <div className="mt-3 flex justify-end">
@@ -367,6 +444,184 @@ export function AskUserQuestionCard({
           </button>
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * Compact "receipt" view that replaces the full option-card body after the
+ * user has submitted. One row per question: `Q{i}·{total} | question |
+ * • answer | caret`. Clicking the caret peeks the chosen option's
+ * description + preview inline under that row only — adjacent rows stay
+ * folded so it doesn't turn into an accordion-of-accordions.
+ */
+function CollapsedReceipt({
+  questions,
+  answers,
+  peeked,
+  onTogglePeek,
+  parseAnswer,
+}: {
+  questions: AskUserQuestionItem[];
+  answers: Record<string, string>;
+  peeked: Set<string>;
+  onTogglePeek: (question: string) => void;
+  parseAnswer: (
+    q: AskUserQuestionItem,
+    raw: string,
+  ) => Array<
+    | { kind: "option"; option: AskUserQuestionItem["options"][number] }
+    | { kind: "other"; text: string }
+  >;
+}) {
+  const total = questions.length;
+  return (
+    <ol className="divide-y divide-klein/15">
+      {questions.map((q, idx) => {
+        const raw = answers[q.question] ?? "";
+        const parts = parseAnswer(q, raw);
+        const isOpen = peeked.has(q.question);
+        const hasPeekableDetail = parts.some(
+          (p) =>
+            p.kind === "option" && (p.option.description || p.option.preview),
+        );
+        return (
+          <li
+            key={q.question}
+            className={cn(
+              "py-2.5 px-1 grid grid-cols-[40px_minmax(0,1fr)_auto] items-start gap-2",
+              isOpen && "bg-klein-wash/40 -mx-1.5 rounded-[6px] px-2.5",
+            )}
+          >
+            <span className="mono text-[10.5px] text-klein tabular-nums pt-[3px]">
+              Q{idx + 1}·{total}
+            </span>
+            <div className="min-w-0">
+              <div className="text-[13px] text-ink-soft leading-snug break-words [overflow-wrap:anywhere]">
+                {q.question}
+              </div>
+              <AnswerLine parts={parts} />
+              {isOpen ? <PeekBody parts={parts} /> : null}
+            </div>
+            <button
+              type="button"
+              onClick={() => onTogglePeek(q.question)}
+              disabled={!hasPeekableDetail}
+              aria-expanded={isOpen}
+              aria-label={isOpen ? "Collapse detail" : "Expand detail"}
+              className={cn(
+                "h-6 w-6 flex items-center justify-center rounded-[4px] transition-colors shrink-0",
+                hasPeekableDetail
+                  ? "text-ink-faint hover:text-klein hover:bg-klein-wash/60"
+                  : "text-ink-faint/40 cursor-default",
+              )}
+            >
+              <ChevronDown
+                className={cn(
+                  "w-3.5 h-3.5 transition-transform",
+                  isOpen && "rotate-180 text-klein",
+                )}
+              />
+            </button>
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
+function AnswerLine({
+  parts,
+}: {
+  parts: Array<
+    | { kind: "option"; option: AskUserQuestionItem["options"][number] }
+    | { kind: "other"; text: string }
+  >;
+}) {
+  return (
+    <div className="flex items-start gap-1.5 mt-1 flex-wrap">
+      <span className="h-1.5 w-1.5 rounded-full bg-klein shrink-0 mt-[7px]" />
+      {parts.map((p, i) => {
+        const sep = i < parts.length - 1 ? "," : "";
+        if (p.kind === "option") {
+          return (
+            <span
+              key={i}
+              className="text-[13px] text-ink font-medium break-words [overflow-wrap:anywhere]"
+            >
+              {p.option.label}
+              {sep}
+            </span>
+          );
+        }
+        // Free-text Other branch. When the user typed something, show
+        // "Other → <mono chip>"; when the answer is literally "Other"
+        // (placeholder), just render the word so the row isn't broken.
+        if (p.text === OTHER_LABEL) {
+          return (
+            <span
+              key={i}
+              className="text-[13px] text-ink font-medium italic"
+            >
+              {OTHER_LABEL}
+              {sep}
+            </span>
+          );
+        }
+        return (
+          <span
+            key={i}
+            className="flex items-center gap-1.5 flex-wrap"
+          >
+            <span className="text-[13px] text-ink font-medium italic">
+              {OTHER_LABEL}
+            </span>
+            <span className="text-[12px] text-ink-muted">→</span>
+            <span className="mono text-[12px] text-ink bg-canvas border border-line rounded-[4px] px-1.5 py-[1px] break-all">
+              {p.text}
+            </span>
+            {sep ? <span className="text-ink-muted">,</span> : null}
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
+function PeekBody({
+  parts,
+}: {
+  parts: Array<
+    | { kind: "option"; option: AskUserQuestionItem["options"][number] }
+    | { kind: "other"; text: string }
+  >;
+}) {
+  // Only option-branch parts have description/preview to peek; free-text
+  // Other answers are already fully rendered in AnswerLine.
+  const options = parts.filter(
+    (p): p is { kind: "option"; option: AskUserQuestionItem["options"][number] } =>
+      p.kind === "option",
+  );
+  if (options.length === 0) return null;
+  return (
+    <div className="mt-1.5 rounded-[6px] border border-klein/30 bg-canvas p-2 space-y-2">
+      {options.map((p, i) => (
+        <div key={i} className={i > 0 ? "pt-2 border-t border-klein/15" : ""}>
+          <div className="text-[12px] font-medium text-ink">
+            {p.option.label}
+          </div>
+          {p.option.description ? (
+            <div className="text-[11px] text-ink-muted leading-snug mt-0.5 break-words [overflow-wrap:anywhere]">
+              {p.option.description}
+            </div>
+          ) : null}
+          {p.option.preview ? (
+            <pre className="mono text-[11px] text-canvas bg-ink rounded-[4px] mt-1.5 px-2 py-1.5 whitespace-pre-wrap break-all overflow-x-auto max-w-full">
+              {p.option.preview}
+            </pre>
+          ) : null}
+        </div>
+      ))}
     </div>
   );
 }
