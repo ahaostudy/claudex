@@ -89,16 +89,15 @@ export function DiffView({
   const slash = diff.path.lastIndexOf("/");
   const basename = slash >= 0 ? diff.path.slice(slash + 1) : diff.path;
   const insideToolGroup = useContext(InsideToolGroupContext);
-  const enableSticky = open && !insideToolGroup;
 
   return (
     <div
       className={cn(
+        // Outer must NOT clip — any overflow != visible turns the card
+        // into a scroll container on WebKit and traps the header's sticky
+        // inside the card. Button carries its own rounded-t + overflow-
+        // hidden so color bands can't escape the border radius.
         "rounded-[10px] border border-line bg-canvas",
-        // overflow-clip/hidden any value non-visible turns the card into a
-        // scroll container on WebKit, which freezes sticky inside the card.
-        // Only clip when the header isn't trying to sticky.
-        !enableSticky && "overflow-clip",
         open ? "w-full" : "w-fit max-w-full",
       )}
     >
@@ -107,8 +106,14 @@ export function DiffView({
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
         className={cn(
-          "flex w-full items-center gap-2 py-1.5 pl-2 pr-3 bg-paper border-b border-line text-left hover:bg-paper/80 max-w-full min-w-0",
-          enableSticky && "sticky top-0 z-10 rounded-t-[9px] overflow-hidden",
+          "flex w-full items-center gap-2 py-1.5 pl-2 pr-3 bg-paper border-b border-line text-left hover:bg-paper/80 max-w-full min-w-0 overflow-hidden",
+          open && "rounded-t-[9px]",
+          // Standalone: pin to Chat scroller top. Inside a ToolGroup: pin
+          // below the ToolGroup's own ~34px sticky header so both stack.
+          open &&
+            (insideToolGroup
+              ? "sticky top-[34px] z-10"
+              : "sticky top-0 z-10"),
         )}
         title={diff.path}
       >
