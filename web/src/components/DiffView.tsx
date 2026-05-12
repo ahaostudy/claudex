@@ -116,7 +116,7 @@ export function DiffView({
           {label}
         </span>
         <span
-          className="mono text-[12px] text-ink-muted truncate min-w-0 flex-1"
+          className="mono text-[11px] text-ink-muted truncate min-w-0 flex-1"
         >
           {basename}
         </span>
