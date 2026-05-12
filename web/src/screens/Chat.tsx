@@ -302,13 +302,13 @@ export function ChatScreen() {
     images: ImageRef[];
     index: number;
   } | null>(null);
-  // Mobile tap-to-reveal state for the per-message action row. Only one
-  // bubble's chips can be shown at a time — tapping a different bubble flips
-  // `revealedSeq` to that bubble's seq, and tapping the revealed bubble again
-  // (or running an action) clears it. Desktop uses `group-hover` instead and
-  // ignores this entirely (see MessageActions classes). Optimistic echoes
-  // without a persisted seq can't be revealed via tap — acceptable tradeoff,
-  // their chips only surface on desktop hover.
+  // Tap/click-to-reveal state for the per-message action row. Only one
+  // bubble's chips can be shown at a time — clicking a different bubble flips
+  // `revealedSeq` to that bubble's seq, and clicking the revealed bubble
+  // again (or running an action) clears it. Desktop and mobile share this
+  // trigger — hover no longer reveals the row because it was too easy to
+  // trip during scroll-past tracking. Optimistic echoes without a persisted
+  // seq can't be revealed — acceptable tradeoff, they're short-lived.
   const [revealedSeq, setRevealedSeq] = useState<number | null>(null);
   // iOS Safari collapses its layout viewport when the software keyboard
   // opens, which used to park the composer *under* the keyboard. We read
@@ -1775,12 +1775,12 @@ function Piece({
   /** Resolves after the server has accepted the edit. Caller handles the
    * subsequent refresh_transcript / events refetch. */
   onEditLastUserMessage?: (text: string) => Promise<void>;
-  /** Shared mobile tap-to-reveal state. Only the bubble whose seq matches
-   * `revealedSeq` shows its action chips; all others stay hidden until
-   * hovered on desktop. */
+  /** Shared click/tap-to-reveal state. Only the bubble whose seq matches
+   * `revealedSeq` shows its action chips; all others stay hidden. Hover
+   * does not reveal anything on either platform. */
   revealedSeq?: number | null;
-  /** Tap handler — flips `revealedSeq` to this bubble's seq or clears it if
-   * already revealed. No-op on desktop (reveal is driven by hover there). */
+  /** Click handler — flips `revealedSeq` to this bubble's seq or clears it
+   * if already revealed. */
   onToggleReveal?: (seq: number) => void;
   /** Clears `revealedSeq` unconditionally. Called from inside action chips
    * so running an action dismisses the row. */
@@ -3060,12 +3060,12 @@ function UserBubble({
    * collide. */
   sessionId: string;
   seq?: number;
-  /** Mobile tap-to-reveal flag — when true, the action chips AND the pencil
-   * are shown regardless of hover state. Desktop ignores this and uses
-   * `group-hover` (see `md:` overrides inside `MessageActions`). */
+  /** Click/tap-to-reveal flag — when true, the action chips AND the pencil
+   * are shown. Desktop and mobile share this trigger; hover does not
+   * reveal anything (see MessageActions class list for the rationale). */
   revealed?: boolean;
-  /** Single-tap handler wired on the bubble surface. Triggers the reveal
-   * toggle at the Chat level. No-op on desktop (hover wins there). */
+  /** Single-click handler wired on the bubble surface. Triggers the reveal
+   * toggle at the Chat level. */
   onToggleReveal?: () => void;
   /** Clears `revealedSeq` after an action fires or when starting the
    * inline editor. */
@@ -3253,13 +3253,11 @@ function UserBubble({
               className={cn(
                 "absolute -top-2 -left-2 h-8 w-8 rounded-full bg-paper text-ink border border-line shadow-card transition-opacity flex items-center justify-center",
                 // Desktop and mobile both respect `revealed` (click/tap on
-                // the bubble toggles it). Desktop additionally reveals on
-                // sustained hover with a 500ms delay — matches the action
-                // chip row so scrolling past a bubble doesn't flicker the
-                // pencil in and out.
+                // the bubble toggles it). Hover no longer reveals the
+                // pencil — matches the action chip row; the user has to
+                // click the bubble intentionally to surface it.
                 revealed ? "opacity-100" : "opacity-0",
-                "md:group-hover:opacity-100 md:group-hover:delay-500",
-                "md:focus:opacity-100 md:focus:delay-0",
+                "md:focus:opacity-100",
               )}
             >
               <Pencil className="h-3 w-3" />

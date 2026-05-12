@@ -3,10 +3,12 @@
 //
 // Rendered as an absolutely-positioned overlay at the tail end of user /
 // assistant_text / tool_result bubbles in Chat.tsx. Hidden by default —
-// appears on hover (desktop) or when the parent bubble has been tapped
-// (mobile). Because the row is absolute, it never reserves vertical flow
-// space, so consecutive messages keep a uniform gap regardless of whether
-// the row is present.
+// appears only when the parent bubble has been clicked/tapped (same
+// trigger on desktop and mobile). Hover does NOT reveal the row: it was
+// too easy to trip while scroll-past tracking across messages, so we
+// require an intentional click. Because the row collapses to zero height
+// when idle, consecutive messages keep a uniform gap regardless of
+// whether the row is present.
 //
 // Parent owns a single `revealedSeq` and passes `revealed` down so only one
 // bubble ever shows its row at a time.
@@ -185,22 +187,16 @@ export function MessageActions({
         // the transcript "shivering" as the mouse crosses each message.
         "overflow-hidden transition-[height,opacity,margin] duration-100",
         // `revealed` drives the visible state on both mobile and desktop —
-        // a click on the bubble toggles it at the Chat level. Previously
-        // desktop had a hard `md:opacity-0` override and relied exclusively
-        // on `:hover`, which flickered the row as the mouse tracked across
-        // messages during scroll.
+        // a click/tap on the bubble toggles it at the Chat level. Hover no
+        // longer reveals the row; it was too easy to trigger while
+        // scroll-past tracking across messages and the user asked for
+        // click-only behavior.
         revealed
           ? "h-6 opacity-100 mt-1 pointer-events-auto"
           : "h-0 opacity-0 mt-0 pointer-events-none",
-        // Desktop also reveals on hover, but with a 500ms delay so
-        // scroll-past mouse moves don't trigger it. When hover leaves, the
-        // `group-hover:*` classes stop applying, delay drops back to 0, and
-        // the row collapses immediately — so a brief hover during scroll
-        // never starts the enter transition in the first place.
-        "md:group-hover:h-6 md:group-hover:opacity-100 md:group-hover:mt-1 md:group-hover:pointer-events-auto md:group-hover:delay-500",
-        // Keyboard focus (tabbing into an action) should be immediate — no
-        // delay — so the user can actually see what they're focusing.
-        "md:focus-within:h-6 md:focus-within:opacity-100 md:focus-within:mt-1 md:focus-within:pointer-events-auto md:focus-within:delay-0",
+        // Keyboard focus (tabbing into an action) still reveals it so the
+        // user can see what they're focusing.
+        "md:focus-within:h-6 md:focus-within:opacity-100 md:focus-within:mt-1 md:focus-within:pointer-events-auto",
         "flex items-center gap-0.5",
         align === "end" ? "justify-end" : "justify-start",
       )}
