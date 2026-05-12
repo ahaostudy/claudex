@@ -2718,7 +2718,7 @@ function ToolGroup({
             </span>
             <span
               className={cn(
-                "text-[10px] uppercase tracking-[0.12em]",
+                "text-[10px] uppercase tracking-[0.12em] whitespace-nowrap",
                 tone === "indigo"
                   ? "text-indigo-ink"
                   : tone === "danger"
