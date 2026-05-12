@@ -2597,29 +2597,34 @@ function ToolGroup({
         open ? "w-full max-w-[min(80ch,100%)]" : "w-fit max-w-full",
       )}
     >
-      <div
+      {/*
+        Header and body are separate rounded cards rather than a single
+        outer wrapper. If we wrap both in an outer div with any overflow
+        (hidden/clip), WebKit treats it as a scroll container and freezes
+        the sticky header inside the card; if we leave the outer wrapper
+        with overflow:visible, the header's left/right edges don't line
+        up with the body when the internal span color bands bleed past
+        the outer border radius. Splitting into two sibling cards lets
+        the button be its own rounded+clipped card (self-overflow on a
+        sticky element doesn't affect its own sticky behavior) and keeps
+        the body a separate rounded card directly under it.
+      */}
+      <button
+        type="button"
+        onClick={toggle}
+        aria-expanded={open}
         className={cn(
-          "rounded-[10px] border shadow-card",
+          "w-full group flex items-stretch text-left focus:outline-none rounded-[10px] border shadow-card overflow-hidden",
           frameClass,
+          open && "sticky top-0 z-20",
+          open &&
+            (tone === "danger"
+              ? "bg-danger-wash"
+              : tone === "indigo"
+                ? "bg-indigo-wash"
+                : "bg-paper"),
         )}
       >
-        <button
-          type="button"
-          onClick={toggle}
-          aria-expanded={open}
-          className={cn(
-            "w-full group flex items-stretch text-left focus:outline-none overflow-hidden",
-            open
-              ? "sticky top-0 z-20 rounded-t-[9px]"
-              : "rounded-[9px]",
-            open &&
-              (tone === "danger"
-                ? "bg-danger-wash"
-                : tone === "indigo"
-                  ? "bg-indigo-wash"
-                  : "bg-paper"),
-          )}
-        >
           {/* chevron band */}
           <span className={cn("flex items-center pl-2 pr-1", chipBg)}>
             {open ? (
@@ -2718,7 +2723,7 @@ function ToolGroup({
             </span>
             <span
               className={cn(
-                "text-[10px] uppercase tracking-[0.12em]",
+                "text-[10px] uppercase tracking-[0.12em] whitespace-nowrap",
                 tone === "indigo"
                   ? "text-indigo-ink"
                   : tone === "danger"
@@ -2776,7 +2781,7 @@ function ToolGroup({
         {open && (
           <div
             className={cn(
-              "px-3 py-2.5 space-y-2 border-t rounded-b-[9px]",
+              "mt-1 px-3 py-2.5 space-y-2 rounded-[10px] border",
               borderX,
               tone === "neutral" ? "bg-canvas" : "bg-canvas/60",
             )}
@@ -2790,7 +2795,6 @@ function ToolGroup({
             </InsideToolGroupContext.Provider>
           </div>
         )}
-      </div>
     </div>
   );
 }
