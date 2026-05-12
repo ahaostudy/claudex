@@ -149,7 +149,7 @@ function RunCard({
   return (
     <div
       className={cn(
-        "mx-2.5 mb-2 rounded-[10px] border overflow-clip relative",
+        "mx-2.5 mb-2 rounded-[10px] border overflow-hidden relative",
         tint.border,
         tint.bg,
       )}
@@ -161,7 +161,7 @@ function RunCard({
       <div
         className={cn(
           "w-full pl-3 pr-2 py-2 flex items-center gap-2 text-left",
-          expanded && "border-b sticky top-0 z-10 bg-paper",
+          expanded && "border-b",
           expanded && tint.headerBorder,
           "hover:bg-paper/40",
         )}
