@@ -24,7 +24,7 @@ import {
   Terminal,
   X,
 } from "lucide-react";
-import { ChatSessionsRail, QuickCreateForm } from "@/components/ChatSessionsRail";
+import { ChatSessionsRail } from "@/components/ChatSessionsRail";
 import { Logo } from "@/components/Logo";
 import { ChatTasksRail } from "@/components/ChatTasksRail";
 import { TasksDrawer } from "@/components/TasksDrawer";
@@ -324,13 +324,6 @@ export function ChatScreen() {
   // / terminal) behind a single "⋯" so the header stays breathable on
   // tablet widths where the sessions + tasks rails are both open.
   const [showMore, setShowMore] = useState(false);
-  // Mobile-only quick-create sheet — the desktop rail already has an
-  // inline "+ New session" affordance, but mobile has no sidebar, so
-  // spawning a sibling session in the current project otherwise costs a
-  // round trip to Home. Surfaced via a new ChatMoreSheet action so we
-  // don't steal a header slot. Renders the same QuickCreateForm the
-  // desktop rail uses, just in a bottom-sheet wrapper.
-  const [showQuickCreate, setShowQuickCreate] = useState(false);
   // Desktop tasks rail visibility. Persisted across navigations so users
   // who prefer the condensed layout stay condensed. Mobile ignores this —
   // the rail itself is `hidden md:flex`. Default `false` since the Settings
@@ -1228,6 +1221,25 @@ export function ChatScreen() {
         }}
         onStop={() => id && interruptSession(id)}
         onOpenSideChat={() => setShowSideChat(true)}
+        onCreateSession={async () => {
+          if (!session) return;
+          try {
+            const res = await api.createSession({
+              projectId: session.projectId,
+              model: session.model,
+              mode: session.mode,
+              effort: session.effort,
+              worktree: session.worktreePath !== null,
+            });
+            navigate(`/session/${res.session.id}`);
+          } catch (e) {
+            const code =
+              e && typeof e === "object" && "code" in e
+                ? String((e as { code: unknown }).code)
+                : "create_failed";
+            toast(`Create failed: ${code}`);
+          }
+        }}
         onOpenLightbox={(images, index) =>
           setLightbox({ images, index })
         }
@@ -1290,21 +1302,7 @@ export function ChatScreen() {
             setShowMore(false);
             navigate(`/session/${id}/session-diff`);
           }}
-          onOpenQuickCreate={() => {
-            setShowMore(false);
-            setShowQuickCreate(true);
-          }}
           onClose={() => setShowMore(false)}
-        />
-      )}
-      {showQuickCreate && session && (
-        <MobileQuickCreateSheet
-          current={session}
-          onClose={() => setShowQuickCreate(false)}
-          onCreated={(newId) => {
-            setShowQuickCreate(false);
-            navigate(`/session/${newId}`);
-          }}
         />
       )}
       {showSettings && session && (
@@ -1662,14 +1660,12 @@ function ChatMoreSheet({
   onOpenSideChat,
   onOpenTerminal,
   onOpenSessionDiff,
-  onOpenQuickCreate,
   onClose,
 }: {
   onOpenTasks: () => void;
   onOpenSideChat: () => void;
   onOpenTerminal: () => void;
   onOpenSessionDiff: () => void;
-  onOpenQuickCreate: () => void;
   onClose: () => void;
 }) {
   return (
@@ -1680,15 +1676,6 @@ function ChatMoreSheet({
         </div>
         <div className="caps text-ink-muted mb-2">Actions</div>
         <div className="space-y-1">
-          {/* Quick-create sits at the top because it's the most frequent
-              mobile action — the desktop rail has an always-visible
-              "+ New session" affordance, but mobile had no equivalent
-              short-cut into a sibling session in the same project. */}
-          <SheetAction
-            icon={<Plus className="w-4 h-4 text-klein" />}
-            label="New session here"
-            onClick={onOpenQuickCreate}
-          />
           <SheetAction
             icon={<MessageCircle className="w-4 h-4 text-klein" />}
             label="Side chat (/btw)"
@@ -1716,62 +1703,6 @@ function ChatMoreSheet({
         >
           Close
         </button>
-      </div>
-    </div>
-  );
-}
-
-// Mobile-only bottom sheet hosting the same QuickCreateForm the desktop
-// rail uses inline. Rendered only from Chat when `showQuickCreate` flips
-// true; closes on backdrop tap, Escape, the form's Cancel button, or a
-// successful create (the caller navigates to the new session in the
-// `onCreated` callback). Defined here rather than in ChatSessionsRail so
-// the rail file stays single-responsibility (desktop rail UI).
-function MobileQuickCreateSheet({
-  current,
-  onClose,
-  onCreated,
-}: {
-  current: Session;
-  onClose: () => void;
-  onCreated: (id: string) => void;
-}) {
-  useEffect(() => {
-    const onKey = (ev: KeyboardEvent) => {
-      if (ev.key === "Escape") {
-        ev.stopPropagation();
-        onClose();
-      }
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [onClose]);
-  return (
-    <div
-      className="fixed inset-0 z-40 bg-ink/30 flex items-end justify-center"
-      onClick={onClose}
-    >
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-label="New session in this project"
-        className="w-full bg-canvas border-t border-line rounded-t-[20px] shadow-lift p-4 space-y-3"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex justify-center">
-          <span className="h-1 w-12 bg-line-strong rounded-full" />
-        </div>
-        <div>
-          <div className="display text-[16px] leading-tight">New session</div>
-          <div className="text-[12px] text-ink-muted mt-0.5 truncate">
-            in this project
-          </div>
-        </div>
-        <QuickCreateForm
-          current={current}
-          onCancel={onClose}
-          onCreated={onCreated}
-        />
       </div>
     </div>
   );
@@ -4219,6 +4150,7 @@ function Composer({
   onSend,
   onStop,
   onOpenSideChat,
+  onCreateSession,
   onClaudexAction,
   onOpenLightbox,
   keyboardOffset = 0,
@@ -4229,6 +4161,13 @@ function Composer({
   onSend: (text: string, attachmentIds?: string[]) => void;
   onStop: () => void;
   onOpenSideChat: () => void;
+  /**
+   * Spawn a new session in the same project, inheriting the current
+   * session's model / mode / effort / worktree. Fires a single API call —
+   * no dialog, no title prompt. Parent owns the busy fallback toast and
+   * the post-create navigation.
+   */
+  onCreateSession?: () => Promise<void> | void;
   /**
    * Picker dispatched a claudex-action slash command. Chat maps these to
    * local UI toggles (settings sheet, usage panel, etc.) instead of sending
@@ -4266,6 +4205,11 @@ function Composer({
   const isLocked = isArchived || isErrored;
   const [text, setText] = useState("");
   const [trigger, setTrigger] = useState<Trigger | null>(null);
+  // Spinner lock for the quick "new session" pill in the toolbar. Local to
+  // the button — the parent's create handler is fire-and-forget from its
+  // perspective; we flip this to block double-clicks while the POST is
+  // in flight.
+  const [creating, setCreating] = useState(false);
   // Prompt history recall (↑ / ↓ like bash/readline). Scoped per-session via
   // localStorage key `claudex.prompt-history.<sessionId>` → JSON array, most-
   // recent LAST, capped at 30. Loaded into a ref (not state) because the
@@ -4662,6 +4606,28 @@ function Composer({
           header but we keep it here too so the chip rail stays consistent
           across breakpoints. */}
       <div className="shrink-0 flex items-center gap-1.5 overflow-x-auto no-scrollbar px-3 pt-2">
+        <button
+          type="button"
+          onClick={async () => {
+            if (!onCreateSession || creating || !session) return;
+            setCreating(true);
+            try {
+              await onCreateSession();
+            } finally {
+              setCreating(false);
+            }
+          }}
+          disabled={!onCreateSession || !session || creating}
+          title="New session in this project (inherits current config)"
+          className="h-8 px-3 md:h-7 md:px-2.5 rounded-full border border-line bg-canvas text-[12px] flex items-center gap-1.5 whitespace-nowrap text-ink-soft disabled:opacity-40"
+        >
+          {creating ? (
+            <Loader2 className="w-3 h-3 animate-spin text-klein" />
+          ) : (
+            <Plus className="w-3 h-3 text-klein" />
+          )}
+          New
+        </button>
         <button
           onClick={openSlashManually}
           type="button"
