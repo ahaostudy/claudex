@@ -13,7 +13,7 @@
   <img alt="pnpm" src="https://img.shields.io/badge/pnpm-9%2B-cc785c?style=flat-square">
   <img alt="typescript" src="https://img.shields.io/badge/typescript-strict-1f1e1d?style=flat-square">
   <img alt="license" src="https://img.shields.io/badge/license-MIT-9a968e?style=flat-square">
-  <img alt="platform" src="https://img.shields.io/badge/platform-mac%20%7C%20linux-6b6862?style=flat-square">
+  <img alt="platform" src="https://img.shields.io/badge/platform-mac%20%7C%20linux%20%7C%20windows-6b6862?style=flat-square">
 </p>
 
 ---
@@ -81,6 +81,20 @@
 </table>
 
 ## 安装
+
+### 一行命令
+
+```sh
+# macOS / Linux
+curl -fsSL https://raw.githubusercontent.com/ahaostudy/claudex/main/install.sh | bash
+
+# Windows (PowerShell)
+irm https://raw.githubusercontent.com/ahaostudy/claudex/main/install.ps1 | iex
+```
+
+脚本会检查 `git` / Node 20 / pnpm 9 / `claude` CLI，缺什么都会先问你同意再装（不会静悄悄装东西、不会在你未同意前用 sudo），克隆仓库到 `~/claudex`，构建 Web bundle，并引导你完成首次管理员初始化（用户名 + 隐藏输入的密码，然后打印 TOTP 二维码和 10 条**仅显示一次**的恢复码）。参数：`--dir PATH` / `--branch NAME` / `--yes` / `--skip-init` / `--skip-build`。环境变量：`CLAUDEX_HOME`、`CLAUDEX_ASSUME_YES=1`。
+
+### 手动
 
 **前置：** Node 20+、pnpm 9+、`claude` CLI 已安装并登录。
 

@@ -13,7 +13,7 @@
   <img alt="pnpm" src="https://img.shields.io/badge/pnpm-9%2B-cc785c?style=flat-square">
   <img alt="typescript" src="https://img.shields.io/badge/typescript-strict-1f1e1d?style=flat-square">
   <img alt="license" src="https://img.shields.io/badge/license-MIT-9a968e?style=flat-square">
-  <img alt="platform" src="https://img.shields.io/badge/platform-mac%20%7C%20linux-6b6862?style=flat-square">
+  <img alt="platform" src="https://img.shields.io/badge/platform-mac%20%7C%20linux%20%7C%20windows-6b6862?style=flat-square">
 </p>
 
 ---
@@ -81,6 +81,20 @@ Everything still runs locally. Your API usage, your `~/.claude/` config, your `C
 </table>
 
 ## Install
+
+### One-liner
+
+```sh
+# macOS / Linux
+curl -fsSL https://raw.githubusercontent.com/ahaostudy/claudex/main/install.sh | bash
+
+# Windows (PowerShell)
+irm https://raw.githubusercontent.com/ahaostudy/claudex/main/install.ps1 | iex
+```
+
+The installer checks for `git` / Node 20 / pnpm 9 / the `claude` CLI, offers to install the missing ones (never silently — every step is a prompt, no sudo unless you opt in), clones the repo to `~/claudex`, builds the web bundle, and walks you through the first-admin setup (username + hidden password prompt, then prints the TOTP QR and 10 recovery codes **shown once**). Flags: `--dir PATH` / `--branch NAME` / `--yes` / `--skip-init` / `--skip-build`. Env: `CLAUDEX_HOME`, `CLAUDEX_ASSUME_YES=1`.
+
+### Manual
 
 **Prereqs:** Node 20+, pnpm 9+, the `claude` CLI installed and logged in.
 

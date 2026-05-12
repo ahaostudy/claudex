@@ -387,7 +387,8 @@ General-purpose read-only host-filesystem viewer (mockup s-14). Entered from the
 |---|---|---|
 | ✅ | Typed shared contract in `@claudex/shared` — WS frames, HTTP DTOs, enums; both sides import from there | `shared/src/` |
 | ✅ | Repo pushes to `https://github.com/ahaostudy/claudex.git` (main); commits co-sign Claude | git log |
-| ⬜ | Dockerfile / one-liner install script | — |
+| ✅ | One-liner installer — `install.sh` (macOS + Linux, bash) and `install.ps1` (Windows, PowerShell 5.1+). `curl -fsSL .../install.sh \| bash` / `irm .../install.ps1 \| iex`. Detects git + Node 20 + pnpm 9 + `claude` CLI and offers to install each missing piece with a prompt (nvm-based Node install on *nix = no sudo; winget on Windows; `corepack enable` for pnpm; `npm install -g @anthropic-ai/claude-code` for the CLI). Clones to `~/claudex` (override via `--dir` / `CLAUDEX_HOME`), runs `pnpm install` + `pnpm --filter @claudex/web build`, and drives `pnpm init` via `CLAUDEX_INIT_USERNAME` / `CLAUDEX_INIT_PASSWORD` env vars so the password never lands in argv — the init child prints the TOTP QR + recovery codes in its non-interactive branch, and the wrapper holds the terminal on a "save them now, press Enter to continue" banner so nobody misses the one-shot secrets. Idempotent: re-running pulls latest, re-installs deps, and skips init when `~/.claudex/claudex.db` already has a user. Flags `--yes` / `--skip-init` / `--skip-build`; env `CLAUDEX_HOME`, `CLAUDEX_BRANCH`, `CLAUDEX_REPO`, `CLAUDEX_ASSUME_YES` | `install.sh`, `install.ps1`, `README.md`, `README_CN.md` |
+| ⬜ | Dockerfile | — |
 | ⬜ | Telemetry / metrics endpoint | — (intentionally not doing this for MVP) |
 
 ---
