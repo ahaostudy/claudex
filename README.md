@@ -181,10 +181,6 @@ Per-session token ring, global usage panel with model breakdown, and a live **Al
 
 > See the full feature ledger in [`docs/FEATURES.md`](docs/FEATURES.md) — updated in the same commit as any behavior change.
 
-<p align="center">
-  <img src="./docs/preview/sessions.png" alt="claudex sessions list — iPhone + desktop" width="100%">
-</p>
-
 ## Architecture
 
 ```
