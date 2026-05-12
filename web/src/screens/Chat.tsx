@@ -2776,7 +2776,7 @@ function ToolGroup({
         {open && (
           <div
             className={cn(
-              "px-3 py-2.5 space-y-2 border-t rounded-b-[9px] overflow-hidden",
+              "px-3 py-2.5 space-y-2 border-t rounded-b-[9px]",
               borderX,
               tone === "neutral" ? "bg-canvas" : "bg-canvas/60",
             )}
@@ -2829,7 +2829,6 @@ function ToolCallBlock({
   const rightHint = running ? null : summarizeResult(resultContent, isError);
   const ToolIcon = toolIcon(name);
   const insideToolGroup = useContext(InsideToolGroupContext);
-  const enableSticky = showBody && !insideToolGroup;
 
   return (
     <div
@@ -2847,12 +2846,12 @@ function ToolCallBlock({
         // look. We now match SubagentRun's `ToolCallCard` — one
         // rounded+bordered container, with the expanded body sitting behind
         // a `border-t` divider. Color variants shift the whole frame.
-        // When we want the header to sticky to the Chat scroller (independent
-        // usage, not inside a ToolGroup), the outer must not clip — any
-        // overflow value other than visible makes the outer a scroll container
-        // on WebKit, which traps sticky inside the card.
+        // Outer must NOT clip — any overflow value other than visible makes
+        // the outer a scroll container on WebKit and traps the header's
+        // sticky position inside the card. Button and body each carry their
+        // own rounded-{t,b} + overflow-hidden so color bands can't escape
+        // the border radius without a clipping ancestor.
         "rounded-[10px] border",
-        !enableSticky && "overflow-clip",
         isError
           ? "bg-danger-wash/40 border-danger/30"
           : running
@@ -2867,12 +2866,21 @@ function ToolCallBlock({
           disabled={!canToggle}
           className={cn(
             "w-full flex items-center gap-2 py-1.5 pl-2 pr-3 max-w-full text-left overflow-hidden",
-            enableSticky && "sticky top-0 z-10 rounded-t-[9px]",
-            enableSticky &&
+            showBody
+              ? "rounded-t-[9px]"
+              : "rounded-[9px]",
+            // Standalone: sticky to the Chat scroller top. Inside a ToolGroup:
+            // sticky to the scroller top PLUS the ToolGroup header height
+            // (~34px) so both headers stack instead of one hiding the other.
+            showBody &&
+              (insideToolGroup
+                ? "sticky top-[34px] z-10"
+                : "sticky top-0 z-10"),
+            showBody &&
               (isError
                 ? "bg-danger-wash"
                 : running
-                  ? "bg-klein-wash"
+                  ? "bg-indigo-wash"
                   : "bg-paper"),
             canToggle &&
               (running ? "hover:bg-indigo-wash/70 cursor-pointer" : "hover:bg-paper/60 cursor-pointer"),
