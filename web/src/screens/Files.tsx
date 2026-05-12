@@ -28,6 +28,14 @@ import { AppShell } from "@/components/AppShell";
 import { Markdown } from "@/components/Markdown";
 import { cn } from "@/lib/cn";
 import { timeAgoShort } from "@/lib/format";
+import {
+  basename as pathBasename,
+  buildCrumbs as buildPathCrumbs,
+  dirname as pathDirname,
+  isAbsolutePath,
+  isWindowsPath,
+  splitPath,
+} from "@/lib/path";
 
 // ---------------------------------------------------------------------------
 // Files browser (mockup s-14). Read-only, general-purpose host filesystem
@@ -58,16 +66,10 @@ function formatSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-// POSIX-ish dirname. Input is expected to be an absolute path returned by
-// the server; we don't need to handle relative paths or Windows drive
-// letters here.
-function dirname(absPath: string): string {
-  if (!absPath || absPath === "/") return "/";
-  const trimmed = absPath.endsWith("/") ? absPath.slice(0, -1) : absPath;
-  const idx = trimmed.lastIndexOf("/");
-  if (idx <= 0) return "/";
-  return trimmed.slice(0, idx);
-}
+// Cross-platform path helpers live in web/src/lib/path.ts — they handle
+// POSIX roots, Windows drive letters (D:\), and UNC shares. Don't
+// reintroduce `split("/")` or `endsWith("/")` checks here; they break
+// the moment a Windows host ships an absolute path through /api/browse.
 
 // Classify a file by extension so we know which preview renderer to use.
 // Anything we don't recognize falls through to "text" — the server will
@@ -315,7 +317,7 @@ export function FilesScreen() {
     // If the file's parent is already the current dir this is a no-op;
     // otherwise the listing effect will refetch the new dir.
     setCurrentPath((prev) => {
-      const parent = dirname(absPath);
+      const parent = pathDirname(absPath);
       return prev === parent ? prev : parent;
     });
     // For non-text kinds the <img>/<iframe>/<audio>/<video> tag loads the
@@ -390,9 +392,15 @@ export function FilesScreen() {
   }, []);
 
   const goRoot = useCallback(() => {
-    // POSIX filesystem root. Windows users would need a drive letter here
-    // but claudex is a Mac/Linux-first product and "/" is the right default.
-    setCurrentPath("/");
+    // On Windows we jump to the current drive's root (e.g. `D:\`) so
+    // users don't land on whatever `path.resolve("/")` picks on the
+    // server side. On POSIX we still go to `/` — the one true root.
+    setCurrentPath((prev) => {
+      if (prev && isWindowsPath(prev)) {
+        return splitPath(prev).root;
+      }
+      return "/";
+    });
   }, []);
 
   const goUp = useCallback(() => {
@@ -411,7 +419,7 @@ export function FilesScreen() {
   // to reset the preview for.
   useEffect(() => {
     if (!currentPath || !selectedFilePath) return;
-    if (dirname(selectedFilePath) !== currentPath) {
+    if (pathDirname(selectedFilePath) !== currentPath) {
       closePreview();
     }
   }, [currentPath, selectedFilePath, closePreview]);
@@ -424,7 +432,7 @@ export function FilesScreen() {
     async (raw: string) => {
       const input = raw.trim();
       if (!input) return;
-      if (!input.startsWith("/")) {
+      if (!isAbsolutePath(input)) {
         setListError("not_absolute");
         return;
       }
@@ -785,18 +793,10 @@ interface Crumb {
   path: string;
 }
 
+// Delegate to the shared cross-platform splitter. Kept as a local thunk
+// so the Breadcrumb component's call site stays `buildCrumbs(path)`.
 function buildCrumbs(absPath: string): Crumb[] {
-  if (!absPath || absPath === "/") {
-    return [{ label: "/", path: "/" }];
-  }
-  const parts = absPath.split("/").filter(Boolean);
-  const crumbs: Crumb[] = [{ label: "/", path: "/" }];
-  let acc = "";
-  for (const p of parts) {
-    acc += "/" + p;
-    crumbs.push({ label: p, path: acc });
-  }
-  return crumbs;
+  return buildPathCrumbs(absPath);
 }
 
 function Breadcrumb({
@@ -1006,7 +1006,7 @@ function DownloadButton({
       href={rawUrl(absPath, true)}
       target="_blank"
       rel="noopener"
-      title={`Download ${absPath.split("/").pop() ?? absPath}`}
+      title={`Download ${pathBasename(absPath) || absPath}`}
       className={cn(
         "inline-flex items-center gap-1.5 rounded-[8px] border border-line bg-canvas text-[12px] shrink-0",
         className,
@@ -1042,7 +1042,7 @@ function BinaryPreview({
   renderHtml: boolean;
 }) {
   const [imgError, setImgError] = useState(false);
-  const basename = absPath.split("/").pop() ?? absPath;
+  const basename = pathBasename(absPath) || absPath;
 
   // Reset image error whenever the selected file changes.
   useEffect(() => {
@@ -1386,7 +1386,7 @@ function MobilePreviewSheet({
     setRenderHtml(false);
   }, [absPath]);
 
-  const basename = absPath.split("/").pop() ?? absPath;
+  const basename = pathBasename(absPath) || absPath;
   const isText = kind === "text";
   const isHtml = kind === "html";
   const isMarkdown = kind === "markdown";

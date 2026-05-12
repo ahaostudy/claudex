@@ -12,6 +12,7 @@ import { ImportSessionsSheet } from "@/components/ImportSessionsSheet";
 import { GlobalSearchSheet } from "@/components/GlobalSearchSheet";
 import { StatsSheet } from "@/components/StatsSheet";
 import { cn } from "@/lib/cn";
+import { basename as pathBasename } from "@/lib/path";
 import { toast } from "@/lib/toast";
 import { useFocusReturn } from "@/hooks/useFocusReturn";
 import { forceReload, restartServer } from "@/lib/admin-actions";
@@ -1553,7 +1554,7 @@ function NewSessionSheet({
       }
       const trimmedName =
         projectName.trim() ||
-        trimmedPath.split("/").filter(Boolean).pop() ||
+        pathBasename(trimmedPath) ||
         "project";
       const p = await api.createProject({
         name: trimmedName,
@@ -1717,7 +1718,7 @@ function NewSessionSheet({
                     <div className="flex items-stretch gap-2">
                       <input
                         className="flex-1 min-w-0 h-10 px-3 bg-canvas border border-line rounded-[8px] text-[14px] mono"
-                        placeholder="/Users/you/code/spindle"
+                        placeholder="/Users/you/code/spindle or D:\Code\spindle"
                         value={projectPath}
                         onChange={(e) => setProjectPath(e.target.value)}
                       />

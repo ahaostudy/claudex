@@ -1,8 +1,9 @@
-import { useEffect, useState } from "react";
-import { ChevronRight, Eye, EyeOff, Folder, Home, X } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Check, ChevronRight, Eye, EyeOff, Folder, Home, Pencil, X } from "lucide-react";
 import { api, ApiError } from "@/api/client";
 import type { BrowseEntry } from "@claudex/shared";
 import { cn } from "@/lib/cn";
+import { isAbsolutePath } from "@/lib/path";
 
 /**
  * Full-screen (mobile) / modal (desktop) directory picker. The server exposes
@@ -30,6 +31,12 @@ export function FolderPicker({
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [showHidden, setShowHidden] = useState(false);
+  // Manual path entry. Mobile users with no way to drill through
+  // `C:\Users\…` into another drive (e.g. `D:\Code`) rely on this to
+  // jump laterally across the filesystem.
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+  const editInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -77,12 +84,71 @@ export function FolderPicker({
             <div className="text-[11px] uppercase tracking-[0.14em] text-ink-muted">
               Pick a folder
             </div>
-            <div
-              className="mono text-[12px] text-ink-soft truncate mt-0.5"
-              title={data?.path ?? path ?? ""}
-            >
-              {data?.path ?? path ?? "…"}
-            </div>
+            {editing ? (
+              <form
+                className="mt-1 flex items-stretch gap-1.5"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  const input = draft.trim();
+                  if (!input) return;
+                  if (!isAbsolutePath(input)) {
+                    setErr("not_absolute");
+                    return;
+                  }
+                  setErr(null);
+                  setEditing(false);
+                  setPath(input);
+                }}
+              >
+                <input
+                  ref={editInputRef}
+                  className="flex-1 min-w-0 h-8 px-2 bg-canvas border border-line rounded-[6px] mono text-[12px] text-ink outline-none focus:border-klein"
+                  value={draft}
+                  onChange={(e) => setDraft(e.target.value)}
+                  placeholder="/Users/you or D:\\Code"
+                  spellCheck={false}
+                  autoCapitalize="off"
+                  autoCorrect="off"
+                  aria-label="Enter absolute path"
+                  onKeyDown={(e) => {
+                    if (e.key === "Escape") {
+                      e.preventDefault();
+                      setEditing(false);
+                    }
+                  }}
+                />
+                <button
+                  type="submit"
+                  className="h-8 w-8 rounded-[6px] bg-ink text-canvas flex items-center justify-center shrink-0"
+                  aria-label="Go to path"
+                  title="Go"
+                >
+                  <Check className="w-3.5 h-3.5" />
+                </button>
+              </form>
+            ) : (
+              <button
+                type="button"
+                onClick={() => {
+                  setDraft(data?.path ?? path ?? "");
+                  setEditing(true);
+                  queueMicrotask(() => {
+                    const el = editInputRef.current;
+                    if (el) {
+                      el.focus();
+                      el.select();
+                    }
+                  });
+                }}
+                title="Tap to edit — paste or type any absolute path (e.g. D:\\Code)"
+                className="mt-0.5 w-full flex items-center gap-1.5 text-left group"
+              >
+                <span className="mono text-[12px] text-ink-soft truncate">
+                  {data?.path ?? path ?? "…"}
+                </span>
+                <Pencil className="w-3 h-3 text-ink-faint group-hover:text-ink shrink-0" />
+              </button>
+            )}
           </div>
           <button
             onClick={onClose}
