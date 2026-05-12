@@ -99,7 +99,10 @@ export function DiffView({
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
-        className="flex w-full items-center gap-2 py-1.5 pl-2 pr-3 bg-paper border-b border-line text-left hover:bg-paper/80 max-w-full min-w-0"
+        className={cn(
+          "flex w-full items-center gap-2 py-1.5 pl-2 pr-3 bg-paper text-left hover:bg-paper/80 max-w-full min-w-0",
+          open && "border-b border-line",
+        )}
         title={diff.path}
       >
         <ChevronRight
