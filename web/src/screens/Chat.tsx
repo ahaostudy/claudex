@@ -1168,7 +1168,16 @@ export function ChatScreen() {
               }
             />
           );
-          return renderEntries.map((e) => {
+          return renderEntries.map((e, idxEntry) => {
+            // When two ToolGroups are rendered back-to-back, collapse the
+            // inter-group gap so their sticky headers chain visually — as A
+            // unsticks at its card bottom, B immediately sticks at its card
+            // top, no "limbo" frame where A's trailing body is still visible
+            // but no header is pinned.
+            const prev =
+              idxEntry > 0 ? renderEntries[idxEntry - 1] : undefined;
+            const chainPrev =
+              e.kind === "group" && prev?.kind === "group";
             if (e.kind === "single") {
               // Find the original index in visiblePieces — needed by
               // isLastUserMessage. O(N·G) lookup but the render loop
@@ -1185,6 +1194,7 @@ export function ChatScreen() {
                 pieces={e.pieces}
                 matchedResultByToolUseId={matchedResultByToolUseId}
                 finalized={e.finalized}
+                chainPrev={chainPrev}
                 renderPiece={(child) =>
                   renderPiece(child, visiblePieces.indexOf(child))
                 }
@@ -2353,6 +2363,7 @@ function ToolGroup({
   matchedResultByToolUseId,
   renderPiece,
   finalized,
+  chainPrev,
 }: {
   pieces: ToolUsePiece[];
   matchedResultByToolUseId: Map<
@@ -2366,6 +2377,10 @@ function ToolGroup({
    * tool run doesn't flicker the summary open/closed/open as consecutive
    * batches complete with brief gaps between them. */
   finalized: boolean;
+  /** True when the previous rendered entry is also a ToolGroup — in that
+   * case we collapse the visual gap between the two so each group's sticky
+   * header hands off to the next without a "no sticky" limbo frame. */
+  chainPrev?: boolean;
 }) {
   const meta = useMemo(() => {
     let anyRunning = false;
@@ -2518,7 +2533,13 @@ function ToolGroup({
   return (
     <div
       className={cn(
-        "my-2",
+        "mb-2",
+        // When the previous entry is also a ToolGroup, pull this group up by
+        // -8px (mb-2) AND cancel the parent scroller's space-y margin with
+        // !important. Net margin between the two cards becomes 0, so the
+        // sticky header of A hands off to the sticky header of B with no
+        // visual gap where neither is pinned.
+        chainPrev ? "!-mt-2 md:!-mt-2" : "mt-2",
         // Collapsed: shrink to the pill's intrinsic width so the summary
         // row sits left-aligned under the claude message above without
         // stretching to full column width. Expanded: grow to fit the
