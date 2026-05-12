@@ -51,6 +51,22 @@ describe("decodeSlug", () => {
     // doesn't silently claim to "fix" it.
     expect(decodeSlug("-my-dir")).toBe("/my/dir");
   });
+
+  it("restores a Windows drive-letter prefix (X-- → X:\\) and keeps body verbatim", () => {
+    // The CLI turns `D:\Code\Golang\management-be-go` into a slug where both
+    // `:` and `\` become `-`, yielding `D--Code-Golang-management-be-go`.
+    // We can't tell separator-dashes from real dashes in the body, so we
+    // restore the drive and leave the rest alone — the user knows their path.
+    expect(decodeSlug("D--Code-Golang-management-be-go")).toBe(
+      "D:\\Code-Golang-management-be-go",
+    );
+  });
+
+  it("accepts a Windows slug with a leading dash too", () => {
+    expect(decodeSlug("-D--Code-Golang-management-be-go")).toBe(
+      "D:\\Code-Golang-management-be-go",
+    );
+  });
 });
 
 describe("truncateTitle", () => {

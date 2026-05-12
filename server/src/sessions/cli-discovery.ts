@@ -11,8 +11,10 @@ import type { CliSessionSummary } from "@claudex/shared";
  *
  *   ~/.claude/projects/<cwd-slug>/<sessionUuid>.jsonl
  *
- * The <cwd-slug> is the absolute cwd with every '/' replaced by '-'. An
- * absolute path like `/Users/hao/Code/foo` becomes `-Users-hao-Code-foo`.
+ * The <cwd-slug> is the absolute cwd with every separator replaced by '-'.
+ * POSIX `/Users/hao/Code/foo` → `-Users-hao-Code-foo`. Windows
+ * `D:\Code\foo` → `D--Code-foo` (both `:` and `\` collapse to `-`, producing
+ * the `X--` drive-letter prefix we key off).
  *
  * IMPORTANT — slug ambiguity: the CLI's encoding is lossy. A directory named
  * literally `my-dir` renders the same as `my/dir`. We cannot round-trip
@@ -27,15 +29,25 @@ export function defaultCliProjectsRoot(): string {
 }
 
 /**
- * Reverse a CLI cwd slug back into an absolute path. The slug convention is
- * `/` ↔ `-`, with a leading `-` indicating the path starts at `/`. Returns
- * an absolute path on unix; Windows is not a target for claudex.
+ * Reverse a CLI cwd slug back into an absolute path. POSIX slug convention:
+ * `/` ↔ `-`, with a leading `-` indicating the root `/`. Windows slug
+ * convention: `X:\` ↔ `X--`, with every `\` thereafter also collapsed to
+ * `-` (indistinguishable from real dashes — we leave the body verbatim so
+ * the user can read their own path, e.g. `D--Code-foo-bar` →
+ * `D:\Code-foo-bar`).
  *
  * Known ambiguity: real dashes in directory names round-trip incorrectly.
- * Documented — same behavior as the CLI. See module docstring.
+ * Documented — same behavior as the CLI. See module docstring. A POSIX path
+ * that literally starts with `/X--…` would also hit the Windows branch
+ * here; that's rare enough to accept.
  */
 export function decodeSlug(slug: string): string {
-  // Strip the leading `-` (which represents the root `/`) and swap.
+  // Windows drive-letter prefix: `D--…` or `-D--…` (the CLI may or may not
+  // emit a leading `-` before the drive letter). Restore `X:\` and keep the
+  // rest of the body verbatim.
+  const winMatch = slug.match(/^-?([A-Za-z])--(.*)$/);
+  if (winMatch) return `${winMatch[1]}:\\${winMatch[2]}`;
+  // POSIX: strip the leading `-` (which represents the root `/`) and swap.
   const body = slug.startsWith("-") ? slug.slice(1) : slug;
   return "/" + body.split("-").join("/");
 }
