@@ -49,7 +49,6 @@ import type {
 import { effortSupportedOnModel } from "@claudex/shared";
 import { cn } from "@/lib/cn";
 import { timeAgoShort } from "@/lib/format";
-import { InsideToolGroupContext } from "@/lib/inside-tool-group";
 import { DiffView, toolCallToDiff } from "@/components/DiffView";
 import { diffForToolCall } from "@/lib/diff";
 import { SessionSettingsSheet } from "@/components/SessionSettingsSheet";
@@ -2597,34 +2596,27 @@ function ToolGroup({
         open ? "w-full max-w-[min(80ch,100%)]" : "w-fit max-w-full",
       )}
     >
-      {/*
-        Header and body are separate rounded cards rather than a single
-        outer wrapper. If we wrap both in an outer div with any overflow
-        (hidden/clip), WebKit treats it as a scroll container and freezes
-        the sticky header inside the card; if we leave the outer wrapper
-        with overflow:visible, the header's left/right edges don't line
-        up with the body when the internal span color bands bleed past
-        the outer border radius. Splitting into two sibling cards lets
-        the button be its own rounded+clipped card (self-overflow on a
-        sticky element doesn't affect its own sticky behavior) and keeps
-        the body a separate rounded card directly under it.
-      */}
-      <button
-        type="button"
-        onClick={toggle}
-        aria-expanded={open}
+      <div
         className={cn(
-          "w-full group flex items-stretch text-left focus:outline-none rounded-[10px] border shadow-card overflow-hidden",
+          "rounded-[10px] overflow-hidden border shadow-card",
           frameClass,
-          open && "sticky top-0 z-20",
-          open &&
-            (tone === "danger"
-              ? "bg-danger-wash"
-              : tone === "indigo"
-                ? "bg-indigo-wash"
-                : "bg-paper"),
         )}
       >
+        <button
+          type="button"
+          onClick={toggle}
+          aria-expanded={open}
+          className={cn(
+            "w-full group flex items-stretch text-left focus:outline-none",
+            open && "sticky top-0 z-20",
+            open &&
+              (tone === "danger"
+                ? "bg-danger-wash"
+                : tone === "indigo"
+                  ? "bg-indigo-wash"
+                  : "bg-paper"),
+          )}
+        >
           {/* chevron band */}
           <span className={cn("flex items-center pl-2 pr-1", chipBg)}>
             {open ? (
@@ -2781,20 +2773,19 @@ function ToolGroup({
         {open && (
           <div
             className={cn(
-              "mt-1 px-3 py-2.5 space-y-2 rounded-[10px] border",
+              "px-3 py-2.5 space-y-2 border-t",
               borderX,
               tone === "neutral" ? "bg-canvas" : "bg-canvas/60",
             )}
           >
-            <InsideToolGroupContext.Provider value={true}>
-              {pieces.map((p) => (
-                <div key={p.id} data-tool-group-child>
-                  {renderPiece(p)}
-                </div>
-              ))}
-            </InsideToolGroupContext.Provider>
+            {pieces.map((p) => (
+              <div key={p.id} data-tool-group-child>
+                {renderPiece(p)}
+              </div>
+            ))}
           </div>
         )}
+      </div>
     </div>
   );
 }
@@ -2832,7 +2823,6 @@ function ToolCallBlock({
   const running = resultContent === null;
   const rightHint = running ? null : summarizeResult(resultContent, isError);
   const ToolIcon = toolIcon(name);
-  const insideToolGroup = useContext(InsideToolGroupContext);
 
   return (
     <div
@@ -2850,12 +2840,7 @@ function ToolCallBlock({
         // look. We now match SubagentRun's `ToolCallCard` — one
         // rounded+bordered container, with the expanded body sitting behind
         // a `border-t` divider. Color variants shift the whole frame.
-        // Outer must NOT clip — any overflow value other than visible makes
-        // the outer a scroll container on WebKit and traps the header's
-        // sticky position inside the card. Button and body each carry their
-        // own rounded-{t,b} + overflow-hidden so color bands can't escape
-        // the border radius without a clipping ancestor.
-        "rounded-[10px] border",
+        "rounded-[10px] border overflow-hidden",
         isError
           ? "bg-danger-wash/40 border-danger/30"
           : running
@@ -2870,22 +2855,6 @@ function ToolCallBlock({
           disabled={!canToggle}
           className={cn(
             "w-full flex items-center gap-2 py-1.5 pl-2 pr-3 max-w-full text-left overflow-hidden",
-            showBody
-              ? "rounded-t-[9px]"
-              : "rounded-[9px]",
-            // Standalone: sticky to the Chat scroller top. Inside a ToolGroup:
-            // sticky to the scroller top PLUS the ToolGroup header height
-            // (~34px) so both headers stack instead of one hiding the other.
-            showBody &&
-              (insideToolGroup
-                ? "sticky top-[34px] z-10"
-                : "sticky top-0 z-10"),
-            showBody &&
-              (isError
-                ? "bg-danger-wash"
-                : running
-                  ? "bg-indigo-wash"
-                  : "bg-paper"),
             canToggle &&
               (running ? "hover:bg-indigo-wash/70 cursor-pointer" : "hover:bg-paper/60 cursor-pointer"),
           )}
