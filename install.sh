@@ -16,6 +16,9 @@
 #   4. Interactively collects admin username + password (hidden) and drives
 #      `pnpm run init` via env vars so the TOTP QR + recovery codes print, then
 #      pauses on a banner so the user actually saves them.
+#   5. Offers to register claudex as a user-scoped daemon (launchd on macOS,
+#      systemd --user on Linux) — user-level only, no sudo. Pass --skip-daemon
+#      to opt out.
 #
 # Honors:
 #   CLAUDEX_HOME         install dir (default: ~/claudex)
@@ -143,6 +146,7 @@ CLAUDEX_BRANCH="${CLAUDEX_BRANCH:-main}"
 ASSUME_YES="${CLAUDEX_ASSUME_YES:-}"
 SKIP_INIT=0
 SKIP_BUILD=0
+SKIP_DAEMON="${CLAUDEX_SKIP_DAEMON:-0}"
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -155,6 +159,7 @@ while [ $# -gt 0 ]; do
     --yes|-y)      ASSUME_YES=1; shift ;;
     --skip-init)   SKIP_INIT=1; shift ;;
     --skip-build)  SKIP_BUILD=1; shift ;;
+    --skip-daemon) SKIP_DAEMON=1; shift ;;
     --debug)       set -x; shift ;;
     -h|--help)
       cat <<EOF
@@ -169,10 +174,12 @@ Options:
   --yes, -y         Skip all confirmation prompts
   --skip-init       Do not run the first-admin setup (pnpm run init)
   --skip-build      Do not build the web bundle
+  --skip-daemon     Do not register claudex as a user-scoped daemon
   --debug           Verbose trace (\`set -x\`) for bug reports
 
 Env vars: CLAUDEX_HOME, CLAUDEX_REPO, CLAUDEX_BRANCH, CLAUDEX_ASSUME_YES,
-CLAUDEX_INSTALL_LOG (path to log file), CLAUDEX_DEBUG, NO_COLOR.
+CLAUDEX_SKIP_DAEMON, CLAUDEX_INSTALL_LOG (path to log file),
+CLAUDEX_DEBUG, NO_COLOR.
 
 On failure the script pauses with "press Enter to close" so the error
 stays on screen even if your terminal closes on process exit. A full
@@ -526,6 +533,178 @@ do_init() {
 }
 
 # ---------------------------------------------------------------------------
+# Daemonize via the host's native user-scoped service manager. User-level
+# only — no sudo. Idempotent: rerun == refresh.
+#
+#   macOS → launchd user agent at ~/Library/LaunchAgents/com.claudex.server.plist
+#   Linux → systemd --user unit at  ~/.config/systemd/user/claudex.service
+#
+# Persistence caveats worth knowing:
+#   - macOS launchd user agents start when the user logs into the GUI.
+#     `launchctl bootstrap gui/$UID` binds it to the current GUI session.
+#   - Linux user units require an active user systemd instance. For
+#     "run even when nobody is logged in", run `sudo loginctl enable-linger
+#     $USER` — we don't auto-run sudo, but we print the hint.
+# ---------------------------------------------------------------------------
+LAUNCHD_LABEL="com.claudex.server"
+LAUNCHD_PLIST="$HOME/Library/LaunchAgents/${LAUNCHD_LABEL}.plist"
+SYSTEMD_UNIT="$HOME/.config/systemd/user/claudex.service"
+
+xml_escape() {
+  # stdin -> stdout, escape & < > for XML text/attribute content.
+  sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g'
+}
+
+setup_daemon_macos() {
+  local pnpm_bin pnpm_dir log_dir state_dir
+  pnpm_bin="$(command -v pnpm)" || die "pnpm missing (shouldn't happen — ensure_pnpm ran)"
+  pnpm_dir="$(dirname "$pnpm_bin")"
+  state_dir="${CLAUDEX_STATE_DIR:-$HOME/.claudex}"
+  log_dir="$state_dir/logs"
+  mkdir -p "$log_dir" "$(dirname "$LAUNCHD_PLIST")"
+
+  local home_esc cwd_esc pnpm_esc path_esc out_esc err_esc
+  home_esc="$(printf '%s' "$HOME" | xml_escape)"
+  cwd_esc="$(printf '%s' "$CLAUDEX_HOME" | xml_escape)"
+  pnpm_esc="$(printf '%s' "$pnpm_bin" | xml_escape)"
+  path_esc="$(printf '%s:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin' "$pnpm_dir" | xml_escape)"
+  out_esc="$(printf '%s/claudex.out.log' "$log_dir" | xml_escape)"
+  err_esc="$(printf '%s/claudex.err.log' "$log_dir" | xml_escape)"
+
+  say "writing ${LAUNCHD_PLIST}..."
+  cat >"$LAUNCHD_PLIST" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>${LAUNCHD_LABEL}</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>${pnpm_esc}</string>
+        <string>start</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>${cwd_esc}</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>HOME</key>
+        <string>${home_esc}</string>
+        <key>PATH</key>
+        <string>${path_esc}</string>
+    </dict>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>${out_esc}</string>
+    <key>StandardErrorPath</key>
+    <string>${err_esc}</string>
+</dict>
+</plist>
+EOF
+
+  # Idempotency: unload any previous copy first.
+  launchctl bootout "gui/$(id -u)" "$LAUNCHD_PLIST" >/dev/null 2>&1 || true
+  launchctl unload "$LAUNCHD_PLIST" >/dev/null 2>&1 || true
+
+  if launchctl bootstrap "gui/$(id -u)" "$LAUNCHD_PLIST" >/dev/null 2>&1; then
+    :
+  elif launchctl load -w "$LAUNCHD_PLIST" >/dev/null 2>&1; then
+    :
+  else
+    warn "failed to load launchd agent. Try: launchctl load -w $LAUNCHD_PLIST"
+    return 1
+  fi
+  ok "launchd agent loaded (label: ${LAUNCHD_LABEL})"
+  printf '  logs: %s\n' "$log_dir"
+  printf '  manage:\n'
+  printf '    launchctl kickstart -k gui/$(id -u)/%s    # restart\n' "$LAUNCHD_LABEL"
+  printf '    launchctl bootout gui/$(id -u) %s    # stop/remove\n' "$LAUNCHD_PLIST"
+  return 0
+}
+
+setup_daemon_linux() {
+  if ! command -v systemctl >/dev/null 2>&1; then
+    warn "systemctl not found. Skipping daemon setup; run manually:"
+    printf '  nohup pnpm start >%s/logs/claudex.out.log 2>&1 &\n' "${CLAUDEX_STATE_DIR:-$HOME/.claudex}"
+    return 1
+  fi
+  if ! systemctl --user show-environment >/dev/null 2>&1; then
+    warn "user systemd instance not available (headless container / no session). Skipping."
+    printf '  nohup pnpm start >%s/logs/claudex.out.log 2>&1 &\n' "${CLAUDEX_STATE_DIR:-$HOME/.claudex}"
+    return 1
+  fi
+
+  local pnpm_bin pnpm_dir state_dir log_dir
+  pnpm_bin="$(command -v pnpm)" || die "pnpm missing (shouldn't happen — ensure_pnpm ran)"
+  pnpm_dir="$(dirname "$pnpm_bin")"
+  state_dir="${CLAUDEX_STATE_DIR:-$HOME/.claudex}"
+  log_dir="$state_dir/logs"
+  mkdir -p "$log_dir" "$(dirname "$SYSTEMD_UNIT")"
+
+  say "writing ${SYSTEMD_UNIT}..."
+  cat >"$SYSTEMD_UNIT" <<EOF
+[Unit]
+Description=claudex — remote control for claude code
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=${CLAUDEX_HOME}
+Environment=PATH=${pnpm_dir}:/usr/local/bin:/usr/bin:/bin
+Environment=HOME=${HOME}
+ExecStart=${pnpm_bin} start
+Restart=on-failure
+RestartSec=5
+StandardOutput=append:${log_dir}/claudex.out.log
+StandardError=append:${log_dir}/claudex.err.log
+
+[Install]
+WantedBy=default.target
+EOF
+
+  systemctl --user daemon-reload
+  systemctl --user enable --now claudex.service \
+    || { warn "systemctl --user enable failed. Try: journalctl --user -u claudex.service"; return 1; }
+
+  ok "systemd --user unit enabled: claudex.service"
+  printf '  logs: %s\n' "$log_dir"
+  printf '  manage:\n'
+  printf '    systemctl --user status  claudex.service\n'
+  printf '    systemctl --user restart claudex.service\n'
+  printf '    systemctl --user stop    claudex.service    # stop\n'
+  printf '    systemctl --user disable --now claudex.service    # remove\n'
+  if ! loginctl show-user "$USER" 2>/dev/null | grep -q 'Linger=yes'; then
+    warn "tip: for run-without-login, run: sudo loginctl enable-linger $USER"
+  fi
+  return 0
+}
+
+setup_daemon() {
+  if [ "$SKIP_DAEMON" -eq 1 ]; then
+    warn "--skip-daemon: skipping daemon registration. Start manually: cd $CLAUDEX_HOME && pnpm start"
+    return 1
+  fi
+  local prompt
+  if [ "$PLATFORM" = macos ]; then
+    prompt="Register claudex as a launchd user agent (auto-start on login)?"
+  else
+    prompt="Register claudex as a systemd --user unit (auto-restart on failure)?"
+  fi
+  if ! confirm "$prompt" y; then
+    warn "skipping daemon setup. Start manually: cd $CLAUDEX_HOME && pnpm start"
+    return 1
+  fi
+
+  case "$PLATFORM" in
+    macos) setup_daemon_macos ;;
+    linux) setup_daemon_linux ;;
+  esac
+}
+
+# ---------------------------------------------------------------------------
 # Main flow
 # ---------------------------------------------------------------------------
 say "checking dependencies"
@@ -537,15 +716,41 @@ ensure_claude_cli
 clone_or_update
 install_deps_and_build
 do_init
+DAEMON_RUNNING=0
+if setup_daemon; then
+  DAEMON_RUNNING=1
+fi
 
-cat <<EOF
+printf '\n%s%s✓ claudex installed.%s\n\n' "$C_GREEN" "$C_BOLD" "$C_RESET"
+if [ "$DAEMON_RUNNING" -eq 1 ]; then
+  if [ "$PLATFORM" = macos ]; then
+    cat <<EOF
+claudex is running as a launchd user agent (${LAUNCHD_LABEL}).
+  ${C_BOLD}launchctl kickstart -k gui/\$(id -u)/${LAUNCHD_LABEL}${C_RESET}   # restart
+  ${C_BOLD}launchctl bootout   gui/\$(id -u) ${LAUNCHD_PLIST}${C_RESET}   # stop/remove
 
-${C_GREEN}${C_BOLD}✓ claudex installed.${C_RESET}
+Open ${C_CYAN}http://127.0.0.1:5179${C_RESET}
+EOF
+  else
+    cat <<EOF
+claudex is running as a systemd --user unit (claudex.service).
+  ${C_BOLD}systemctl --user status  claudex.service${C_RESET}
+  ${C_BOLD}systemctl --user restart claudex.service${C_RESET}
+  ${C_BOLD}systemctl --user disable --now claudex.service${C_RESET}  # remove
 
+Open ${C_CYAN}http://127.0.0.1:5179${C_RESET}
+EOF
+  fi
+else
+  cat <<EOF
 Next steps:
   ${C_BOLD}cd $CLAUDEX_HOME${C_RESET}
   ${C_BOLD}pnpm start${C_RESET}   # or \`pnpm serve\` if you passed --skip-build
   open ${C_CYAN}http://127.0.0.1:5179${C_RESET}
+EOF
+fi
+
+cat <<EOF
 
 Remote access: claudex binds to 127.0.0.1 only by design. Put a tunnel
 (Cloudflare Tunnel, frp, Tailscale Funnel, Caddy, …) in front. See README.

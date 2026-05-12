@@ -53,7 +53,7 @@ curl -fsSL https://raw.githubusercontent.com/ahaostudy/claudex/main/install.sh |
 irm https://raw.githubusercontent.com/ahaostudy/claudex/main/install.ps1 | iex
 ```
 
-安装脚本会检查 `git` / Node 20 / pnpm 9 / `claude` CLI，缺什么都先问你同意再装——没有静默动作、不会擅自 sudo。然后克隆仓库到 `~/claudex`，构建 Web bundle，再引导你完成首次管理员初始化（用户名 + 隐藏输入的密码 → TOTP 二维码 → 10 条**仅显示一次**的恢复码）。参数：`--dir PATH` · `--branch NAME` · `--yes` · `--skip-init` · `--skip-build`。环境变量：`CLAUDEX_HOME`、`CLAUDEX_ASSUME_YES=1`。
+安装脚本会检查 `git` / Node 20 / pnpm 9 / `claude` CLI，缺什么都先问你同意再装——没有静默动作、不会擅自 sudo。然后克隆仓库到 `~/claudex`，构建 Web bundle，引导你完成首次管理员初始化（用户名 + 隐藏输入的密码 → TOTP 二维码 → 10 条**仅显示一次**的恢复码），最后提供把 claudex **注册为用户级后台服务**的选项:macOS 用 launchd、Linux 用 `systemd --user`、Windows 用 pm2（自动 `npm i -g pm2 pm2-windows-startup`）。参数：`--dir PATH` · `--branch NAME` · `--yes` · `--skip-init` · `--skip-build` · `--skip-daemon`。环境变量：`CLAUDEX_HOME`、`CLAUDEX_ASSUME_YES=1`、`CLAUDEX_SKIP_DAEMON=1`。
 
 ### 手动
 
@@ -71,10 +71,16 @@ pnpm run init --username=you --password='set-a-strong-one'
 ### 运行
 
 ```sh
-pnpm serve        # 构建 Web bundle + 启动服务，监听 127.0.0.1:5179
+pnpm serve        # 构建 Web bundle + 前台启动服务，监听 127.0.0.1:5179
 ```
 
 然后打开 `http://127.0.0.1:5179`。
+
+想让它挂在后台常驻，要么重跑 installer 接受 daemon 提示，要么手动:
+
+- **macOS** — `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.claudex.server.plist`
+- **Linux** — `systemctl --user enable --now claudex.service`
+- **Windows** — `pm2 start ecosystem.config.cjs; pm2 save; pm2-startup install`
 
 **远程访问** —— claudex 刻意只绑 `127.0.0.1`。请在前面套自己的隧道：
 

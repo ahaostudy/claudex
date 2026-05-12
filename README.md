@@ -53,7 +53,7 @@ curl -fsSL https://raw.githubusercontent.com/ahaostudy/claudex/main/install.sh |
 irm https://raw.githubusercontent.com/ahaostudy/claudex/main/install.ps1 | iex
 ```
 
-The installer checks for `git` / Node 20 / pnpm 9 / the `claude` CLI and offers to install anything missing — every step is a prompt, nothing is silent, sudo is opt-in. It then clones the repo to `~/claudex`, builds the web bundle, and walks you through first-admin setup (username + hidden password → TOTP QR → 10 one-shot recovery codes). Flags: `--dir PATH` · `--branch NAME` · `--yes` · `--skip-init` · `--skip-build`. Env: `CLAUDEX_HOME`, `CLAUDEX_ASSUME_YES=1`.
+The installer checks for `git` / Node 20 / pnpm 9 / the `claude` CLI and offers to install anything missing — every step is a prompt, nothing is silent, sudo is opt-in. It then clones the repo to `~/claudex`, builds the web bundle, walks you through first-admin setup (username + hidden password → TOTP QR → 10 one-shot recovery codes), and finally offers to register claudex as a **user-scoped daemon**: launchd on macOS, `systemd --user` on Linux, pm2 on Windows (installs `pm2` + `pm2-windows-startup` via npm). Flags: `--dir PATH` · `--branch NAME` · `--yes` · `--skip-init` · `--skip-build` · `--skip-daemon`. Env: `CLAUDEX_HOME`, `CLAUDEX_ASSUME_YES=1`, `CLAUDEX_SKIP_DAEMON=1`.
 
 ### Manual
 
@@ -71,10 +71,16 @@ First-run init prints your TOTP secret (QR + manual string) and **10 recovery co
 ### Run
 
 ```sh
-pnpm serve        # build web bundle + start server on 127.0.0.1:5179
+pnpm serve        # build web bundle + start server on 127.0.0.1:5179 (foreground)
 ```
 
 Then open `http://127.0.0.1:5179`.
+
+For a background daemon, rerun the installer and accept the daemon prompt, or:
+
+- **macOS** — `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.claudex.server.plist`
+- **Linux** — `systemctl --user enable --now claudex.service`
+- **Windows** — `pm2 start ecosystem.config.cjs; pm2 save; pm2-startup install`
 
 **Remote access** — claudex binds to `127.0.0.1` only, by design. Put your tunnel of choice in front:
 

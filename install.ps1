@@ -15,6 +15,8 @@
 #   4. Interactively collects admin username + password (hidden), drives
 #      `pnpm run init` via env vars so the TOTP QR + recovery codes print, then
 #      pauses on a banner so the user actually saves them.
+#   5. Offers to register claudex as a background service via pm2 (installs
+#      pm2 + pm2-windows-startup globally via npm; pass -SkipDaemon to opt out).
 #
 # Never runs with elevated privileges implicitly; winget usage is opt-in.
 [CmdletBinding()]
@@ -25,6 +27,7 @@ param(
     [switch]$Yes,
     [switch]$SkipInit,
     [switch]$SkipBuild,
+    [switch]$SkipDaemon,
     [switch]$Trace
 )
 
@@ -74,6 +77,7 @@ if (-not $Dir)    { $Dir    = if ($env:CLAUDEX_HOME)   { $env:CLAUDEX_HOME }   e
 if (-not $Branch) { $Branch = if ($env:CLAUDEX_BRANCH) { $env:CLAUDEX_BRANCH } else { 'main' } }
 if (-not $Repo)   { $Repo   = if ($env:CLAUDEX_REPO)   { $env:CLAUDEX_REPO }   else { 'https://github.com/ahaostudy/claudex.git' } }
 if (-not $Yes -and $env:CLAUDEX_ASSUME_YES) { $Yes = $true }
+if (-not $SkipDaemon -and $env:CLAUDEX_SKIP_DAEMON) { $SkipDaemon = $true }
 
 # ---------------------------------------------------------------------------
 # Styling helpers
@@ -363,6 +367,67 @@ function Do-Init() {
 }
 
 # ---------------------------------------------------------------------------
+# Daemonize via pm2 (Windows's answer to launchd / systemd --user).
+#
+# Idempotent: rerun == refresh. If pm2 / pm2-windows-startup aren't present,
+# installs them globally via npm. Uses `pm2 startOrReload` so a second run
+# just picks up the latest ecosystem config.
+# ---------------------------------------------------------------------------
+function Ensure-Pm2() {
+    if (-not (Have 'pm2')) {
+        Say 'installing pm2 globally via npm...'
+        & npm install -g pm2
+        if ($LASTEXITCODE -ne 0) { DieM 'pm2 install failed.' }
+        Refresh-Env
+    }
+    if (-not (Have 'pm2')) { DieM 'pm2 still not on PATH after install.' }
+    if (-not (Have 'pm2-startup')) {
+        Say 'installing pm2-windows-startup globally via npm...'
+        & npm install -g pm2-windows-startup
+        if ($LASTEXITCODE -ne 0) {
+            WarnM 'pm2-windows-startup install failed. Daemon will run now but won''t auto-start on reboot.'
+        } else {
+            Refresh-Env
+        }
+    }
+}
+
+function Setup-Daemon() {
+    $script:DaemonRunning = $false
+    if ($SkipDaemon) {
+        WarnM "-SkipDaemon: skipping pm2 registration. Start manually with ``cd $Dir; pnpm start``."
+        return
+    }
+    if (-not (Confirm-Step 'Run claudex in the background via pm2 (auto-restart + boot)?' $true)) {
+        WarnM "skipping daemon setup. Start manually with ``cd $Dir; pnpm start`` when ready."
+        return
+    }
+
+    Ensure-Pm2
+
+    Push-Location $Dir
+    try {
+        Say 'registering claudex with pm2...'
+        & pm2 startOrReload ecosystem.config.cjs | Out-Host
+        if ($LASTEXITCODE -ne 0) { DieM "pm2 start failed (exit $LASTEXITCODE). Check ``pm2 logs claudex``." }
+        & pm2 save | Out-Host
+    } finally {
+        Pop-Location
+    }
+
+    if (Have 'pm2-startup') {
+        Say 'registering pm2 for auto-start on login...'
+        & pm2-startup install | Out-Host
+        if ($LASTEXITCODE -ne 0) {
+            WarnM 'pm2-startup install failed; daemon will still run now but may not auto-start after reboot.'
+        }
+    }
+
+    Ok 'claudex is running under pm2'
+    $script:DaemonRunning = $true
+}
+
+# ---------------------------------------------------------------------------
 # Main flow
 # ---------------------------------------------------------------------------
 Refresh-Env
@@ -378,6 +443,7 @@ Ensure-Claude
 Clone-Or-Update
 Install-Deps-And-Build
 Do-Init
+Setup-Daemon
 
 Write-Host ''
 if ($script:UseColor) {
@@ -386,10 +452,20 @@ if ($script:UseColor) {
     Write-Host '[ok] claudex installed.'
 }
 Write-Host ''
-Write-Host 'Next steps:'
-Write-Host "  cd $Dir"
-Write-Host '  pnpm start   # or `pnpm serve` if you passed -SkipBuild'
-Write-Host '  open http://127.0.0.1:5179'
+if ($script:DaemonRunning) {
+    Write-Host 'claudex is running under pm2:'
+    Write-Host '  pm2 status         # check process state'
+    Write-Host '  pm2 logs claudex   # tail stdout/stderr'
+    Write-Host '  pm2 restart claudex'
+    Write-Host '  pm2 stop claudex'
+    Write-Host ''
+    Write-Host 'Open http://127.0.0.1:5179'
+} else {
+    Write-Host 'Next steps:'
+    Write-Host "  cd $Dir"
+    Write-Host '  pnpm start   # or `pnpm serve` if you passed -SkipBuild'
+    Write-Host '  open http://127.0.0.1:5179'
+}
 Write-Host ''
 Write-Host 'Remote access: claudex binds to 127.0.0.1 only by design. Put a tunnel'
 Write-Host '(Cloudflare Tunnel, frp, Tailscale Funnel, Caddy, ...) in front. See README.'
