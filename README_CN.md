@@ -3,10 +3,6 @@
   <a href="./README_CN.md"><kbd>&nbsp;中文&nbsp;</kbd></a>
 </div>
 
-<p align="center">
-  <img src="./docs/preview/hero.png" alt="claudex — 本机 Claude Code 的远程遥控器" width="100%">
-</p>
-
 <h1 align="center">claudex</h1>
 
 <p align="center">
@@ -40,6 +36,10 @@
 **claudex 不是 Claude Code 的替代品，而是它的驾驶舱。** 一个长耗时的编码任务不该把你钉在桌前。打开手机，从任何地方接管进行中的会话：在等咖啡的时候批准一个权限请求、在地铁里排队下三个 prompt、合上笔电后从床上看最终构建跑完。
 
 一切仍然跑在本地。你的 API 配额、`~/.claude/` 配置、`CLAUDE.md` 文件、MCP 服务器——全部通过把真正的 `claude` CLI 作为子进程拉起而免费继承。claudex 只是**驱动器**，永远不是 agent 本身。
+
+<p align="center">
+  <img src="./docs/preview/hero.png" alt="claudex — 本机 Claude Code 的远程遥控器" width="100%">
+</p>
 
 ## 安装
 

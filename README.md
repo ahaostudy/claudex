@@ -3,10 +3,6 @@
   <a href="./README_CN.md"><kbd>&nbsp;中文&nbsp;</kbd></a>
 </div>
 
-<p align="center">
-  <img src="./docs/preview/hero.png" alt="claudex — remote control for Claude Code" width="100%">
-</p>
-
 <h1 align="center">claudex</h1>
 
 <p align="center">
@@ -40,6 +36,10 @@ You already pay for [Claude Code](https://docs.anthropic.com/en/docs/claude-code
 **claudex doesn't replace Claude Code. It puts a cockpit around it.** A long-running coding task shouldn't tie you to your desk. Open your phone from anywhere and keep the session going: answer a permission prompt while waiting for coffee, queue the next three prompts from the train, watch the final build finish while the laptop is closed.
 
 Everything still runs locally. Your API usage, your `~/.claude/` config, your `CLAUDE.md` files, your MCP servers — all inherited for free by spawning the real `claude` CLI as a subprocess. claudex is the *driver*, never the agent.
+
+<p align="center">
+  <img src="./docs/preview/hero.png" alt="claudex — remote control for Claude Code" width="100%">
+</p>
 
 ## Install
 
