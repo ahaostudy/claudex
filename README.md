@@ -63,7 +63,7 @@ The installer checks for `git` / Node 20 / pnpm 9 / the `claude` CLI and offers 
 git clone https://github.com/ahaostudy/claudex.git
 cd claudex
 pnpm install
-pnpm init --username=you --password='set-a-strong-one'
+pnpm run init --username=you --password='set-a-strong-one'
 ```
 
 First-run init prints your TOTP secret (QR + manual string) and **10 recovery codes — shown once, never again**. Save them. Scan the QR into any TOTP app (1Password, Authy, Aegis, Google Authenticator).

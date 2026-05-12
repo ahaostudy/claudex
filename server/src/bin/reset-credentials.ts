@@ -66,7 +66,7 @@ async function main() {
   }>;
   if (rows.length === 0) {
     process.stderr.write(
-      "claudex reset-credentials: no admin user exists yet. Run `pnpm init` first.\n",
+      "claudex reset-credentials: no admin user exists yet. Run `pnpm run init` first.\n",
     );
     close();
     process.exit(1);

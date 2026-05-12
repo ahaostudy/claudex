@@ -13,7 +13,7 @@
 #      (override with -Dir or $env:CLAUDEX_HOME).
 #   3. Runs `pnpm install` and the web bundle build.
 #   4. Interactively collects admin username + password (hidden), drives
-#      `pnpm init` via env vars so the TOTP QR + recovery codes print, then
+#      `pnpm run init` via env vars so the TOTP QR + recovery codes print, then
 #      pauses on a banner so the user actually saves them.
 #
 # Never runs with elevated privileges implicitly; winget usage is opt-in.
@@ -306,7 +306,7 @@ function SecureString-ToPlain([System.Security.SecureString]$s) {
 
 function Do-Init() {
     if ($SkipInit) {
-        WarnM "-SkipInit: leaving credentials unset. Run ``cd $Dir; pnpm init`` when ready."
+        WarnM "-SkipInit: leaving credentials unset. Run ``cd $Dir; pnpm run init`` when ready."
         return
     }
     if (Already-Initialized) {
@@ -337,12 +337,12 @@ function Do-Init() {
         break
     }
 
-    Say 'running `pnpm init` to provision TOTP + recovery codes...'
+    Say 'running `pnpm run init` to provision TOTP + recovery codes...'
     $env:CLAUDEX_INIT_USERNAME = $username
     $env:CLAUDEX_INIT_PASSWORD = $password
     try {
         Push-Location $Dir
-        & pnpm init
+        & pnpm run init
         $rc = $LASTEXITCODE
         Pop-Location
     } finally {
@@ -352,7 +352,7 @@ function Do-Init() {
     }
 
     if ($rc -ne 0) {
-        DieM "pnpm init failed (exit $rc). Delete $((StateDir))\claudex.db and rerun if partially provisioned."
+        DieM "pnpm run init failed (exit $rc). Delete $((StateDir))\claudex.db and rerun if partially provisioned."
     }
 
     Banner '⚠  Save the TOTP secret AND recovery codes above — shown once only.'

@@ -63,7 +63,7 @@ irm https://raw.githubusercontent.com/ahaostudy/claudex/main/install.ps1 | iex
 git clone https://github.com/ahaostudy/claudex.git
 cd claudex
 pnpm install
-pnpm init --username=you --password='set-a-strong-one'
+pnpm run init --username=you --password='set-a-strong-one'
 ```
 
 首次 init 会打印你的 TOTP 密钥（二维码 + 手输字符串）和 **10 条恢复码——只显示一次，过后再也看不到**。请务必保存。把二维码扫进任意 TOTP 应用（1Password / Authy / Aegis / Google Authenticator 均可）。

@@ -14,7 +14,7 @@
 #      --dir or CLAUDEX_HOME).
 #   3. Runs `pnpm install` and `pnpm --filter @claudex/web build`.
 #   4. Interactively collects admin username + password (hidden) and drives
-#      `pnpm init` via env vars so the TOTP QR + recovery codes print, then
+#      `pnpm run init` via env vars so the TOTP QR + recovery codes print, then
 #      pauses on a banner so the user actually saves them.
 #
 # Honors:
@@ -167,7 +167,7 @@ Options:
   --branch NAME     Git branch (default: main)
   --repo URL        Git repo (default: https://github.com/ahaostudy/claudex.git)
   --yes, -y         Skip all confirmation prompts
-  --skip-init       Do not run the first-admin setup (pnpm init)
+  --skip-init       Do not run the first-admin setup (pnpm run init)
   --skip-build      Do not build the web bundle
   --debug           Verbose trace (\`set -x\`) for bug reports
 
@@ -453,7 +453,7 @@ install_deps_and_build() {
 }
 
 # ---------------------------------------------------------------------------
-# First-admin init (drives pnpm init via env vars)
+# First-admin init (drives pnpm run init via env vars)
 # ---------------------------------------------------------------------------
 already_initialized() {
   local state="${CLAUDEX_STATE_DIR:-$HOME/.claudex}"
@@ -462,7 +462,7 @@ already_initialized() {
 
 do_init() {
   if [ "$SKIP_INIT" -eq 1 ]; then
-    warn "--skip-init: leaving credentials unset. Run \`cd $CLAUDEX_HOME && pnpm init\` when ready."
+    warn "--skip-init: leaving credentials unset. Run \`cd $CLAUDEX_HOME && pnpm run init\` when ready."
     return
   fi
   if already_initialized; then
@@ -495,9 +495,9 @@ do_init() {
     break
   done
 
-  say "running \`pnpm init\` to provision TOTP + recovery codes..."
+  say "running \`pnpm run init\` to provision TOTP + recovery codes..."
   # Use env vars (not argv) so the password never lands in /proc/*/cmdline.
-  # `pnpm init` sees the env vars and takes its non-interactive branch — it
+  # `pnpm run init` sees the env vars and takes its non-interactive branch — it
   # prints the QR + codes and returns immediately. We own the "press enter"
   # pause so the user can't miss them.
   set +e
@@ -505,7 +505,7 @@ do_init() {
     cd "$CLAUDEX_HOME"
     CLAUDEX_INIT_USERNAME="$username" \
     CLAUDEX_INIT_PASSWORD="$password" \
-    pnpm init
+    pnpm run init
   )
   local rc=$?
   set -e
@@ -514,7 +514,7 @@ do_init() {
   unset CLAUDEX_INIT_USERNAME CLAUDEX_INIT_PASSWORD 2>/dev/null || true
 
   if [ $rc -ne 0 ]; then
-    die "pnpm init failed (exit $rc). Delete ~/.claudex/claudex.db and rerun if partially provisioned."
+    die "pnpm run init failed (exit $rc). Delete ~/.claudex/claudex.db and rerun if partially provisioned."
   fi
 
   banner "⚠  Save the TOTP secret AND recovery codes above — shown once only."
