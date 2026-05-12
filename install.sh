@@ -57,13 +57,80 @@ banner() {
 }
 
 # ---------------------------------------------------------------------------
-# Re-bind stdin to TTY when invoked via `curl ... | bash`
+# Logging — tee everything to a file so the user can always read the errors
+# back, even if the terminal window is closed/scrolled past / the curl | bash
+# pipeline dies mid-stream.
+# ---------------------------------------------------------------------------
+CLAUDEX_INSTALL_LOG="${CLAUDEX_INSTALL_LOG:-$HOME/.claudex-install.log}"
+# Best-effort: if we can't create the log (read-only $HOME etc.), fall back to /tmp.
+if ! { : >"$CLAUDEX_INSTALL_LOG"; } 2>/dev/null; then
+  CLAUDEX_INSTALL_LOG="/tmp/claudex-install-$$.log"
+  : >"$CLAUDEX_INSTALL_LOG" 2>/dev/null || CLAUDEX_INSTALL_LOG=""
+fi
+if [ -n "$CLAUDEX_INSTALL_LOG" ]; then
+  # shellcheck disable=SC2094
+  exec > >(tee -a "$CLAUDEX_INSTALL_LOG") 2> >(tee -a "$CLAUDEX_INSTALL_LOG" >&2)
+  printf '\n===== claudex install log — %s =====\n' "$(date 2>/dev/null || echo now)" >>"$CLAUDEX_INSTALL_LOG"
+fi
+
+# ---------------------------------------------------------------------------
+# ERR trap: identify the failing command & line number for the log
+# ---------------------------------------------------------------------------
+_last_cmd=""
+trap '_last_cmd=$BASH_COMMAND' DEBUG
+_on_err() {
+  local code=$?
+  printf '\n%s[err]%s line %s: command failed (exit %s): %s\n' \
+    "$C_RED" "$C_RESET" "${BASH_LINENO[0]:-?}" "$code" "$_last_cmd" >&2
+}
+trap _on_err ERR
+
+# ---------------------------------------------------------------------------
+# EXIT trap: ALWAYS restore the terminal and, on failure, pause so the user
+# can read the error before their shell window disappears. Users have
+# reported "the terminal closes before I can see what went wrong" — this is
+# the guard.
+# ---------------------------------------------------------------------------
+_on_exit() {
+  local code=$?
+  # Always restore echo in case a password prompt was mid-flight.
+  stty echo 2>/dev/null || true
+  if [ "$code" -ne 0 ]; then
+    printf '\n%s[!]%s install failed with exit code %s.\n' "$C_RED" "$C_RESET" "$code" >&2
+    if [ -n "${CLAUDEX_INSTALL_LOG:-}" ]; then
+      printf '    full log: %s\n' "$CLAUDEX_INSTALL_LOG" >&2
+    fi
+    printf '    re-run with CLAUDEX_DEBUG=1 for a verbose trace.\n' >&2
+    # Pause so the window doesn't slam shut. Skip only when the user has
+    # explicitly opted out via CLAUDEX_ASSUME_YES=1 (scripts / CI).
+    if [ -z "${CLAUDEX_ASSUME_YES:-}" ] && [ -c /dev/tty ]; then
+      printf '    press Enter to close...' >&2
+      # Read straight from the tty so a dead curl | bash pipeline can't
+      # swallow the Enter keystroke.
+      read -r _ </dev/tty 2>/dev/null || true
+    fi
+  fi
+}
+trap _on_exit EXIT
+
+# Debug mode: CLAUDEX_DEBUG=1 → echo every command. Useful bug-report attachment.
+if [ -n "${CLAUDEX_DEBUG:-}" ]; then
+  set -x
+fi
+
+# ---------------------------------------------------------------------------
+# Re-bind stdin to TTY when invoked via `curl ... | bash`. Guard against
+# environments where /dev/tty exists but cannot be opened (orphaned
+# sub-shells, some container setups) — we don't die, we just fall back to
+# pipe stdin and let the confirmation prompts read whatever they can.
 # ---------------------------------------------------------------------------
 if [ ! -t 0 ]; then
-  if [ -c /dev/tty ]; then
-    exec < /dev/tty
+  # Probe /dev/tty without redirecting the shell's own fds. A successful probe
+  # means we can re-open it for real in the next step.
+  if [ -c /dev/tty ] && { : </dev/tty; } 2>/dev/null; then
+    exec </dev/tty
   elif [ -z "${CLAUDEX_ASSUME_YES:-}" ]; then
-    die "stdin is not a terminal. Re-run locally (\`bash install.sh\`) or set CLAUDEX_ASSUME_YES=1."
+    die "stdin is not a terminal (and /dev/tty can't be opened). Re-run locally (\`bash install.sh\`) or set CLAUDEX_ASSUME_YES=1."
   fi
 fi
 
@@ -88,6 +155,7 @@ while [ $# -gt 0 ]; do
     --yes|-y)      ASSUME_YES=1; shift ;;
     --skip-init)   SKIP_INIT=1; shift ;;
     --skip-build)  SKIP_BUILD=1; shift ;;
+    --debug)       set -x; shift ;;
     -h|--help)
       cat <<EOF
 claudex installer
@@ -101,8 +169,14 @@ Options:
   --yes, -y         Skip all confirmation prompts
   --skip-init       Do not run the first-admin setup (pnpm init)
   --skip-build      Do not build the web bundle
+  --debug           Verbose trace (\`set -x\`) for bug reports
 
-Env vars: CLAUDEX_HOME, CLAUDEX_REPO, CLAUDEX_BRANCH, CLAUDEX_ASSUME_YES, NO_COLOR.
+Env vars: CLAUDEX_HOME, CLAUDEX_REPO, CLAUDEX_BRANCH, CLAUDEX_ASSUME_YES,
+CLAUDEX_INSTALL_LOG (path to log file), CLAUDEX_DEBUG, NO_COLOR.
+
+On failure the script pauses with "press Enter to close" so the error
+stays on screen even if your terminal closes on process exit. A full
+log is always written to \$CLAUDEX_INSTALL_LOG (default: ~/.claudex-install.log).
 EOF
       exit 0
       ;;
@@ -132,17 +206,20 @@ confirm() {
 }
 
 read_hidden() {
-  # $1 = prompt, echoes value on stdout
-  local prompt="$1" value
+  # $1 = prompt, echoes value on stdout.
+  # Terminal echo is restored by the global EXIT trap (see _on_exit) even on
+  # Ctrl-C, so we don't need a local trap here — and we must NOT install one,
+  # since it would clobber _on_exit.
+  local prompt="$1" value saved
   printf '%s' "$prompt" >&2
-  # Ensure echo gets re-enabled even on Ctrl-C / early exit.
-  local saved; saved="$(stty -g 2>/dev/null || true)"
-  trap '[ -n "'"$saved"'" ] && stty "'"$saved"'" 2>/dev/null || true' INT TERM EXIT
+  saved="$(stty -g 2>/dev/null || true)"
   stty -echo 2>/dev/null || true
   IFS= read -r value || value=""
-  stty echo 2>/dev/null || true
-  [ -n "$saved" ] && stty "$saved" 2>/dev/null || true
-  trap - INT TERM EXIT
+  if [ -n "$saved" ]; then
+    stty "$saved" 2>/dev/null || stty echo 2>/dev/null || true
+  else
+    stty echo 2>/dev/null || true
+  fi
   printf '\n' >&2
   printf '%s' "$value"
 }

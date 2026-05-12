@@ -24,10 +24,48 @@ param(
     [string]$Repo,
     [switch]$Yes,
     [switch]$SkipInit,
-    [switch]$SkipBuild
+    [switch]$SkipBuild,
+    [switch]$Trace
 )
 
 $ErrorActionPreference = 'Stop'
+
+# ---------------------------------------------------------------------------
+# Logging — mirror everything to a transcript file so the user can always
+# read errors back, even if the PowerShell window closes on process exit.
+# ---------------------------------------------------------------------------
+$script:InstallLog = if ($env:CLAUDEX_INSTALL_LOG) { $env:CLAUDEX_INSTALL_LOG } `
+                     else { Join-Path $env:USERPROFILE '.claudex-install.log' }
+try {
+    Start-Transcript -Path $script:InstallLog -Append -ErrorAction Stop | Out-Null
+    $script:TranscriptStarted = $true
+} catch {
+    $script:TranscriptStarted = $false
+}
+
+if ($Trace -or $env:CLAUDEX_DEBUG) { Set-PSDebug -Trace 1 }
+
+# ---------------------------------------------------------------------------
+# Trap any terminating error so the window pauses before closing. Users have
+# reported "the terminal closes before I can see what went wrong" — this is
+# the guard.
+# ---------------------------------------------------------------------------
+trap {
+    Write-Host ''
+    Write-Host "[!] install failed: $($_.Exception.Message)" -ForegroundColor Red
+    if ($_.InvocationInfo -and $_.InvocationInfo.PositionMessage) {
+        Write-Host $_.InvocationInfo.PositionMessage -ForegroundColor DarkGray
+    }
+    if ($script:InstallLog) {
+        Write-Host "    full log: $script:InstallLog" -ForegroundColor Red
+    }
+    Write-Host '    re-run with -Trace or $env:CLAUDEX_DEBUG=1 for a verbose trace.' -ForegroundColor Red
+    if (-not $Yes) {
+        try { Read-Host '    press Enter to close' | Out-Null } catch {}
+    }
+    if ($script:TranscriptStarted) { try { Stop-Transcript | Out-Null } catch {} }
+    exit 1
+}
 
 # ---------------------------------------------------------------------------
 # Defaults (env > param)
@@ -44,7 +82,10 @@ $script:UseColor = ($Host.UI.RawUI -ne $null) -and (-not $env:NO_COLOR)
 function Say   ([string]$msg) { if ($script:UseColor) { Write-Host "==> " -NoNewline -ForegroundColor Cyan;   Write-Host $msg } else { Write-Host "==> $msg" } }
 function Ok    ([string]$msg) { if ($script:UseColor) { Write-Host "[ok] " -NoNewline -ForegroundColor Green; Write-Host $msg } else { Write-Host "[ok] $msg" } }
 function WarnM ([string]$msg) { if ($script:UseColor) { Write-Host "[warn] " -NoNewline -ForegroundColor Yellow;Write-Host $msg } else { Write-Host "[warn] $msg" } }
-function DieM  ([string]$msg) { if ($script:UseColor) { Write-Host "[err] " -NoNewline -ForegroundColor Red;  Write-Host $msg } else { Write-Host "[err] $msg" } ; exit 1 }
+function DieM  ([string]$msg) {
+    # Throw so the global trap fires, pausing the window before exit.
+    throw $msg
+}
 
 function Banner([string]$msg) {
     Write-Host ''
@@ -352,3 +393,5 @@ Write-Host '  open http://127.0.0.1:5179'
 Write-Host ''
 Write-Host 'Remote access: claudex binds to 127.0.0.1 only by design. Put a tunnel'
 Write-Host '(Cloudflare Tunnel, frp, Tailscale Funnel, Caddy, ...) in front. See README.'
+
+if ($script:TranscriptStarted) { try { Stop-Transcript | Out-Null } catch {} }
