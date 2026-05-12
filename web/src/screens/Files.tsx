@@ -14,6 +14,7 @@ import {
   FolderOpen,
   HardDrive,
   Home,
+  Pencil,
   Search,
   X,
 } from "lucide-react";
@@ -55,6 +56,17 @@ function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} kB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+// POSIX-ish dirname. Input is expected to be an absolute path returned by
+// the server; we don't need to handle relative paths or Windows drive
+// letters here.
+function dirname(absPath: string): string {
+  if (!absPath || absPath === "/") return "/";
+  const trimmed = absPath.endsWith("/") ? absPath.slice(0, -1) : absPath;
+  const idx = trimmed.lastIndexOf("/");
+  if (idx <= 0) return "/";
+  return trimmed.slice(0, idx);
 }
 
 // Classify a file by extension so we know which preview renderer to use.
@@ -221,18 +233,22 @@ export function FilesScreen() {
     });
   }, []);
 
-  // First render: fetch user's home directory and land there.
+  // First render: fetch user's home directory and land there. Don't
+  // clobber a currentPath the sessionStorage restore may have already set
+  // — openFile() now syncs the listing to the file's parent dir, so the
+  // restore path and this fetch can race, and we want the restored value
+  // to win.
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
         const home = await api.browseHome();
         if (cancelled) return;
-        setCurrentPath(home.path);
+        setCurrentPath((prev) => prev ?? home.path);
       } catch {
         // Very unlikely, but if /api/browse/home fails we still try "/" so
         // the screen isn't permanently stuck.
-        if (!cancelled) setCurrentPath("/");
+        if (!cancelled) setCurrentPath((prev) => prev ?? "/");
       }
     })();
     return () => {
@@ -294,6 +310,14 @@ export function FilesScreen() {
     setPreviewSize(entry?.size ?? null);
     setFileData(null);
     setFileError(null);
+    // Keep the side listing in sync with the previewed file — the user
+    // asked for one "location" shared between the tree and the preview.
+    // If the file's parent is already the current dir this is a no-op;
+    // otherwise the listing effect will refetch the new dir.
+    setCurrentPath((prev) => {
+      const parent = dirname(absPath);
+      return prev === parent ? prev : parent;
+    });
     // For non-text kinds the <img>/<iframe>/<audio>/<video> tag loads the
     // bytes itself — we don't need to hit /api/browse/read at all, and
     // doing so would just 415 with binary_file for images/pdfs/etc.
@@ -379,6 +403,46 @@ export function FilesScreen() {
     setCurrentPath(projectPath);
   }, []);
 
+  // Keep tree & preview on the same location: if the side listing moves
+  // somewhere that doesn't contain the previewed file, drop the preview.
+  // openFile() keeps them aligned proactively, so the only way to land
+  // here is an explicit navigation (Breadcrumb, Home/Root/Up, folder
+  // click, project jump, path input) — the exact cases the user wants
+  // to reset the preview for.
+  useEffect(() => {
+    if (!currentPath || !selectedFilePath) return;
+    if (dirname(selectedFilePath) !== currentPath) {
+      closePreview();
+    }
+  }, [currentPath, selectedFilePath, closePreview]);
+
+  // Resolve a user-entered path: try it as a directory first, fall back
+  // to opening it as a file if the server says `not_a_directory`. Any
+  // other error surfaces inline on the listing (same channel as a failed
+  // browse — keeps the UX consistent with clicking a now-missing dir).
+  const resolvePath = useCallback(
+    async (raw: string) => {
+      const input = raw.trim();
+      if (!input) return;
+      if (!input.startsWith("/")) {
+        setListError("not_absolute");
+        return;
+      }
+      setListError(null);
+      try {
+        await api.browse(input);
+        setCurrentPath(input);
+      } catch (e) {
+        if (e instanceof ApiError && e.code === "not_a_directory") {
+          await openFile(input);
+          return;
+        }
+        setListError(e instanceof ApiError ? e.code : "load_failed");
+      }
+    },
+    [openFile],
+  );
+
   const visibleEntries = useMemo(() => {
     if (!browse) return [] as BrowseEntry[];
     const base = browse.entries.filter((e) => showHidden || !e.isHidden);
@@ -418,6 +482,7 @@ export function FilesScreen() {
           onHome={goHome}
           onRoot={goRoot}
           onUp={goUp}
+          onSubmitPath={resolvePath}
           projects={projects}
           onGoToProject={goToProject}
         />
@@ -447,6 +512,7 @@ export function FilesScreen() {
           onHome={goHome}
           onRoot={goRoot}
           onUp={goUp}
+          onSubmitPath={resolvePath}
           projects={projects}
           onGoToProject={goToProject}
         />
@@ -736,13 +802,89 @@ function buildCrumbs(absPath: string): Crumb[] {
 function Breadcrumb({
   path,
   onNavigate,
+  onSubmitPath,
   className,
 }: {
   path: string;
   onNavigate: (p: string) => void;
+  /** Called when the user submits a raw path via the inline input. If
+   *  omitted, the edit affordance is hidden. */
+  onSubmitPath?: (input: string) => void | Promise<void>;
   className?: string;
 }) {
   const crumbs = buildCrumbs(path);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(path);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // Whenever the caller's path changes (navigation happened through some
+  // other channel — click a folder, Home, etc.), reset the draft so the
+  // next time the user taps edit they start from the current location
+  // rather than a stale string.
+  useEffect(() => {
+    if (!editing) setDraft(path);
+  }, [path, editing]);
+
+  const enterEdit = useCallback(() => {
+    if (!onSubmitPath) return;
+    setDraft(path || "/");
+    setEditing(true);
+    // Select-all on next tick so the user can overwrite the path with
+    // a paste/typing motion without first tapping to clear.
+    queueMicrotask(() => {
+      const el = inputRef.current;
+      if (el) {
+        el.focus();
+        el.select();
+      }
+    });
+  }, [onSubmitPath, path]);
+
+  const cancelEdit = useCallback(() => {
+    setEditing(false);
+    setDraft(path);
+  }, [path]);
+
+  const commitEdit = useCallback(() => {
+    if (!onSubmitPath) return;
+    const value = draft;
+    setEditing(false);
+    void onSubmitPath(value);
+  }, [draft, onSubmitPath]);
+
+  if (editing && onSubmitPath) {
+    return (
+      <div
+        className={cn(
+          "flex items-center gap-1 mono text-[11.5px]",
+          className,
+        )}
+      >
+        <input
+          ref={inputRef}
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              commitEdit();
+            } else if (e.key === "Escape") {
+              e.preventDefault();
+              cancelEdit();
+            }
+          }}
+          onBlur={cancelEdit}
+          placeholder="/absolute/path"
+          spellCheck={false}
+          autoCapitalize="off"
+          autoCorrect="off"
+          aria-label="Enter absolute path"
+          className="flex-1 min-w-0 h-6 px-1.5 bg-canvas border border-line rounded-[4px] text-ink outline-none focus:border-klein"
+        />
+      </div>
+    );
+  }
+
   return (
     <div
       className={cn(
@@ -769,6 +911,17 @@ function Breadcrumb({
           </span>
         );
       })}
+      {onSubmitPath && (
+        <button
+          type="button"
+          onClick={enterEdit}
+          aria-label="Edit path"
+          title="Edit path"
+          className="ml-1 shrink-0 text-ink-faint hover:text-ink"
+        >
+          <Pencil className="w-3 h-3" />
+        </button>
+      )}
     </div>
   );
 }
@@ -1095,6 +1248,7 @@ interface FilesViewProps {
   onHome: () => void;
   onRoot: () => void;
   onUp: () => void;
+  onSubmitPath: (input: string) => void | Promise<void>;
   projects: Project[];
   onGoToProject: (path: string) => void;
 }
@@ -1107,6 +1261,7 @@ function MobileFilesView(p: FilesViewProps) {
         <Breadcrumb
           path={p.currentPath ?? ""}
           onNavigate={p.onNavigate}
+          onSubmitPath={p.onSubmitPath}
           className="px-1"
         />
         {/* Nav row: Home/Root/Up on the left (scrollable if it overflows),
@@ -1378,6 +1533,7 @@ function DesktopFilesView(p: FilesViewProps) {
             <Breadcrumb
               path={p.currentPath ?? ""}
               onNavigate={p.onNavigate}
+              onSubmitPath={p.onSubmitPath}
               className="flex-1 min-w-0"
             />
           </div>
