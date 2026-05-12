@@ -11,7 +11,7 @@
     "postinstall": "node scripts/fix-node-pty-perms.mjs",
     "dev": "pnpm -r --parallel run dev",
     "build": "pnpm --filter @claudex/web run build",
-    "start": "NODE_ENV=production pnpm --filter @claudex/server exec tsx src/index.ts",
+    "start": "cross-env NODE_ENV=production pnpm --filter @claudex/server exec tsx src/index.ts",
     "serve": "pnpm build && pnpm start",
     "typecheck": "pnpm -r run typecheck",
     "lint": "pnpm -r run lint",
@@ -24,6 +24,7 @@
     "claudex:status": "pnpm --filter @claudex/server exec tsx src/bin/status.ts"
   },
   "devDependencies": {
+    "cross-env": "^7.0.3",
     "typescript": "^5.6.3"
   }
 }
