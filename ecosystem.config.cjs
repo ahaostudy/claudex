@@ -7,6 +7,11 @@
 //
 //   pm2 start ecosystem.config.cjs
 //
+// We point pm2 at a plain Node wrapper (scripts/pm2-entry.cjs) rather than
+// `pnpm start` because pm2 on Windows can't spawn `pnpm.cmd` directly —
+// Node's spawn rejects .cmd scripts with EINVAL unless shell:true is
+// threaded through the pm2 layer. The wrapper does the spawning itself.
+//
 // Logs land under $CLAUDEX_STATE_DIR (default ~/.claudex) so they follow
 // the same convention as the rest of claudex runtime state.
 
@@ -23,17 +28,12 @@ try {
   // best-effort; pm2 will fall back to ~/.pm2/logs if we can't create this
 }
 
-const isWin = process.platform === "win32";
-
 module.exports = {
   apps: [
     {
       name: "claudex",
       cwd: __dirname,
-      script: isWin ? "pnpm.cmd" : "pnpm",
-      args: ["start"],
-      // pnpm isn't a Node script — tell pm2 to exec it directly.
-      interpreter: "none",
+      script: "scripts/pm2-entry.cjs",
       autorestart: true,
       max_restarts: 10,
       min_uptime: "5s",
