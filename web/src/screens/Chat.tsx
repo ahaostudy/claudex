@@ -2539,13 +2539,6 @@ function ToolGroup({
           aria-expanded={open}
           className={cn(
             "w-full group flex items-stretch text-left focus:outline-none",
-            open && "sticky top-0 z-20",
-            open &&
-              (tone === "danger"
-                ? "bg-danger-wash"
-                : tone === "indigo"
-                  ? "bg-indigo-wash"
-                  : "bg-paper"),
           )}
         >
           {/* chevron band */}
