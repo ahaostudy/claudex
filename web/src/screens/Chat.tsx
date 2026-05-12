@@ -2529,7 +2529,7 @@ function ToolGroup({
     >
       <div
         className={cn(
-          "rounded-[10px] overflow-hidden border shadow-card",
+          "rounded-[10px] overflow-clip border shadow-card",
           frameClass,
         )}
       >
