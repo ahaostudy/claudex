@@ -2745,7 +2745,13 @@ function ToolCallBlock({
   const canToggle = !verbose;
   const pretty = useMemo(() => safeStringify(input), [input]);
   const running = resultContent === null;
-  const rightHint = running ? null : summarizeResult(resultContent, isError);
+  // Skill tool's result is always a near-fixed "Launching skill: <name>"
+  // string, which duplicates the skill name we already show in the
+  // summary slot. Suppress the right-hand result hint for it.
+  const rightHint =
+    running || name === "Skill"
+      ? null
+      : summarizeResult(resultContent, isError);
   const ToolIcon = toolIcon(name);
 
   return (

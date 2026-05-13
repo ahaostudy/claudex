@@ -148,6 +148,10 @@ export function summarizeToolCall(
       if (!cmd) return "";
       return truncate(cmd.startsWith("/") ? cmd : `/${cmd}`);
     }
+    case "Skill": {
+      const skill = asString(input.skill);
+      return skill ? truncate(skill) : "";
+    }
     case "KillShell":
     case "KillBash":
     case "BashOutput": {
