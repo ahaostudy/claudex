@@ -631,9 +631,21 @@ export async function registerSessionRoutes(
       if (title !== undefined) sessions.setTitle(id, title);
       if (model !== undefined && model !== existing.model) {
         sessions.setModel(id, model);
-        // The Agent SDK doesn't expose a hot model swap — it picks up the
-        // new model on the next user turn via a fresh SDK Query. Running
-        // sessions therefore keep the old model for any in-flight turn.
+        // Propagate to the live runner via the SDK's Query.setModel control
+        // request so the next turn actually uses the new model. Without this
+        // the cached runner keeps replying with whatever model it was
+        // launched with — typically the SDK's default Sonnet — and the user
+        // sees "I picked Opus but Claude still answers as Sonnet". The
+        // change applies to the NEXT SDK turn; an in-flight query keeps
+        // the model it was launched with (matches SDK semantics).
+        try {
+          await deps.manager.applyModel(id, model);
+        } catch (err) {
+          req.log.warn(
+            { err, sessionId: id, model },
+            "failed to propagate model change to runner",
+          );
+        }
         if (existing.status === "running" || deps.manager.hasRunner(id)) {
           warnings.push("model_change_applies_to_next_turn");
         }

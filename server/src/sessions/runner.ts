@@ -236,6 +236,11 @@ export interface Runner {
   resolvePlanAccept(planId: string, decision: "accept" | "reject"): void;
   interrupt(): Promise<void>;
   setPermissionMode(mode: PermissionMode): Promise<void>;
+  // Hot-swap the model. The Agent SDK exposes a control-request `setModel`
+  // on the live `Query`; we route through it so subsequent SDK turns use
+  // the new model without tearing the runner down. The runner also caches
+  // the value so a future resume after restart picks the right model.
+  setModel(model: ModelId): Promise<void>;
   // Hot-swap the thinking-effort level. Stored on the runner; takes effect
   // on the NEXT SDK turn (the SDK's `thinking` option is start-time only,
   // so we can't restyle an in-flight query without tearing it down).

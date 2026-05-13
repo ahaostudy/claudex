@@ -17,6 +17,7 @@ import type {
   AskUserQuestionAnnotation,
   AskUserQuestionItem,
   EffortLevel,
+  ModelId,
   PermissionMode,
 } from "@claudex/shared";
 
@@ -64,11 +65,13 @@ export class AgentRunner implements Runner {
   private disposed = false;
   private permissionMode: PermissionMode;
   private effort: EffortLevel;
+  private currentModel: ModelId;
 
   constructor(private readonly opts: RunnerInitOptions) {
     this.sessionId = opts.sessionId;
     this.permissionMode = opts.permissionMode;
     this.effort = opts.effort ?? "medium";
+    this.currentModel = opts.model;
     this.userMessages = new AsyncPush();
   }
 
@@ -119,7 +122,7 @@ export class AgentRunner implements Runner {
     const sdkOptions: Options = {
       cwd: this.opts.cwd,
       permissionMode: mapPermissionMode(this.permissionMode),
-      model: this.opts.model,
+      model: this.currentModel,
       // MUST merge — SDK replaces process.env otherwise.
       env: { ...process.env } as Record<string, string>,
       resume: this.opts.resumeSdkSessionId,
@@ -565,6 +568,18 @@ export class AgentRunner implements Runner {
     this.permissionMode = mode;
     if (this.sdkHandle) {
       await this.sdkHandle.setPermissionMode(mapPermissionMode(mode));
+    }
+  }
+
+  async setModel(model: ModelId): Promise<void> {
+    // Cache so a future start() (e.g. after a server restart that
+    // re-instantiates the runner) picks up the latest choice. The SDK's
+    // `setModel` is the live channel — it takes effect from the next SDK
+    // turn (in-flight queries keep the model they were launched with,
+    // mirroring how the SDK itself scopes the change).
+    this.currentModel = model;
+    if (this.sdkHandle) {
+      await this.sdkHandle.setModel(model);
     }
   }
 

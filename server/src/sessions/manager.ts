@@ -14,6 +14,7 @@ import type { AttachmentStore } from "../uploads/store.js";
 import type { AppSettingsStore } from "../settings/store.js";
 import type {
   AskUserQuestionAnnotation,
+  ModelId,
   SessionStatus,
 } from "@claudex/shared";
 import { HISTORICAL_TURN_THRESHOLD, contextWindowTokens } from "@claudex/shared";
@@ -1397,6 +1398,26 @@ export class SessionManager {
     const entry = this.runners.get(sessionId);
     if (!entry) return false;
     await entry.runner.setEffort(effort);
+    return true;
+  }
+
+  /**
+   * Propagate a model change to the live runner, if any. Routed through
+   * the Agent SDK's `Query.setModel` so subsequent turns use the new
+   * model without tearing the runner down. In-flight SDK queries keep
+   * the model they were launched with — this matches the SDK's own
+   * semantics. The caller is expected to have already persisted the new
+   * model to the DB.
+   *
+   * Without this hop, the runner cache in `getOrCreate` returns the
+   * old runner forever and the DB-side model change is silently
+   * ignored, surfacing as "model picker says X but Claude still
+   * answers as Sonnet 4.6".
+   */
+  async applyModel(sessionId: string, model: ModelId): Promise<boolean> {
+    const entry = this.runners.get(sessionId);
+    if (!entry) return false;
+    await entry.runner.setModel(model);
     return true;
   }
 
