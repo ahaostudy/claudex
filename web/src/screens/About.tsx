@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ChevronLeft, ExternalLink, Info } from "lucide-react";
+import { ChevronLeft, Download, ExternalLink, Info } from "lucide-react";
 import { api, ApiError } from "@/api/client";
-import type { MetaResponse } from "@claudex/shared";
+import type { LatestReleaseResponse, MetaResponse } from "@claudex/shared";
 import { AppShell } from "@/components/AppShell";
 import { timeAgoLong } from "@/lib/format";
 
@@ -21,12 +21,22 @@ export function AboutScreen() {
   const navigate = useNavigate();
   const [meta, setMeta] = useState<MetaResponse | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [release, setRelease] = useState<LatestReleaseResponse | null>(null);
 
   useEffect(() => {
     api
       .getMeta()
       .then(setMeta)
       .catch((e) => setErr(e instanceof ApiError ? e.code : "load failed"));
+    // Release lookup is best-effort and decoupled from the main meta fetch:
+    // an offline machine still gets a usable About screen, just without the
+    // update-available row. Errors land as `ok: false` payloads, not throws.
+    api
+      .getLatestRelease()
+      .then(setRelease)
+      .catch(() => {
+        /* fall through — UI hides the row on null */
+      });
   }, []);
 
   return (
@@ -59,6 +69,10 @@ export function AboutScreen() {
             </p>
 
             <div className="mt-7 space-y-5">
+              {release && release.ok && release.updateAvailable ? (
+                <UpdateBanner release={release} />
+              ) : null}
+
               {err ? (
                 <div className="rounded-[12px] border border-danger/30 bg-danger-wash p-4 text-[13px] text-danger">
                   Couldn't load server info: <span className="mono">{err}</span>
@@ -68,7 +82,7 @@ export function AboutScreen() {
                   loading…
                 </div>
               ) : (
-                <MetaCard meta={meta} />
+                <MetaCard meta={meta} release={release} />
               )}
 
               <FooterLinks commit={meta?.commit ?? null} />
@@ -80,7 +94,13 @@ export function AboutScreen() {
   );
 }
 
-function MetaCard({ meta }: { meta: MetaResponse }) {
+function MetaCard({
+  meta,
+  release,
+}: {
+  meta: MetaResponse;
+  release: LatestReleaseResponse | null;
+}) {
   const commitHref =
     meta.commit !== null ? `${GITHUB_REPO}/commit/${meta.commit}` : null;
   return (
@@ -89,6 +109,7 @@ function MetaCard({ meta }: { meta: MetaResponse }) {
         label="Version"
         value={<span className="mono">v{meta.version}</span>}
       />
+      <Row label="Latest release" value={<LatestReleaseValue release={release} />} />
       <Row
         label="Commit"
         value={
@@ -134,6 +155,99 @@ function MetaCard({ meta }: { meta: MetaResponse }) {
         label="Uptime"
         value={<span className="mono">{formatUptime(meta.uptimeSec)}</span>}
       />
+    </div>
+  );
+}
+
+// Renders the right side of the "Latest release" row. Three states:
+//   - null            → release fetch hasn't resolved yet (initial render)
+//   - ok: false       → fetch failed; show muted error code (network, timeout, …)
+//   - ok: true        → tag link + relative timestamp; "up to date" tag when
+//                       the version matches the running server.
+function LatestReleaseValue({
+  release,
+}: {
+  release: LatestReleaseResponse | null;
+}) {
+  if (release === null) {
+    return <span className="text-ink-muted">checking…</span>;
+  }
+  if (!release.ok) {
+    return (
+      <span className="text-ink-muted">
+        couldn't check ·{" "}
+        <span className="mono text-[11px]">{release.error}</span>
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex items-center gap-2 flex-wrap">
+      <a
+        href={release.htmlUrl}
+        target="_blank"
+        rel="noreferrer noopener"
+        className="mono inline-flex items-center gap-1 underline underline-offset-2 hover:text-ink"
+      >
+        {release.tag}
+        <ExternalLink className="w-3 h-3" />
+      </a>
+      <span className="text-ink-muted text-[11px] mono">
+        {timeAgoLong(release.publishedAt)}
+      </span>
+      {release.updateAvailable ? (
+        <span className="text-[11px] uppercase tracking-[0.08em] text-warn bg-warn-wash border border-warn/30 rounded-[6px] px-1.5 py-0.5">
+          update
+        </span>
+      ) : (
+        <span className="text-[11px] uppercase tracking-[0.08em] text-ink-muted">
+          up to date
+        </span>
+      )}
+    </span>
+  );
+}
+
+// Shown above the meta card when a newer release is available. We surface the
+// tag + the first chunk of release notes so the user can decide whether to
+// pull. Update is *always manual* — claudex doesn't ship a self-updater (the
+// user runs `git pull` + the iteration loop), so the CTA here links to the
+// release page rather than triggering anything server-side.
+function UpdateBanner({
+  release,
+}: {
+  release: Extract<LatestReleaseResponse, { ok: true }>;
+}) {
+  const notes = release.body.trim();
+  const notesPreview = notes.length > 280 ? `${notes.slice(0, 280)}…` : notes;
+  return (
+    <div className="rounded-[12px] border border-warn/40 bg-warn-wash/40 p-4 flex items-start gap-3">
+      <div className="h-9 w-9 rounded-[8px] bg-canvas border border-warn/40 flex items-center justify-center shrink-0 text-warn">
+        <Download className="w-4 h-4" />
+      </div>
+      <div className="min-w-0 flex-1 text-[13px] space-y-2">
+        <div className="font-medium text-ink">
+          Update available · <span className="mono">{release.tag}</span>
+          <span className="text-ink-muted text-[12px] ml-2 mono">
+            (current v{release.currentVersion})
+          </span>
+        </div>
+        {notesPreview ? (
+          <div className="text-ink-soft whitespace-pre-wrap break-words">
+            {notesPreview}
+          </div>
+        ) : null}
+        <div>
+          <a
+            href={release.htmlUrl}
+            target="_blank"
+            rel="noreferrer noopener"
+            className="inline-flex items-center gap-1 underline underline-offset-2 hover:text-ink"
+          >
+            View release on GitHub
+            <ExternalLink className="w-3 h-3" />
+          </a>
+        </div>
+      </div>
     </div>
   );
 }

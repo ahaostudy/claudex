@@ -33,6 +33,7 @@ import type {
   MemoryResponse,
   StatsResponse,
   MetaResponse,
+  LatestReleaseResponse,
   ListSubagentsResponse,
   AlertsListResponse,
   FilesTreeResponse,
@@ -429,6 +430,16 @@ export const api = {
    */
   getMeta() {
     return request<MetaResponse>("/api/meta");
+  },
+  /**
+   * Latest GitHub release for `ahaostudy/claudex`. Lazily fetched + cached
+   * server-side for 1h. Response is a discriminated union: `ok: true` with
+   * tag/version/htmlUrl/etc., or `ok: false` with an `error` code (network,
+   * timeout, no_release, http_xxx). The About screen uses `updateAvailable`
+   * to decide whether to show the "update available" banner.
+   */
+  getLatestRelease() {
+    return request<LatestReleaseResponse>("/api/meta/latest-release");
   },
 
   // ---------------------------------------------------------------------------

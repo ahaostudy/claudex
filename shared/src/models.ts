@@ -1695,6 +1695,51 @@ export const MetaResponse = z.object({
 export type MetaResponse = z.infer<typeof MetaResponse>;
 
 // ============================================================================
+// Latest GitHub release
+//
+// Response for `GET /api/meta/latest-release`. Lazily fetched (only on first
+// request to the route) from GitHub's `releases/latest` endpoint, cached
+// in-process for 1 hour. The endpoint returns:
+//
+//   - `tag`         — release tag, e.g. "v0.0.2"
+//   - `name`        — release title, e.g. "v0.0.2 — minor fixes"
+//   - `version`     — `tag` with leading `v` stripped, used for compare()
+//   - `htmlUrl`     — link to the release page on GitHub
+//   - `publishedAt` — ISO timestamp
+//   - `body`        — release notes (truncated to 2KB, may be empty)
+//   - `currentVersion` — server's package.json version, for client convenience
+//   - `updateAvailable` — true when `version` > `currentVersion` (semver-ish
+//                         compare, prerelease tags fall back to string compare)
+//   - `fetchedAt`   — when the cache row was filled
+//
+// `error` is set instead of the rest when GitHub is unreachable or the
+// response was unparseable; clients should render a muted "couldn't check"
+// row, not a hard failure.
+// ============================================================================
+
+export const LatestReleaseResponse = z.union([
+  z.object({
+    ok: z.literal(true),
+    tag: z.string(),
+    name: z.string(),
+    version: z.string(),
+    htmlUrl: z.string(),
+    publishedAt: z.string(),
+    body: z.string(),
+    currentVersion: z.string(),
+    updateAvailable: z.boolean(),
+    fetchedAt: z.string(),
+  }),
+  z.object({
+    ok: z.literal(false),
+    error: z.string(),
+    currentVersion: z.string(),
+    fetchedAt: z.string(),
+  }),
+]);
+export type LatestReleaseResponse = z.infer<typeof LatestReleaseResponse>;
+
+// ============================================================================
 // Admin / self-restart
 //
 // Body for POST /api/admin/restart. Both fields optional — the legacy call
