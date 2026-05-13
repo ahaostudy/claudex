@@ -37,6 +37,25 @@ You already pay for [Claude Code](https://docs.anthropic.com/en/docs/claude-code
 
 Everything still runs locally. Your API usage, your `~/.claude/` config, your `CLAUDE.md` files, your MCP servers — all inherited for free by spawning the real `claude` CLI as a subprocess. claudex is the *driver*, never the agent.
 
+## See it in action
+
+A long Claude session, four phone screens. The mockups below run on a 390 px viewport — what you actually see on the device:
+
+<table>
+<tr>
+<td width="25%" align="center" valign="top"><img src="./docs/preview/mobile-chat-permission.png" alt="Chat — inline permission prompt" /><br/><sub><b>Chat</b><br/>read / grep / edit prompted inline, one tap to allow.</sub></td>
+<td width="25%" align="center" valign="top"><img src="./docs/preview/mobile-plan.png" alt="Plan tracking" /><br/><sub><b>Plan</b><br/>step strip on top, live progress, completed steps collapse.</sub></td>
+<td width="25%" align="center" valign="top"><img src="./docs/preview/mobile-subagents.png" alt="Subagents fanned out" /><br/><sub><b>Subagents</b><br/>tasks run in parallel, watch them on a live strip.</sub></td>
+<td width="25%" align="center" valign="top"><img src="./docs/preview/mobile-diff.png" alt="Diff review with inline comment" /><br/><sub><b>Review</b><br/>file-by-file diff, inline comments, accept / reject / comment.</sub></td>
+</tr>
+</table>
+
+And on a wide screen, the same session opens up into a three-column cockpit — sessions rail, transcript, live subagent panel:
+
+<p align="center">
+  <img src="./docs/preview/desktop.png" alt="claudex desktop — three-column cockpit" width="100%">
+</p>
+
 ## Install
 
 ### One-liner
@@ -182,25 +201,6 @@ Per-session token ring, global usage panel with model breakdown, and a live **Al
 </table>
 
 > See the full feature ledger in [`docs/FEATURES.md`](docs/FEATURES.md) — updated in the same commit as any behavior change.
-
-## See it in action
-
-A long Claude session, four phone screens. The mockups below run on a 390 px viewport — what you actually see on the device:
-
-<table>
-<tr>
-<td width="25%" align="center" valign="top"><img src="./docs/preview/mobile-chat-permission.png" alt="Chat — inline permission prompt" /><br/><sub><b>Chat</b><br/>read / grep / edit prompted inline, one tap to allow.</sub></td>
-<td width="25%" align="center" valign="top"><img src="./docs/preview/mobile-plan.png" alt="Plan tracking" /><br/><sub><b>Plan</b><br/>step strip on top, live progress, completed steps collapse.</sub></td>
-<td width="25%" align="center" valign="top"><img src="./docs/preview/mobile-subagents.png" alt="Subagents fanned out" /><br/><sub><b>Subagents</b><br/>tasks run in parallel, watch them on a live strip.</sub></td>
-<td width="25%" align="center" valign="top"><img src="./docs/preview/mobile-diff.png" alt="Diff review with inline comment" /><br/><sub><b>Review</b><br/>file-by-file diff, inline comments, accept / reject / comment.</sub></td>
-</tr>
-</table>
-
-And on a wide screen, the same session opens up into a three-column cockpit — sessions rail, transcript, live subagent panel:
-
-<p align="center">
-  <img src="./docs/preview/desktop.png" alt="claudex desktop — three-column cockpit" width="100%">
-</p>
 
 ## Architecture
 
