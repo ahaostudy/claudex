@@ -37,10 +37,6 @@
 
 一切仍然跑在本地。你的 API 配额、`~/.claude/` 配置、`CLAUDE.md` 文件、MCP 服务器——全部通过把真正的 `claude` CLI 作为子进程拉起而免费继承。claudex 只是**驱动器**，永远不是 agent 本身。
 
-<p align="center">
-  <img src="./docs/preview/hero.png" alt="claudex — 本机 Claude Code 的远程遥控器" width="100%">
-</p>
-
 ## 安装
 
 ### 一行命令

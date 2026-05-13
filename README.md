@@ -37,10 +37,6 @@ You already pay for [Claude Code](https://docs.anthropic.com/en/docs/claude-code
 
 Everything still runs locally. Your API usage, your `~/.claude/` config, your `CLAUDE.md` files, your MCP servers — all inherited for free by spawning the real `claude` CLI as a subprocess. claudex is the *driver*, never the agent.
 
-<p align="center">
-  <img src="./docs/preview/hero.png" alt="claudex — remote control for Claude Code" width="100%">
-</p>
-
 ## Install
 
 ### One-liner
