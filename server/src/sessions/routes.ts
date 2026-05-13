@@ -185,6 +185,24 @@ export async function registerSessionRoutes(
     },
   );
 
+  // POST /api/projects/cleanup-empty
+  //
+  // Bulk-remove every project that has zero sessions (archived included, since
+  // `countSessions` does). Returns `{ removed, removedNames }` so the UI can
+  // toast a precise summary. Idempotent — re-running with no empty projects
+  // returns `{ removed: 0, removedNames: [] }` rather than 404'ing.
+  app.post(
+    "/api/projects/cleanup-empty",
+    { preHandler: app.requireAuth as any },
+    async () => {
+      const removed = projects.cleanupEmpty();
+      return {
+        removed: removed.length,
+        removedNames: removed.map((p) => p.name),
+      };
+    },
+  );
+
   // -- sessions -------------------------------------------------------------
 
   app.get(

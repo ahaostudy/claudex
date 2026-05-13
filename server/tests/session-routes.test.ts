@@ -1,5 +1,8 @@
 import { describe, it, expect, afterEach } from "vitest";
 import type { FastifyInstance } from "fastify";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { bootstrapAuthedApp, trustProject } from "./helpers.js";
 import type { ClaudexDb } from "../src/db/index.js";
 import type {
@@ -245,6 +248,96 @@ describe("session HTTP routes", () => {
         headers: { cookie: ctx.cookie },
       });
       expect(res.statusCode).toBe(404);
+    });
+  });
+
+  describe("POST /api/projects/cleanup-empty", () => {
+    it("requires auth", async () => {
+      const ctx = await bootstrap();
+      disposers.push(ctx.cleanup);
+      const res = await ctx.app.inject({
+        method: "POST",
+        url: "/api/projects/cleanup-empty",
+      });
+      expect(res.statusCode).toBe(401);
+    });
+
+    it("returns zero when there are no empty projects", async () => {
+      const ctx = await bootstrap();
+      disposers.push(ctx.cleanup);
+      const res = await ctx.app.inject({
+        method: "POST",
+        url: "/api/projects/cleanup-empty",
+        headers: { cookie: ctx.cookie },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toEqual({ removed: 0, removedNames: [] });
+    });
+
+    it("removes only projects with zero sessions, leaving the rest", async () => {
+      const ctx = await bootstrap();
+      disposers.push(ctx.cleanup);
+      // Three projects: A (empty), B (empty), C (has a session). Each needs a
+      // distinct path because the unique constraint on `projects.path` rejects
+      // duplicates.
+      const tmpA = fs.mkdtempSync(path.join(os.tmpdir(), "cleanup-a-"));
+      const tmpB = fs.mkdtempSync(path.join(os.tmpdir(), "cleanup-b-"));
+      const tmpC = fs.mkdtempSync(path.join(os.tmpdir(), "cleanup-c-"));
+      try {
+        const mk = async (name: string, p: string) => {
+          const r = await ctx.app.inject({
+            method: "POST",
+            url: "/api/projects",
+            headers: { cookie: ctx.cookie },
+            payload: { name, path: p },
+          });
+          return r.json().project as { id: string; name: string };
+        };
+        const a = await mk("alpha", tmpA);
+        const b = await mk("bravo", tmpB);
+        const c = await mk("charlie", tmpC);
+        trustProject(ctx.dbh, c.id);
+        await ctx.app.inject({
+          method: "POST",
+          url: "/api/sessions",
+          headers: { cookie: ctx.cookie },
+          payload: {
+            projectId: c.id,
+            title: "keep-me",
+            model: "claude-opus-4-7",
+            mode: "default",
+            worktree: false,
+          },
+        });
+
+        const res = await ctx.app.inject({
+          method: "POST",
+          url: "/api/projects/cleanup-empty",
+          headers: { cookie: ctx.cookie },
+        });
+        expect(res.statusCode).toBe(200);
+        const body = res.json();
+        expect(body.removed).toBe(2);
+        expect(body.removedNames.sort()).toEqual(["alpha", "bravo"]);
+
+        const list = await ctx.app.inject({
+          method: "GET",
+          url: "/api/projects",
+          headers: { cookie: ctx.cookie },
+        });
+        const ids = list
+          .json()
+          .projects.map((p: { id: string }) => p.id)
+          .sort();
+        expect(ids).toEqual([c.id]);
+        // sanity: the unrelated id `a` and `b` must not survive
+        expect(ids).not.toContain(a.id);
+        expect(ids).not.toContain(b.id);
+      } finally {
+        fs.rmSync(tmpA, { recursive: true, force: true });
+        fs.rmSync(tmpB, { recursive: true, force: true });
+        fs.rmSync(tmpC, { recursive: true, force: true });
+      }
     });
   });
 

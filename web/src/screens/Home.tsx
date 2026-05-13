@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { Plus, GitBranch, Pencil, Pin, Trash2, FolderOpen, Settings2, X, Download, Search, BarChart3, MoreHorizontal, ChevronDown, ChevronUp, RotateCcw, RefreshCw } from "lucide-react";
+import { Plus, GitBranch, Pencil, Pin, Trash2, FolderOpen, Settings2, X, Download, Search, BarChart3, MoreHorizontal, ChevronDown, ChevronUp, RotateCcw, RefreshCw, Sparkles } from "lucide-react";
 import { useAuth } from "@/state/auth";
 import { useSessions } from "@/state/sessions";
 import { api, ApiError } from "@/api/client";
@@ -2137,6 +2137,7 @@ function ProjectsSheet({ onClose }: { onClose: () => void }) {
   const [editingName, setEditingName] = useState("");
   const [shakeId, setShakeId] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [cleaning, setCleaning] = useState(false);
 
   async function refresh() {
     setLoading(true);
@@ -2195,6 +2196,31 @@ function ProjectsSheet({ onClose }: { onClose: () => void }) {
     }
   }
 
+  async function cleanupEmpty() {
+    setErr(null);
+    if (
+      !confirm(
+        "Remove every project that has no sessions? Sessions are unaffected; only project references with zero sessions are deleted.",
+      )
+    ) {
+      return;
+    }
+    setCleaning(true);
+    try {
+      const r = await api.cleanupEmptyProjects();
+      await refresh();
+      toast(
+        r.removed === 0
+          ? "No empty projects to remove"
+          : `Removed ${r.removed} empty project${r.removed === 1 ? "" : "s"}`,
+      );
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.code : "cleanup failed");
+    } finally {
+      setCleaning(false);
+    }
+  }
+
   return (
     <div className="fixed inset-0 z-40 bg-ink/30 flex items-end sm:items-center justify-center">
       <div role="dialog" aria-modal="true" aria-labelledby="projects-sheet-title" className="w-full sm:max-w-lg bg-canvas border-t sm:border border-line rounded-t-[20px] sm:rounded-[14px] shadow-lift flex flex-col max-h-[90vh]">
@@ -2207,12 +2233,25 @@ function ProjectsSheet({ onClose }: { onClose: () => void }) {
               Manage where claude can work.
             </h2>
           </div>
-          <button
-            onClick={onClose}
-            className="ml-auto h-8 w-8 rounded-[8px] border border-line flex items-center justify-center"
-          >
-            ✕
-          </button>
+          <div className="ml-auto flex items-center gap-2">
+            {projects.length > 0 && (
+              <button
+                onClick={cleanupEmpty}
+                disabled={cleaning || loading}
+                title="Remove every project that has no sessions"
+                className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-[8px] border border-line bg-canvas hover:bg-paper text-[12px] font-medium text-ink-soft disabled:opacity-60 disabled:cursor-not-allowed"
+              >
+                <Sparkles className="w-3.5 h-3.5" />
+                {cleaning ? "Cleaning…" : "Clean up empty"}
+              </button>
+            )}
+            <button
+              onClick={onClose}
+              className="h-8 w-8 rounded-[8px] border border-line flex items-center justify-center"
+            >
+              ✕
+            </button>
+          </div>
         </div>
         <div className="flex-1 overflow-y-auto">
           {loading ? (

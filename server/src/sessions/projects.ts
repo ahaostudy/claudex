@@ -116,4 +116,29 @@ export class ProjectStore {
   delete(id: string): void {
     this.db.prepare("DELETE FROM projects WHERE id = ?").run(id);
   }
+
+  /**
+   * Bulk-remove every project that has zero sessions. Returns the deleted
+   * rows in their pre-delete shape so the caller can report names back to
+   * the UI. Wrapped in a single transaction so concurrent session inserts
+   * either land before the cleanup (project survives) or after (project is
+   * gone, FK is gone with it) — never in between.
+   */
+  cleanupEmpty(): Project[] {
+    const fn = this.db.transaction((): Project[] => {
+      const rows = this.db
+        .prepare(
+          `SELECT p.* FROM projects p
+           WHERE NOT EXISTS (
+             SELECT 1 FROM sessions s WHERE s.project_id = p.id
+           )`,
+        )
+        .all() as ProjectRow[];
+      if (rows.length === 0) return [];
+      const stmt = this.db.prepare("DELETE FROM projects WHERE id = ?");
+      for (const row of rows) stmt.run(row.id);
+      return rows.map(toProject);
+    });
+    return fn();
+  }
 }

@@ -133,6 +133,16 @@ export const api = {
     return request<{ ok: true }>(`/api/projects/${id}`, { method: "DELETE" });
   },
   /**
+   * Bulk-remove every project with zero sessions. Returns the count and the
+   * names so the UI can toast a precise summary.
+   */
+  cleanupEmptyProjects() {
+    return request<{ removed: number; removedNames: string[] }>(
+      "/api/projects/cleanup-empty",
+      { method: "POST" },
+    );
+  },
+  /**
    * Flip the trust bit on a project. `POST /api/sessions` refuses to spawn
    * a session under a project with `trusted === false` and returns
    * `409 project_not_trusted`; the NewSessionSheet's "Trust this folder?"
