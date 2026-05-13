@@ -130,7 +130,11 @@ export interface UserRow {
   id: string;
   username: string;
   password_hash: string;
+  // Empty string when 2FA is disabled. `setTotpSecret` writes it; `verifyTotp`
+  // never sees this value because the route gates on `totp_enabled` first.
   totp_secret: string;
+  // SQLite has no native bool — stored as 0/1. Treat any non-zero as enabled.
+  totp_enabled: number;
   created_at: string;
 }
 
@@ -161,25 +165,33 @@ export class UserStore {
   create(input: {
     username: string;
     passwordHash: string;
+    // Empty string + totpEnabled=false means the account is created without
+    // 2FA. The DB column is NOT NULL so we can't store an actual NULL —
+    // the empty string never reaches `verifyTotp` because the login path
+    // checks `totp_enabled` before consulting the secret.
     totpSecret: string;
+    totpEnabled?: boolean;
   }): UserRow {
+    const totpEnabled = input.totpEnabled ?? (input.totpSecret.length > 0);
     const row: UserRow = {
       id: nanoid(16),
       username: input.username.toLowerCase(),
       password_hash: input.passwordHash,
       totp_secret: input.totpSecret,
+      totp_enabled: totpEnabled ? 1 : 0,
       created_at: new Date().toISOString(),
     };
     this.db
       .prepare(
-        `INSERT INTO users (id, username, password_hash, totp_secret, created_at)
-         VALUES (?, ?, ?, ?, ?)`,
+        `INSERT INTO users (id, username, password_hash, totp_secret, totp_enabled, created_at)
+         VALUES (?, ?, ?, ?, ?, ?)`,
       )
       .run(
         row.id,
         row.username,
         row.password_hash,
         row.totp_secret,
+        row.totp_enabled,
         row.created_at,
       );
     return row;
@@ -190,6 +202,29 @@ export class UserStore {
     this.db
       .prepare("UPDATE users SET password_hash = ? WHERE id = ?")
       .run(passwordHash, id);
+  }
+
+  /**
+   * Atomically swap the TOTP secret and the enabled flag. Used by both the
+   * "enable / rebind" confirm route (writes a fresh secret + flag=1) and the
+   * disable route (clears secret + flag=0). Done in a single statement so a
+   * crash mid-update can't leave a row with `totp_enabled=1` and a stale
+   * secret the user no longer has access to.
+   */
+  setTotpState(
+    id: string,
+    input: { secret: string; enabled: boolean },
+  ): void {
+    this.db
+      .prepare(
+        "UPDATE users SET totp_secret = ?, totp_enabled = ? WHERE id = ?",
+      )
+      .run(input.secret, input.enabled ? 1 : 0, id);
+  }
+
+  /** Wipe every recovery-code row for a user. Called on TOTP disable. */
+  clearRecoveryCodes(userId: string): void {
+    this.db.prepare("DELETE FROM recovery_codes WHERE user_id = ?").run(userId);
   }
 
   /**

@@ -1,13 +1,19 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import type Database from "better-sqlite3";
+import QRCode from "qrcode";
 import {
   ChangePasswordRequest,
   LoginRequest,
+  TotpConfirmRequest,
+  TotpDisableRequest,
   VerifyRecoveryCodeRequest,
   VerifyTotpRequest,
   type LoginResponse,
   type RecoveryCodesStateResponse,
   type RegenerateRecoveryCodesResponse,
+  type TotpBeginResponse,
+  type TotpConfirmResponse,
+  type TotpDisableResponse,
   type VerifyRecoveryCodeResponse,
   type VerifyTotpResponse,
   type WhoAmIResponse,
@@ -16,8 +22,10 @@ import {
   ACCESS_COOKIE_NAME,
   ChallengeStore,
   UserStore,
+  generateTotpSecret,
   hashPassword,
   signAccessToken,
+  totpUri,
   verifyAccessToken,
   verifyPassword,
   verifyTotp,
@@ -174,6 +182,28 @@ export async function registerAuthRoutes(
     // Legit credentials → drop any accumulated failures for this IP so a
     // user who fat-fingered a couple times doesn't get throttled on TOTP.
     loginLimiter.reset(ipKey);
+
+    // 2FA off → no second-factor round trip; sign the JWT immediately and tell
+    // the client to skip the TOTP step. Migration 28 added `totp_enabled`,
+    // defaulted to 1 for every pre-existing account, so this branch is only
+    // reachable for accounts created via `claudex init --skip-totp` or for
+    // accounts that explicitly disabled 2FA from Settings.
+    if (!row.totp_enabled) {
+      const token = await signAccessToken(deps.jwtSecret, row.id);
+      reply.setCookie(ACCESS_COOKIE_NAME, token, {
+        ...cookieOpts(req),
+        maxAge: 60 * 60 * 24 * 30,
+      });
+      deps.audit.append({
+        userId: row.id,
+        event: "login",
+        detail: "password only (2FA disabled)",
+        ...reqCtx(req),
+      });
+      const body: LoginResponse = { requireTotp: false, challengeId: null };
+      return reply.send(body);
+    }
+
     const challengeId = deps.challenges.create(row.id);
     const body: LoginResponse = { requireTotp: true, challengeId };
     return reply.send(body);
@@ -348,7 +378,7 @@ export async function registerAuthRoutes(
           id: row.id,
           username: row.username,
           createdAt: row.created_at,
-          twoFactorEnabled: true,
+          twoFactorEnabled: !!row.totp_enabled,
         },
       };
       return reply.send(body);
@@ -440,6 +470,145 @@ export async function registerAuthRoutes(
         ...reqCtx(req),
       });
       const body: RegenerateRecoveryCodesResponse = { codes, generatedAt };
+      return reply.send(body);
+    },
+  );
+
+  // TOTP setup / rebind. Two-step: `/begin` mints a fresh secret + URI but
+  // does NOT touch the DB; `/confirm` echoes that secret back along with a
+  // current 6-digit code (proving the user actually paired the new
+  // authenticator) plus a second proof of identity — `currentTotp` if 2FA
+  // is already on (proves they still control the OLD authenticator → can't
+  // be used by a thief who has the cookie but no device), or `password` if
+  // 2FA is off (no old authenticator to consult). The route refuses if both
+  // proofs are missing or both supplied.
+  app.post(
+    "/api/auth/totp/begin",
+    { preHandler: app.requireAuth as any },
+    async (req, reply) => {
+      const row = users.findById(req.userId!);
+      if (!row) return reply.code(401).send({ error: "user_gone" });
+      const secret = generateTotpSecret();
+      const uri = totpUri(secret, row.username);
+      // Render the otpauth URI as an inline SVG so the browser can embed it
+      // directly. `qrcode`'s SVG output strips the XML preamble when type=svg
+      // is used via the toString API — perfect for `dangerouslySetInnerHTML`.
+      const qrSvg = await QRCode.toString(uri, {
+        type: "svg",
+        margin: 1,
+        width: 240,
+        errorCorrectionLevel: "M",
+      });
+      const body: TotpBeginResponse = {
+        secret,
+        uri,
+        issuer: "claudex",
+        account: row.username,
+        qrSvg,
+      };
+      return reply.send(body);
+    },
+  );
+
+  app.post(
+    "/api/auth/totp/confirm",
+    { preHandler: app.requireAuth as any },
+    async (req, reply) => {
+      const parsed = TotpConfirmRequest.safeParse(req.body);
+      if (!parsed.success) {
+        return reply.code(400).send({ error: "bad_request" });
+      }
+      const { secret, code, currentTotp, password } = parsed.data;
+      const row = users.findById(req.userId!);
+      if (!row) return reply.code(401).send({ error: "user_gone" });
+
+      // Exactly one proof of identity beyond the session cookie.
+      const haveTotp = typeof currentTotp === "string";
+      const havePassword = typeof password === "string";
+      if (haveTotp === havePassword) {
+        return reply.code(400).send({ error: "bad_request" });
+      }
+      if (row.totp_enabled) {
+        // Rebinding an account that already has 2FA → must prove old device.
+        if (!haveTotp) {
+          return reply.code(400).send({ error: "current_totp_required" });
+        }
+        if (!verifyTotp(row.totp_secret, currentTotp!)) {
+          deps.audit.append({
+            userId: row.id,
+            event: "totp_rebind_failed",
+            detail: "current_totp_invalid",
+            ...reqCtx(req),
+          });
+          return reply.code(401).send({ error: "invalid_current_totp" });
+        }
+      } else {
+        // Enabling 2FA from off → no old TOTP exists, fall back to password.
+        if (!havePassword) {
+          return reply.code(400).send({ error: "password_required" });
+        }
+        const ok = await verifyPassword(password!, row.password_hash);
+        if (!ok) {
+          deps.audit.append({
+            userId: row.id,
+            event: "totp_enable_failed",
+            detail: "invalid_password",
+            ...reqCtx(req),
+          });
+          return reply.code(401).send({ error: "invalid_credentials" });
+        }
+      }
+
+      // The new pairing code must be valid for the secret the client is
+      // proposing — proves the user actually scanned the QR before clicking
+      // confirm, instead of submitting any old 6 digits.
+      if (!verifyTotp(secret, code)) {
+        return reply.code(401).send({ error: "invalid_totp" });
+      }
+
+      const wasEnabled = !!row.totp_enabled;
+      users.setTotpState(row.id, { secret, enabled: true });
+      deps.audit.append({
+        userId: row.id,
+        event: wasEnabled ? "totp_rebound" : "totp_enabled",
+        ...reqCtx(req),
+      });
+      const body: TotpConfirmResponse = { ok: true };
+      return reply.send(body);
+    },
+  );
+
+  app.post(
+    "/api/auth/totp/disable",
+    { preHandler: app.requireAuth as any },
+    async (req, reply) => {
+      const parsed = TotpDisableRequest.safeParse(req.body);
+      if (!parsed.success) {
+        return reply.code(400).send({ error: "bad_request" });
+      }
+      const row = users.findById(req.userId!);
+      if (!row) return reply.code(401).send({ error: "user_gone" });
+      const ok = await verifyPassword(parsed.data.password, row.password_hash);
+      if (!ok) {
+        deps.audit.append({
+          userId: row.id,
+          event: "totp_disable_failed",
+          detail: "invalid_password",
+          ...reqCtx(req),
+        });
+        return reply.code(401).send({ error: "invalid_credentials" });
+      }
+      // Wipe secret + recovery codes together. Once 2FA is off, recovery
+      // codes have nothing to recover; keeping them around would let an
+      // attacker who finds an old printout bypass a re-enabled 2FA later.
+      users.setTotpState(row.id, { secret: "", enabled: false });
+      users.clearRecoveryCodes(row.id);
+      deps.audit.append({
+        userId: row.id,
+        event: "totp_disabled",
+        ...reqCtx(req),
+      });
+      const body: TotpDisableResponse = { ok: true };
       return reply.send(body);
     },
   );

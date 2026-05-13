@@ -839,6 +839,19 @@ const MIGRATIONS: MigrationEntry[] = [
       void patched;
     },
   },
+  {
+    id: 28,
+    name: "users_totp_enabled",
+    // Make TOTP optional. Existing accounts all have a real `totp_secret`
+    // and were enrolled in 2FA, so default the flag to 1 — they keep working
+    // with no behavioral change. New accounts created via `claudex init
+    // --skip-totp` will set this to 0 and store an empty `totp_secret`; the
+    // login route reads this column to decide whether to issue a TOTP
+    // challenge or sign the JWT immediately.
+    up: `
+      ALTER TABLE users ADD COLUMN totp_enabled INTEGER NOT NULL DEFAULT 1;
+    `,
+  },
 ];
 
 export function openDb(config: Config, log: Logger): ClaudexDb {

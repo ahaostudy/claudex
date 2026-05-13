@@ -535,6 +535,66 @@ export const ChangePasswordRequest = z.object({
 });
 export type ChangePasswordRequest = z.infer<typeof ChangePasswordRequest>;
 
+// TOTP setup / rebind flow.
+//
+//   begin    →  server mints a fresh secret + otpauth URI (NOT persisted yet)
+//   confirm  →  client sends the secret back along with a current 6-digit
+//               code; server verifies the code against the proposed secret,
+//               then atomically swaps it in. If 2FA is currently enabled the
+//               caller must also include `currentTotp` (a code from the *old*
+//               authenticator); if 2FA is currently off the caller must
+//               include `password` instead — the two prove the same thing
+//               (this user controls the account right now), but the right
+//               proof depends on what's already configured.
+//   disable  →  flag off, secret cleared, recovery codes wiped. Always
+//               gated on the current password since "disabling 2FA"
+//               permanently lowers account security.
+//
+// `secret` is the base32 string from `begin` echoed back by the client. We
+// keep it on the wire instead of in server-side session state so that
+// reloading the Settings page mid-flow doesn't strand the user.
+export const TotpBeginResponse = z.object({
+  secret: z.string().min(16),
+  uri: z.string(),
+  issuer: z.string(),
+  account: z.string(),
+  // Server-rendered SVG of the otpauth URI. Inlined so the browser can render
+  // it via `dangerouslySetInnerHTML` without pulling in a QR library and
+  // without round-tripping data URIs through an `<img>` tag (the latter
+  // breaks under strict-CSP webviews).
+  qrSvg: z.string(),
+});
+export type TotpBeginResponse = z.infer<typeof TotpBeginResponse>;
+
+export const TotpConfirmRequest = z.object({
+  secret: z.string().min(16),
+  code: z.string().regex(/^\d{6}$/),
+  // Exactly one of these must be present. Validation deferred to the route
+  // because zod's discriminated unions add a wrapper field on the wire and
+  // we'd rather keep the JSON shape flat.
+  currentTotp: z
+    .string()
+    .regex(/^\d{6}$/)
+    .optional(),
+  password: z.string().min(1).optional(),
+});
+export type TotpConfirmRequest = z.infer<typeof TotpConfirmRequest>;
+
+export const TotpConfirmResponse = z.object({
+  ok: z.literal(true),
+});
+export type TotpConfirmResponse = z.infer<typeof TotpConfirmResponse>;
+
+export const TotpDisableRequest = z.object({
+  password: z.string().min(1),
+});
+export type TotpDisableRequest = z.infer<typeof TotpDisableRequest>;
+
+export const TotpDisableResponse = z.object({
+  ok: z.literal(true),
+});
+export type TotpDisableResponse = z.infer<typeof TotpDisableResponse>;
+
 // Read-only reflection of the user's Claude CLI environment: which plugins
 // are installed, which are flagged as enabled in `settings.json`. We don't
 // let the UI mutate any of this — the CLI owns those files, we just surface

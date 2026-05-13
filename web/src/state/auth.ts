@@ -39,6 +39,13 @@ export const useAuth = create<AuthState>((set, get) => ({
     set({ error: null });
     try {
       const res = await api.login({ username, password });
+      // 2FA off → server already issued the JWT cookie. Skip the TOTP step
+      // and resolve `user` immediately so Login.tsx redirects out.
+      if (!res.requireTotp) {
+        const me = await api.whoami();
+        set({ user: me.user, challengeId: null });
+        return;
+      }
       set({ challengeId: res.challengeId });
     } catch (err) {
       const code = err instanceof ApiError ? err.code : "unknown";

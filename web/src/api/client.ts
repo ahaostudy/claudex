@@ -21,6 +21,11 @@ import type {
   SessionEvent,
   SlashCommand,
   ToolGrant,
+  TotpBeginResponse,
+  TotpConfirmRequest,
+  TotpConfirmResponse,
+  TotpDisableRequest,
+  TotpDisableResponse,
   UpdateProjectRequest,
   UpdateQueuedPromptRequest,
   UpdateRoutineRequest,
@@ -395,6 +400,40 @@ export const api = {
       "/api/auth/recovery-codes/regenerate",
       { method: "POST" },
     );
+  },
+  /**
+   * Mint a fresh TOTP secret + otpauth URI for pairing a new authenticator.
+   * The secret is NOT persisted yet — the caller echoes it back via
+   * `confirmTotp` along with a current 6-digit code from the new pairing
+   * before it lands on the user row.
+   */
+  beginTotp() {
+    return request<TotpBeginResponse>("/api/auth/totp/begin", {
+      method: "POST",
+    });
+  },
+  /**
+   * Confirm a TOTP pairing started by `beginTotp`. The body must include
+   * the new `secret`, a current 6-digit `code` from it, and exactly one of
+   * `currentTotp` (if 2FA is currently on — proves the old device) or
+   * `password` (if 2FA is currently off — first-time enable).
+   */
+  confirmTotp(body: TotpConfirmRequest) {
+    return request<TotpConfirmResponse>("/api/auth/totp/confirm", {
+      method: "POST",
+      json: body,
+    });
+  },
+  /**
+   * Turn 2FA off. Wipes the stored secret and every recovery-code row.
+   * Always password-gated since "disable 2FA" is a permanent downgrade
+   * a stolen cookie should not be able to perform on its own.
+   */
+  disableTotp(body: TotpDisableRequest) {
+    return request<TotpDisableResponse>("/api/auth/totp/disable", {
+      method: "POST",
+      json: body,
+    });
   },
   getUserEnv() {
     return request<UserEnvResponse>("/api/user/env");

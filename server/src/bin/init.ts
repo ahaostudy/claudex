@@ -21,12 +21,18 @@ import {
 interface InitInputs {
   username: string;
   password: string;
+  // When true, skip TOTP enrollment entirely. The user row lands with
+  // `totp_enabled = 0` and an empty `totp_secret`, and login short-circuits
+  // straight to a session cookie after bcrypt. They can opt back in later
+  // from Settings → Security.
+  skipTotp: boolean;
 }
 
 /**
  * Collect credentials. Precedence:
- *   1. CLI flags: --username=... --password=...
- *   2. Env vars: CLAUDEX_INIT_USERNAME / CLAUDEX_INIT_PASSWORD
+ *   1. CLI flags: --username=... --password=... [--skip-totp]
+ *   2. Env vars: CLAUDEX_INIT_USERNAME / CLAUDEX_INIT_PASSWORD /
+ *      CLAUDEX_INIT_SKIP_TOTP
  *   3. Interactive prompts on stdin.
  *
  * Non-interactive paths exist so tests and automation don't have to juggle
@@ -38,10 +44,19 @@ async function collectInputs(): Promise<InitInputs> {
     const hit = argv.find((a) => a.startsWith(`--${name}=`));
     return hit?.slice(name.length + 3);
   };
+  const hasBareFlag = (name: string): boolean =>
+    argv.includes(`--${name}`);
   const username = flag("username") ?? process.env.CLAUDEX_INIT_USERNAME;
   const password = flag("password") ?? process.env.CLAUDEX_INIT_PASSWORD;
+  const skipTotpEnv = process.env.CLAUDEX_INIT_SKIP_TOTP;
+  const skipTotp =
+    hasBareFlag("skip-totp") ||
+    flag("skip-totp") === "1" ||
+    flag("skip-totp") === "true" ||
+    skipTotpEnv === "1" ||
+    skipTotpEnv === "true";
   if (username && password) {
-    return { username, password };
+    return { username, password, skipTotp };
   }
 
   if (!process.stdin.isTTY) {
@@ -69,7 +84,7 @@ async function collectInputs(): Promise<InitInputs> {
     if (p !== confirm) {
       throw new Error("passwords did not match");
     }
-    return { username: u, password: p };
+    return { username: u, password: p, skipTotp };
   } finally {
     rl.close();
   }
@@ -110,15 +125,40 @@ async function main() {
     process.exit(1);
   }
 
+  const passwordHash = await hashPassword(inputs.password);
+
+  if (inputs.skipTotp) {
+    // 2FA-off install: empty secret, flag=0. Recovery codes are not seeded
+    // either — they protect against a lost authenticator that this install
+    // doesn't have.
+    const user = users.create({
+      username: inputs.username,
+      passwordHash,
+      totpSecret: "",
+      totpEnabled: false,
+    });
+    output.write(`\n✓ Admin user "${inputs.username}" created (without 2FA).\n`);
+    output.write(`  State directory: ${config.stateDir}\n`);
+    output.write(`  DB: ${config.dbPath}\n`);
+    output.write(
+      `\n  Two-factor authentication is OFF. You can enable it later from\n` +
+        `  Settings → Security after logging in.\n`,
+    );
+    output.write(`\nNext: run \`pnpm dev\` and visit http://127.0.0.1:5173/.\n`);
+    void user;
+    close();
+    return;
+  }
+
   const totpSecret = generateTotpSecret();
   const uri = totpUri(totpSecret, inputs.username.toLowerCase());
   const qr = await QRCode.toString(uri, { type: "terminal", small: true });
 
-  const passwordHash = await hashPassword(inputs.password);
   const user = users.create({
     username: inputs.username,
     passwordHash,
     totpSecret,
+    totpEnabled: true,
   });
 
   output.write(`\nScan this QR code with your authenticator app:\n\n`);

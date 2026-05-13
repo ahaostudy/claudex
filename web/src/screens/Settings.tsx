@@ -403,6 +403,7 @@ function ProfileCard() {
 function AccountPanel() {
   const { user } = useAuth();
   const [showChange, setShowChange] = useState(false);
+  const twoFactorOn = !!user?.twoFactorEnabled;
   return (
     <>
       <Card>
@@ -414,9 +415,15 @@ function AccountPanel() {
         <Row
           label="Two-factor"
           value={
-            <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-[6px] border border-success/30 bg-success-wash text-[#1f5f21] text-[10px] font-medium uppercase tracking-[0.1em]">
-              enabled
-            </span>
+            twoFactorOn ? (
+              <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-[6px] border border-success/30 bg-success-wash text-[#1f5f21] text-[10px] font-medium uppercase tracking-[0.1em]">
+                enabled
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-[6px] border border-line bg-paper/60 text-ink-muted text-[10px] font-medium uppercase tracking-[0.1em]">
+                disabled
+              </span>
+            )
           }
         />
         <div className="px-4 py-3 border-t border-line bg-paper/40 flex items-center gap-2 flex-wrap">
@@ -594,62 +601,21 @@ function LabeledInput({
 // ----------------------------------------------------------------------------
 // Security — mockup lines 2119–2135 + 2163–2173 (audit log card).
 //
-// Shipped: enabled pill + Issuer + Audit log list (server-backed).
-// Omitted (and why):
-//   - Recovery codes tile  — we don't track "8 of 10 unused"
-//   - Last used tile       — we don't record TOTP usage timestamps
-//   - Regenerate codes btn — no rotation flow yet
-//   - Move to hardware key — no flow
-//   - Disable 2FA          — TOTP is mandatory
-//   - Paired browsers card — no per-JWT tracking
+// Two-factor card now drives enable / rebind / disable flows via the
+// `/api/auth/totp/*` routes; recovery codes only render when 2FA is on
+// (they have nothing to recover when it's off).
 // ----------------------------------------------------------------------------
 
 function SecurityPanel() {
   const [searchParams, setSearchParams] = useSearchParams();
   const fullLog = searchParams.get("audit") === "1";
+  const { user } = useAuth();
+  const twoFactorOn = !!user?.twoFactorEnabled;
   return (
     <div className="space-y-5">
-      <div className="rounded-[12px] border border-line bg-canvas overflow-hidden">
-        <div className="flex items-center gap-4 px-5 py-4 border-b border-line">
-          <div className="h-10 w-10 rounded-[10px] bg-klein-wash flex items-center justify-center text-klein-ink shrink-0">
-            <Shield className="w-5 h-5" />
-          </div>
-          <div className="min-w-0">
-            <div className="display text-[18px] leading-tight">
-              Two-factor authentication
-            </div>
-            <div className="text-[13px] text-ink-muted mt-0.5">
-              Required. Rotates every 30 seconds via an authenticator app.
-            </div>
-          </div>
-          <span className="ml-auto inline-flex items-center gap-1.5 px-2 py-0.5 rounded-[6px] border border-success/30 bg-success-wash text-[#1f5f21] text-[10px] font-medium uppercase tracking-[0.1em] shrink-0">
-            <span className="h-1.5 w-1.5 rounded-full bg-success" />
-            enabled
-          </span>
-        </div>
+      <TwoFactorCard />
 
-        <div className="grid grid-cols-3 divide-x divide-line text-[13px]">
-          <div className="px-5 py-4">
-            <div className="caps text-ink-muted">Issuer</div>
-            <div className="mt-1 mono">claudex</div>
-          </div>
-          <div className="px-5 py-4">
-            <div className="caps text-ink-muted">Recovery codes</div>
-            <div className="mt-1 text-ink-muted">—</div>
-          </div>
-          <div className="px-5 py-4">
-            <div className="caps text-ink-muted">Last used</div>
-            <div className="mt-1 text-ink-muted">—</div>
-          </div>
-        </div>
-
-        <div className="px-5 py-3 border-t border-line bg-paper/40 text-[12.5px] text-ink-muted">
-          Disable-2FA, paired browsers, and "last used" tracking are planned.
-          Rotate via <span className="mono">pnpm reset-credentials</span> for now.
-        </div>
-      </div>
-
-      <RecoveryCodesCard />
+      {twoFactorOn && <RecoveryCodesCard />}
 
       <GrantedToolsCard />
 
@@ -668,6 +634,427 @@ function SecurityPanel() {
           setSearchParams(next, { replace: true });
         }}
       />
+    </div>
+  );
+}
+
+// Two-factor card. State machine:
+//   off   → "Enable" button → TwoFactorEnrollModal (password gate)
+//   on    → "Rebind" button → TwoFactorEnrollModal (current TOTP gate)
+//          + "Disable" button → TwoFactorDisableModal (password gate)
+// `whoami` drives the on/off pill so the card reflects whichever state the
+// server is in immediately after a successful confirm/disable.
+function TwoFactorCard() {
+  const { user, checkSession } = useAuth();
+  const enabled = !!user?.twoFactorEnabled;
+  const [enrollOpen, setEnrollOpen] = useState(false);
+  const [disableOpen, setDisableOpen] = useState(false);
+
+  return (
+    <div className="rounded-[12px] border border-line bg-canvas overflow-hidden">
+      <div className="flex items-center gap-4 px-5 py-4 border-b border-line">
+        <div className="h-10 w-10 rounded-[10px] bg-klein-wash flex items-center justify-center text-klein-ink shrink-0">
+          <Shield className="w-5 h-5" />
+        </div>
+        <div className="min-w-0">
+          <div className="display text-[18px] leading-tight">
+            Two-factor authentication
+          </div>
+          <div className="text-[13px] text-ink-muted mt-0.5">
+            {enabled
+              ? "Required at every sign-in. Rotates every 30 seconds."
+              : "Disabled. Sign-in only requires your password."}
+          </div>
+        </div>
+        {enabled ? (
+          <span className="ml-auto inline-flex items-center gap-1.5 px-2 py-0.5 rounded-[6px] border border-success/30 bg-success-wash text-[#1f5f21] text-[10px] font-medium uppercase tracking-[0.1em] shrink-0">
+            <span className="h-1.5 w-1.5 rounded-full bg-success" />
+            enabled
+          </span>
+        ) : (
+          <span className="ml-auto inline-flex items-center gap-1.5 px-2 py-0.5 rounded-[6px] border border-line bg-paper/60 text-ink-muted text-[10px] font-medium uppercase tracking-[0.1em] shrink-0">
+            disabled
+          </span>
+        )}
+      </div>
+
+      <div className="px-5 py-4 text-[13px] text-ink-soft">
+        {enabled ? (
+          <div>
+            Your account requires a 6-digit code from an authenticator app at
+            sign-in. You can rebind to a new device, or turn 2FA off entirely.
+          </div>
+        ) : (
+          <div>
+            Sign-in is currently single-factor. Enable 2FA to require a rotating
+            code from an authenticator app (Google Authenticator, 1Password,
+            Authy, etc.) on every login.
+          </div>
+        )}
+      </div>
+
+      <div className="px-5 py-3 border-t border-line bg-paper/40 flex items-center gap-2 flex-wrap">
+        {enabled ? (
+          <>
+            <button
+              onClick={() => setEnrollOpen(true)}
+              className="h-9 px-3 rounded-[8px] border border-line bg-canvas text-[13px] inline-flex items-center gap-1.5"
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+              Rebind authenticator
+            </button>
+            <button
+              onClick={() => setDisableOpen(true)}
+              className="h-9 px-3 rounded-[8px] border border-danger/40 bg-canvas text-danger text-[13px] inline-flex items-center gap-1.5"
+            >
+              Disable 2FA
+            </button>
+          </>
+        ) : (
+          <button
+            onClick={() => setEnrollOpen(true)}
+            className="h-9 px-3 rounded-[8px] bg-ink text-canvas text-[13px] font-medium inline-flex items-center gap-1.5"
+          >
+            <Shield className="w-3.5 h-3.5" />
+            Enable 2FA
+          </button>
+        )}
+        <span className="text-[11.5px] text-ink-muted ml-1">
+          {enabled
+            ? "Rebinding asks for a code from your current device."
+            : "Enabling asks for your current password."}
+        </span>
+      </div>
+
+      {enrollOpen && (
+        <TwoFactorEnrollModal
+          alreadyEnabled={enabled}
+          onClose={() => setEnrollOpen(false)}
+          onSuccess={async () => {
+            setEnrollOpen(false);
+            await checkSession();
+          }}
+        />
+      )}
+      {disableOpen && (
+        <TwoFactorDisableModal
+          onClose={() => setDisableOpen(false)}
+          onSuccess={async () => {
+            setDisableOpen(false);
+            await checkSession();
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+// Two-step enrollment: server mints a candidate `secret + qrSvg` on open, the
+// user pairs the new authenticator, then confirms with a current 6-digit code
+// against that secret PLUS one of:
+//   - `currentTotp`  if 2FA is already on (proves they still control the
+//                    authenticator they're replacing — stops a thief who has
+//                    only the cookie from rebinding to their own device)
+//   - `password`     if 2FA is currently off (no old authenticator to consult)
+//
+// The candidate secret is held in component state and never persisted until
+// confirm — closing the modal early throws it away.
+function TwoFactorEnrollModal({
+  alreadyEnabled,
+  onClose,
+  onSuccess,
+}: {
+  alreadyEnabled: boolean;
+  onClose: () => void;
+  onSuccess: () => void | Promise<void>;
+}) {
+  useFocusReturn();
+  const [pairing, setPairing] = useState<{
+    secret: string;
+    uri: string;
+    qrSvg: string;
+  } | null>(null);
+  const [code, setCode] = useState("");
+  const [proof, setProof] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [secretCopied, setSecretCopied] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await api.beginTotp();
+        if (cancelled) return;
+        setPairing({ secret: res.secret, uri: res.uri, qrSvg: res.qrSvg });
+      } catch (e) {
+        if (cancelled) return;
+        setErr(e instanceof ApiError ? e.code : "load_failed");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  async function copySecret() {
+    if (!pairing) return;
+    const ok = await copyText(pairing.secret);
+    if (ok) {
+      setSecretCopied(true);
+      window.setTimeout(() => setSecretCopied(false), 1500);
+    }
+  }
+
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    if (!pairing) return;
+    if (!/^\d{6}$/.test(code)) {
+      setErr("Enter the 6-digit code from your authenticator.");
+      return;
+    }
+    if (!proof.trim()) {
+      setErr(
+        alreadyEnabled
+          ? "Enter a current code from your existing authenticator."
+          : "Enter your current password.",
+      );
+      return;
+    }
+    setBusy(true);
+    setErr(null);
+    try {
+      await api.confirmTotp({
+        secret: pairing.secret,
+        code,
+        ...(alreadyEnabled
+          ? { currentTotp: proof.trim() }
+          : { password: proof }),
+      });
+      await onSuccess();
+    } catch (e) {
+      if (e instanceof ApiError) {
+        if (e.code === "invalid_totp") {
+          setErr("Pairing code is incorrect — try the latest one.");
+        } else if (e.code === "invalid_current_totp") {
+          setErr("Current authenticator code is incorrect.");
+        } else if (e.code === "invalid_credentials") {
+          setErr("Current password is incorrect.");
+        } else if (e.code === "current_totp_required") {
+          setErr("A code from your existing authenticator is required.");
+        } else if (e.code === "password_required") {
+          setErr("Your current password is required.");
+        } else {
+          setErr(e.code);
+        }
+      } else {
+        setErr("confirm_failed");
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-30 bg-ink/30 flex items-end sm:items-center justify-center">
+      <form
+        onSubmit={submit}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="twofactor-enroll-title"
+        className="w-full max-w-md bg-canvas border-t sm:border border-line rounded-t-[20px] sm:rounded-[14px] shadow-lift p-5 max-h-[90vh] overflow-y-auto"
+      >
+        <div className="flex items-center mb-4">
+          <div>
+            <div className="caps text-ink-muted">Security</div>
+            <h2
+              id="twofactor-enroll-title"
+              className="display text-[20px] md:text-[22px] leading-tight mt-0.5"
+            >
+              {alreadyEnabled ? "Rebind authenticator" : "Enable two-factor auth"}
+            </h2>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="ml-auto h-8 w-8 rounded-[8px] border border-line flex items-center justify-center"
+            aria-label="Close"
+          >
+            ✕
+          </button>
+        </div>
+
+        {pairing === null ? (
+          <div className="text-[13px] text-ink-muted">Generating QR code…</div>
+        ) : (
+          <div className="space-y-4">
+            <div className="text-[13px] text-ink-soft">
+              Scan this QR code with your authenticator app, then enter the
+              current 6-digit code below to confirm pairing.
+            </div>
+            <div className="flex items-center justify-center bg-paper/40 border border-line rounded-[12px] p-3">
+              <div
+                className="w-[220px] h-[220px] [&_svg]:w-full [&_svg]:h-full bg-canvas"
+                // Inline SVG from /api/auth/totp/begin — server-rendered, no
+                // external resources, safe under strict-CSP webviews.
+                dangerouslySetInnerHTML={{ __html: pairing.qrSvg }}
+              />
+            </div>
+            <div className="text-[12.5px] text-ink-muted">
+              Or enter this secret manually:
+            </div>
+            <button
+              type="button"
+              onClick={copySecret}
+              className="w-full mono text-[13px] rounded-[8px] border border-line bg-paper/40 px-3 py-2 inline-flex items-center gap-2"
+            >
+              <span className="break-all text-left flex-1">{pairing.secret}</span>
+              <Copy className="w-3.5 h-3.5 shrink-0 text-ink-muted" />
+              {secretCopied && (
+                <span className="text-[11px] text-success">Copied</span>
+              )}
+            </button>
+
+            <LabeledInput
+              label="Pairing code (from new authenticator)"
+              value={code}
+              onChange={(v) => setCode(v.replace(/\D/g, "").slice(0, 6))}
+              autoFocus
+            />
+            <LabeledInput
+              label={
+                alreadyEnabled
+                  ? "Code from your CURRENT authenticator"
+                  : "Current password"
+              }
+              type={alreadyEnabled ? "text" : "password"}
+              value={proof}
+              onChange={(v) =>
+                setProof(alreadyEnabled ? v.replace(/\D/g, "").slice(0, 6) : v)
+              }
+            />
+            {err && (
+              <div className="text-[13px] text-danger bg-danger-wash rounded-[8px] px-3 py-2 border border-danger/30">
+                {err}
+              </div>
+            )}
+            {!alreadyEnabled && (
+              <div className="text-[12.5px] text-ink-muted">
+                After enabling, generate a fresh batch of recovery codes from
+                the Recovery codes card so you have a fallback if you lose your
+                authenticator.
+              </div>
+            )}
+            <button
+              type="submit"
+              disabled={busy}
+              className="w-full h-10 rounded-[8px] bg-ink text-canvas text-[14px] font-medium disabled:opacity-50"
+            >
+              {busy
+                ? "Confirming…"
+                : alreadyEnabled
+                  ? "Confirm new device"
+                  : "Enable 2FA"}
+            </button>
+          </div>
+        )}
+      </form>
+    </div>
+  );
+}
+
+function TwoFactorDisableModal({
+  onClose,
+  onSuccess,
+}: {
+  onClose: () => void;
+  onSuccess: () => void | Promise<void>;
+}) {
+  useFocusReturn();
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    if (!password) {
+      setErr("Enter your current password.");
+      return;
+    }
+    setBusy(true);
+    setErr(null);
+    try {
+      await api.disableTotp({ password });
+      await onSuccess();
+    } catch (e) {
+      if (e instanceof ApiError) {
+        if (e.code === "invalid_credentials") {
+          setErr("Current password is incorrect.");
+        } else {
+          setErr(e.code);
+        }
+      } else {
+        setErr("disable_failed");
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-30 bg-ink/30 flex items-end sm:items-center justify-center">
+      <form
+        onSubmit={submit}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="twofactor-disable-title"
+        className="w-full max-w-md bg-canvas border-t sm:border border-line rounded-t-[20px] sm:rounded-[14px] shadow-lift p-5"
+      >
+        <div className="flex items-center mb-4">
+          <div>
+            <div className="caps text-ink-muted">Security</div>
+            <h2
+              id="twofactor-disable-title"
+              className="display text-[20px] md:text-[22px] leading-tight mt-0.5"
+            >
+              Disable two-factor auth
+            </h2>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="ml-auto h-8 w-8 rounded-[8px] border border-line flex items-center justify-center"
+            aria-label="Close"
+          >
+            ✕
+          </button>
+        </div>
+        <div className="text-[13px] text-ink-muted mb-3">
+          Sign-in will only require your password. All current recovery codes
+          will be invalidated. You can re-enable 2FA later from this page.
+        </div>
+        <div className="space-y-3">
+          <LabeledInput
+            label="Current password"
+            type="password"
+            value={password}
+            onChange={setPassword}
+            autoFocus
+          />
+          {err && (
+            <div className="text-[13px] text-danger bg-danger-wash rounded-[8px] px-3 py-2 border border-danger/30">
+              {err}
+            </div>
+          )}
+          <button
+            type="submit"
+            disabled={busy}
+            className="w-full h-10 rounded-[8px] border border-danger/40 bg-canvas text-danger text-[14px] font-medium disabled:opacity-50"
+          >
+            {busy ? "Disabling…" : "Disable 2FA"}
+          </button>
+        </div>
+      </form>
     </div>
   );
 }
