@@ -2087,12 +2087,14 @@ export type SupportedLanguage = (typeof SUPPORTED_LANGUAGES)[number];
  * the context-percentage ring; omit for proxies that don't expose this.
  * `baseUrl` (optional) sets `ANTHROPIC_BASE_URL` for this model so the
  * CLI routes API requests through the user's proxy (OneAPI, New API, etc.).
+ * `apiKey` (optional) sets `ANTHROPIC_API_KEY` for this model.
  */
 export const CustomModel = z.object({
   id: z.string().min(1),
   label: z.string().min(1),
   contextWindow: z.number().int().positive().optional(),
   baseUrl: z.string().optional(),
+  apiKey: z.string().optional(),
 });
 export type CustomModel = z.infer<typeof CustomModel>;
 

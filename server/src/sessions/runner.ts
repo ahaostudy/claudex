@@ -58,6 +58,12 @@ export interface RunnerInitOptions {
    * `baseUrl` field.
    */
   baseUrl?: string;
+  /**
+   * Optional API key override (ANTHROPIC_API_KEY). When set, the runner
+   * passes it as an env var to the Claude Code subprocess. Sourced from the
+   * custom model's `apiKey` field.
+   */
+  apiKey?: string;
   // Optional pino-shaped logger for diagnostic breadcrumbs (e.g. raw SDK
   // usage on every turn_end). When absent the runner stays silent — tests
   // don't need to thread a logger through.

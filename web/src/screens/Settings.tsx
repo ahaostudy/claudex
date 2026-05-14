@@ -2745,11 +2745,12 @@ function ModelsPanel() {
     contextWindow: string;
     ctxUnit: CtxUnit;
     baseUrl: string;
-  }>({ id: "", label: "", contextWindow: "", ctxUnit: "k", baseUrl: "" });
+    apiKey: string;
+  }>({ id: "", label: "", contextWindow: "", ctxUnit: "k", baseUrl: "", apiKey: "" });
   const [err, setErr] = useState<string | null>(null);
 
   function startAdd() {
-    setDraft({ id: "", label: "", contextWindow: "", ctxUnit: "k", baseUrl: "" });
+    setDraft({ id: "", label: "", contextWindow: "", ctxUnit: "k", baseUrl: "", apiKey: "" });
     setErr(null);
     setAdding(true);
     setEditId(null);
@@ -2765,6 +2766,7 @@ function ModelsPanel() {
       contextWindow: d.value,
       ctxUnit: d.unit,
       baseUrl: m.baseUrl ?? "",
+      apiKey: m.apiKey ?? "",
     });
     setErr(null);
     setEditId(m.id);
@@ -2806,6 +2808,7 @@ function ModelsPanel() {
       label,
       ...(ctxTokens ? { contextWindow: ctxTokens } : {}),
       ...(draft.baseUrl.trim() ? { baseUrl: draft.baseUrl.trim() } : {}),
+      ...(draft.apiKey.trim() ? { apiKey: draft.apiKey.trim() } : {}),
     };
     const next = editId
       ? others.concat(entry)
@@ -2966,10 +2969,20 @@ function ModelsPanel() {
               <input
                 value={draft.baseUrl}
                 onChange={(e) => setDraft({ ...draft, baseUrl: e.target.value })}
-                placeholder="e.g. https://api.openai.com/v1"
+                placeholder="e.g. https://api.anthropic.com"
                 className="w-full h-9 px-3 bg-canvas border border-line rounded-[6px] text-[13px] font-mono"
               />
               <div className="text-[11px] text-ink-muted mt-1">Overrides ANTHROPIC_BASE_URL for this model. Leave blank to use the default.</div>
+            </div>
+            <div>
+              <label className="text-[12px] uppercase tracking-[0.14em] text-ink-muted mb-1 block">API Key (optional)</label>
+              <input
+                value={draft.apiKey}
+                onChange={(e) => setDraft({ ...draft, apiKey: e.target.value })}
+                placeholder="sk-ant-..."
+                className="w-full h-9 px-3 bg-canvas border border-line rounded-[6px] text-[13px] font-mono"
+              />
+              <div className="text-[11px] text-ink-muted mt-1">Overrides ANTHROPIC_API_KEY for this model. Leave blank to use the default.</div>
             </div>
             {err && <div className="text-[12px] text-danger">{err}</div>}
             <div className="flex gap-2">

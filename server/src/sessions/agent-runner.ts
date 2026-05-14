@@ -142,6 +142,9 @@ export class AgentRunner implements Runner {
         ...(this.opts.baseUrl
           ? { ANTHROPIC_BASE_URL: this.opts.baseUrl }
           : {}),
+        ...(this.opts.apiKey
+          ? { ANTHROPIC_API_KEY: this.opts.apiKey }
+          : {}),
       } as Record<string, string>,
       resume: this.opts.resumeSdkSessionId,
       ...(systemPromptOption ? { systemPrompt: systemPromptOption } : {}),

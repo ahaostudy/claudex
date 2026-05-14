@@ -595,6 +595,9 @@ export class SessionManager {
       baseUrl: this.deps.appSettings
         ?.get()
         .customModels?.find((m) => m.id === session.model)?.baseUrl,
+      apiKey: this.deps.appSettings
+        ?.get()
+        .customModels?.find((m) => m.id === session.model)?.apiKey,
       logger: this.deps.logger,
     };
     const runner = this.deps.runnerFactory.create(opts);
