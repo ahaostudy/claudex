@@ -590,6 +590,11 @@ export class SessionManager {
       // live SDK handle is not supported, so UI changes only affect
       // future/resumed sessions. Missing store (tests) → no override.
       language: this.deps.appSettings?.get().language ?? null,
+      // If the session's model matches a custom model with a baseUrl, pass
+      // it through so the runner sets ANTHROPIC_BASE_URL for the CLI.
+      baseUrl: this.deps.appSettings
+        ?.get()
+        .customModels?.find((m) => m.id === session.model)?.baseUrl,
       logger: this.deps.logger,
     };
     const runner = this.deps.runnerFactory.create(opts);

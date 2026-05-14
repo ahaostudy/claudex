@@ -137,7 +137,12 @@ export class AgentRunner implements Runner {
       permissionMode: mapPermissionMode(this.permissionMode),
       model: this.currentModel,
       // MUST merge — SDK replaces process.env otherwise.
-      env: { ...process.env } as Record<string, string>,
+      env: {
+        ...process.env,
+        ...(this.opts.baseUrl
+          ? { ANTHROPIC_BASE_URL: this.opts.baseUrl }
+          : {}),
+      } as Record<string, string>,
       resume: this.opts.resumeSdkSessionId,
       ...(systemPromptOption ? { systemPrompt: systemPromptOption } : {}),
       // Per-session thinking-effort level. The SDK maps this onto its

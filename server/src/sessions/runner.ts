@@ -51,6 +51,13 @@ export interface RunnerInitOptions {
    * made after a session starts only affect *future* sessions.
    */
   language?: string | null;
+  /**
+   * Optional API base URL override (ANTHROPIC_BASE_URL). When set, the runner
+   * passes it as an env var to the Claude Code subprocess so that API requests
+   * are routed through the user's proxy. Sourced from the custom model's
+   * `baseUrl` field.
+   */
+  baseUrl?: string;
   // Optional pino-shaped logger for diagnostic breadcrumbs (e.g. raw SDK
   // usage on every turn_end). When absent the runner stays silent — tests
   // don't need to thread a logger through.

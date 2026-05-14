@@ -2744,11 +2744,12 @@ function ModelsPanel() {
     label: string;
     contextWindow: string;
     ctxUnit: CtxUnit;
-  }>({ id: "", label: "", contextWindow: "", ctxUnit: "k" });
+    baseUrl: string;
+  }>({ id: "", label: "", contextWindow: "", ctxUnit: "k", baseUrl: "" });
   const [err, setErr] = useState<string | null>(null);
 
   function startAdd() {
-    setDraft({ id: "", label: "", contextWindow: "", ctxUnit: "k" });
+    setDraft({ id: "", label: "", contextWindow: "", ctxUnit: "k", baseUrl: "" });
     setErr(null);
     setAdding(true);
     setEditId(null);
@@ -2763,6 +2764,7 @@ function ModelsPanel() {
       label: m.label,
       contextWindow: d.value,
       ctxUnit: d.unit,
+      baseUrl: m.baseUrl ?? "",
     });
     setErr(null);
     setEditId(m.id);
@@ -2803,6 +2805,7 @@ function ModelsPanel() {
       id,
       label,
       ...(ctxTokens ? { contextWindow: ctxTokens } : {}),
+      ...(draft.baseUrl.trim() ? { baseUrl: draft.baseUrl.trim() } : {}),
     };
     const next = editId
       ? others.concat(entry)
@@ -2867,7 +2870,7 @@ function ModelsPanel() {
                 <div className="min-w-0">
                   <div className="text-[14px] font-medium">{m.label}</div>
                   <div className="text-[12px] text-ink-muted font-mono truncate">
-                    {m.id}{m.contextWindow ? ` · ${(m.contextWindow / 1000).toLocaleString()}k tokens` : ""}
+                    {m.id}{m.contextWindow ? ` · ${(m.contextWindow / 1000).toLocaleString()}k tokens` : ""}{m.baseUrl ? ` · ${m.baseUrl}` : ""}
                   </div>
                 </div>
                 <div className="flex items-center gap-1 shrink-0 ml-2">
@@ -2957,6 +2960,16 @@ function ModelsPanel() {
                 />
               </div>
               <div className="text-[11px] text-ink-muted mt-1">Used for the context-percentage ring. Leave blank for the 1M default.</div>
+            </div>
+            <div>
+              <label className="text-[12px] uppercase tracking-[0.14em] text-ink-muted mb-1 block">API Base URL (optional)</label>
+              <input
+                value={draft.baseUrl}
+                onChange={(e) => setDraft({ ...draft, baseUrl: e.target.value })}
+                placeholder="e.g. https://api.openai.com/v1"
+                className="w-full h-9 px-3 bg-canvas border border-line rounded-[6px] text-[13px] font-mono"
+              />
+              <div className="text-[11px] text-ink-muted mt-1">Overrides ANTHROPIC_BASE_URL for this model. Leave blank to use the default.</div>
             </div>
             {err && <div className="text-[12px] text-danger">{err}</div>}
             <div className="flex gap-2">

@@ -2085,11 +2085,14 @@ export type SupportedLanguage = (typeof SUPPORTED_LANGUAGES)[number];
  * `label` is the human-readable display name shown in the UI.
  * `contextWindow` (optional) overrides the default 1M fallback used by
  * the context-percentage ring; omit for proxies that don't expose this.
+ * `baseUrl` (optional) sets `ANTHROPIC_BASE_URL` for this model so the
+ * CLI routes API requests through the user's proxy (OneAPI, New API, etc.).
  */
 export const CustomModel = z.object({
   id: z.string().min(1),
   label: z.string().min(1),
   contextWindow: z.number().int().positive().optional(),
+  baseUrl: z.string().optional(),
 });
 export type CustomModel = z.infer<typeof CustomModel>;
 
