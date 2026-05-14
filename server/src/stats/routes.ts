@@ -105,26 +105,23 @@ export async function registerStatsRoutes(
 
         // 3) Turn + token aggregates. `json_extract` (SQLite's json1, bundled
         //    with better-sqlite3) pulls the four usage fields out of each
-        //    turn_end payload; COALESCE(..., 0) handles both missing keys and
-        //    older rows that predate cacheRead/cacheCreation. Each field is
-        //    summed independently so one missing key doesn't poison the rest.
-        //
-        //    Query quoted in the report:
-        //      SELECT COUNT(*) AS totalTurns,
-        //             COALESCE(SUM(COALESCE(json_extract(payload,'$.usage.inputTokens'),0)
-        //                       + COALESCE(json_extract(payload,'$.usage.outputTokens'),0)
-        //                       + COALESCE(json_extract(payload,'$.usage.cacheReadInputTokens'),0)
-        //                       + COALESCE(json_extract(payload,'$.usage.cacheCreationInputTokens'),0)), 0) AS totalTokens
-        //      FROM session_events WHERE kind = 'turn_end';
+        //    turn_end payload. Each field uses
+        //    `COALESCE(json_extract(...,'$.billingUsage.X'),
+        //              json_extract(...,'$.usage.X'), 0)`
+        //    so live rows from the per-call fix onward sum the cumulative
+        //    `billingUsage` (true billable breakdown across SDK sub-calls),
+        //    while CLI imports / pre-fix live rows fall back to per-call
+        //    `usage` and keep their existing summed semantics. One missing
+        //    field doesn't poison the rest.
         const turnAgg = deps.db
           .prepare(
             `SELECT
                COUNT(*) AS totalTurns,
                COALESCE(SUM(
-                 COALESCE(json_extract(payload, '$.usage.inputTokens'), 0)
-                 + COALESCE(json_extract(payload, '$.usage.outputTokens'), 0)
-                 + COALESCE(json_extract(payload, '$.usage.cacheReadInputTokens'), 0)
-                 + COALESCE(json_extract(payload, '$.usage.cacheCreationInputTokens'), 0)
+                 COALESCE(json_extract(payload, '$.billingUsage.inputTokens'), json_extract(payload, '$.usage.inputTokens'), 0)
+                 + COALESCE(json_extract(payload, '$.billingUsage.outputTokens'), json_extract(payload, '$.usage.outputTokens'), 0)
+                 + COALESCE(json_extract(payload, '$.billingUsage.cacheReadInputTokens'), json_extract(payload, '$.usage.cacheReadInputTokens'), 0)
+                 + COALESCE(json_extract(payload, '$.billingUsage.cacheCreationInputTokens'), json_extract(payload, '$.usage.cacheCreationInputTokens'), 0)
                ), 0) AS totalTokens
              FROM session_events
              WHERE kind = 'turn_end'`,

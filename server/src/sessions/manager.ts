@@ -940,12 +940,23 @@ export class SessionManager {
             payload: {
               stopReason: event.stopReason,
               usage: event.usage ?? null,
+              ...(event.billingUsage !== undefined
+                ? { billingUsage: event.billingUsage }
+                : {}),
             },
           });
           // Compute context-window fill % for the session list ring.
           // Skip when usage is missing or below the historical threshold
           // (e.g. cache fields absent) — leaving stats_context_pct at its
           // previous value rather than stamping a misleading ~0%.
+          //
+          // We deliberately use `event.usage` (per-call) here, NOT
+          // `event.billingUsage` (cumulative). The ring answers "how full
+          // is the context window right now"; the cumulative number sums
+          // every sub-call's cache-read across a multi-tool-use turn and
+          // pushes the ring well past 100% on long turns. See
+          // `shared/src/usage.ts` and `RunnerEvent.turn_end` for the
+          // semantics.
           const u = event.usage;
           let contextPct: number | undefined;
           if (u) {

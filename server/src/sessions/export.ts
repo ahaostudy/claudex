@@ -125,9 +125,18 @@ function renderEvent(ev: SessionEvent): string | null {
       return `> ${mark} Permission ${decision}`;
     }
     case "turn_end": {
-      const usage = (p as Record<string, unknown>).usage as
+      // Prefer `billingUsage` (cumulative across SDK sub-calls) over the
+      // per-call `usage` snapshot — the export is a billing-style record
+      // of what the turn cost. CLI imports / pre-fix live rows only have
+      // `usage`, so the fallback preserves their behavior.
+      const billing = (p as Record<string, unknown>).billingUsage as
         | Record<string, unknown>
         | undefined;
+      const perCall = (p as Record<string, unknown>).usage as
+        | Record<string, unknown>
+        | undefined;
+      const usage =
+        billing && typeof billing === "object" ? billing : perCall;
       if (!usage || typeof usage !== "object") {
         return "---";
       }

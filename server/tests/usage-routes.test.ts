@@ -65,6 +65,12 @@ function seedTurnEnd(
     cacheCreationInputTokens?: number;
   },
   createdAt: string,
+  billingUsage?: {
+    inputTokens?: number;
+    outputTokens?: number;
+    cacheReadInputTokens?: number;
+    cacheCreationInputTokens?: number;
+  },
 ): void {
   // Match SessionStore.appendEvent shape. We bypass the store here because we
   // need a specific `created_at` timestamp and `seq` isn't load-bearing for
@@ -79,7 +85,7 @@ function seedTurnEnd(
       sessionId,
       0,
       createdAt,
-      JSON.stringify({ usage }),
+      JSON.stringify(billingUsage ? { usage, billingUsage } : { usage }),
     );
 }
 
@@ -235,6 +241,36 @@ describe("usage routes", () => {
       const body = res.json() as UsageTodayResponse;
       expect(body.totalTokens).toBe(42);
       expect(body.sessionCount).toBe(1);
+    });
+
+    it("totalTokens prefers billingUsage (cumulative) over usage when both present", async () => {
+      // Live runner from the per-call fix onward writes both. The aggregator
+      // must read the cumulative `billingUsage` so multi-tool-use turns'
+      // billable cache reads sum correctly. Falling back to per-call would
+      // collapse the number to the final sub-call's usage and undercount.
+      const ctx = await bootstrap();
+      disposers.push(ctx.cleanup);
+      const projectId = await createProject(ctx, "billing-priority");
+      const s1 = await createSession(ctx, projectId);
+      const now = new Date().toISOString();
+
+      seedTurnEnd(
+        ctx,
+        s1,
+        { inputTokens: 10, outputTokens: 30, cacheReadInputTokens: 150 },
+        now,
+        { inputTokens: 15, outputTokens: 50, cacheReadInputTokens: 250 },
+      );
+
+      const res = await ctx.app.inject({
+        method: "GET",
+        url: "/api/usage/today",
+        headers: { cookie: ctx.cookie },
+      });
+      expect(res.statusCode).toBe(200);
+      const body = res.json() as UsageTodayResponse;
+      // billingUsage sum = 15 + 50 + 250 = 315
+      expect(body.totalTokens).toBe(315);
     });
   });
 

@@ -140,6 +140,59 @@ describe("GET /api/sessions/:id/export", () => {
     );
   });
 
+  it("md export prefers billingUsage (cumulative) over usage when both present", async () => {
+    // Live runner from the per-call fix onward writes both `usage`
+    // (per-call snapshot — drives the ring) and `billingUsage`
+    // (cumulative `result.usage` — the true billable breakdown).
+    // The export is a billing-style record, so the markdown line must
+    // render the cumulative numbers, not the per-call ones.
+    const ctx = await bootstrapAuthedApp();
+    disposers.push(ctx.cleanup);
+    const projects = new ProjectStore(ctx.dbh.db);
+    const sessions = new SessionStore(ctx.dbh.db);
+    const project = projects.create({
+      name: "proj-billing",
+      path: ctx.tmpDir,
+      trusted: true,
+    });
+    const session = sessions.create({
+      id: "sess-export-billing",
+      title: "Billing session",
+      projectId: project.id,
+      model: "claude-opus-4-7",
+      mode: "default",
+    });
+    sessions.appendEvent({
+      sessionId: session.id,
+      kind: "turn_end",
+      payload: {
+        stopReason: "success",
+        usage: {
+          inputTokens: 10,
+          outputTokens: 30,
+          cacheReadInputTokens: 150,
+          cacheCreationInputTokens: 0,
+        },
+        billingUsage: {
+          inputTokens: 15,
+          outputTokens: 50,
+          cacheReadInputTokens: 250,
+          cacheCreationInputTokens: 5,
+        },
+      },
+    });
+
+    const res = await ctx.app.inject({
+      method: "GET",
+      url: `/api/sessions/${session.id}/export?format=md`,
+      headers: { cookie: ctx.cookie },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toContain(
+      "_turn end · in 15 tok / out 50 tok · cache read 250 / create 5_",
+    );
+  });
+
   it("json export round-trips session + full event array", async () => {
     const ctx = await bootstrapAuthedApp();
     disposers.push(ctx.cleanup);

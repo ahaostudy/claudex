@@ -305,21 +305,32 @@ export type SessionEvent = z.infer<typeof SessionEvent>;
 /**
  * Usage payload attached to a persisted `turn_end` SessionEvent.
  *
- * The Agent SDK's `result` message reports four relevant token counts:
- *   - `inputTokens` — *new* (uncached) input tokens for this turn. Tiny once
- *     the prompt cache is warm
- *   - `cacheReadInputTokens` — cached input tokens replayed into the turn
- *   - `cacheCreationInputTokens` — input tokens entering the cache this turn
- *   - `outputTokens` — assistant output tokens
+ * Two slots, with different semantics — keep them straight:
  *
- * The "context body shipped to the model" for this turn is the sum
- * `inputTokens + cacheReadInputTokens + cacheCreationInputTokens`. The Usage
- * panel's "how full is my context window" ring uses that sum, not
- * `inputTokens` alone — otherwise every turn after the first looks like it
- * used almost no context.
+ * - `usage` is **per-call**: the token counts from the SDK's *final*
+ *   underlying API call in this turn (taken off the last `assistant`
+ *   SDKMessage's `message.usage`, NOT off `result.usage`). The
+ *   "context body shipped to the model" for this turn is
+ *   `inputTokens + cacheReadInputTokens + cacheCreationInputTokens` of
+ *   `usage`. The Usage panel's "how full is my context window" ring uses
+ *   that sum, not `inputTokens` alone — otherwise every turn after the
+ *   first looks like it used almost no context.
  *
- * All fields are optional on the schema because older persisted rows (from
- * before the cache fields existed) don't carry them.
+ * - `billingUsage` is **cumulative** across every SDK sub-call in the
+ *   turn (the original `result.usage`). Used for billing-style totals —
+ *   "Tokens · this session", `/api/usage/today`, `/api/stats` — where
+ *   the per-call cache reads should sum, not collapse.
+ *
+ * Aggregation rule everywhere: ring/context math reads `usage`; billing
+ * totals read `billingUsage ?? usage` so CLI-imported sessions (which
+ * only emit `usage` per-call, one turn_end per assistant record) keep
+ * their existing per-call-summed semantics.
+ *
+ * All fields are optional on the schema because:
+ *   - older persisted rows (from before the cache fields existed) don't
+ *     carry the cache numbers
+ *   - `billingUsage` only appears on live-runner rows from the per-call
+ *     fix onward; CLI imports and pre-fix live rows omit it
  */
 export const TurnEndUsage = z.object({
   inputTokens: z.number().int().nonnegative().optional(),

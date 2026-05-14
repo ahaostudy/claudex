@@ -217,6 +217,50 @@ describe("SessionManager", () => {
     });
   });
 
+  it("round-trips both usage (per-call) and billingUsage (cumulative) through turn_end payload", () => {
+    // Live runner from the per-call fix onward emits both fields. Manager
+    // must persist both so consumers downstream (`scanTurnEnds`, stats SQL,
+    // export) can pick the right one for each surface.
+    const s = setupManager();
+    cleanups.push(s.cleanup);
+    s.manager.getOrCreate(s.session.id);
+    const mock = s.last()!;
+    mock.emit({
+      type: "turn_end",
+      stopReason: "success",
+      usage: {
+        inputTokens: 10,
+        outputTokens: 30,
+        cacheReadInputTokens: 150_000,
+        cacheCreationInputTokens: 0,
+      },
+      billingUsage: {
+        inputTokens: 15,
+        outputTokens: 50,
+        cacheReadInputTokens: 250_000,
+        cacheCreationInputTokens: 0,
+      },
+    });
+
+    const evs = s.sessions.listEvents(s.session.id);
+    const turnEnd = evs.find((e) => e.kind === "turn_end")!;
+    expect(turnEnd.payload).toEqual({
+      stopReason: "success",
+      usage: {
+        inputTokens: 10,
+        outputTokens: 30,
+        cacheReadInputTokens: 150_000,
+        cacheCreationInputTokens: 0,
+      },
+      billingUsage: {
+        inputTokens: 15,
+        outputTokens: 50,
+        cacheReadInputTokens: 250_000,
+        cacheCreationInputTokens: 0,
+      },
+    });
+  });
+
   it("flips status to awaiting on permission_request and back to running on decision", () => {
     const s = setupManager();
     cleanups.push(s.cleanup);

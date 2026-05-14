@@ -11,6 +11,12 @@ function makeTurnEnd(
     cacheCreationInputTokens?: number;
   } | null,
   stopReason: string = "end_turn",
+  billingUsage?: {
+    inputTokens?: number;
+    outputTokens?: number;
+    cacheReadInputTokens?: number;
+    cacheCreationInputTokens?: number;
+  } | null,
 ): SessionEvent {
   return {
     id: `ev-${seq}`,
@@ -18,7 +24,11 @@ function makeTurnEnd(
     kind: "turn_end",
     seq,
     createdAt: new Date().toISOString(),
-    payload: { stopReason, usage },
+    payload: {
+      stopReason,
+      usage,
+      ...(billingUsage !== undefined ? { billingUsage } : {}),
+    },
   };
 }
 
@@ -176,5 +186,65 @@ describe("computeUsageSummary", () => {
     expect(out.totalInput).toBe(20 + 50_000);
     // But lastTurnInput reflects the most recent (tool_use) chunk.
     expect(out.lastTurnInput).toBe(15 + 80_000);
+  });
+
+  it("totals prefer billingUsage (cumulative) when present; lastTurn always reads usage (per-call)", () => {
+    // Live runner from the per-call fix onward writes both fields:
+    //   - `usage` = last sub-call's per-call usage (drives the ring)
+    //   - `billingUsage` = SDK `result.usage` (cumulative across sub-calls)
+    // The ring math must read per-call so it reflects the actual prompt
+    // size; totals must read cumulative so a 10-tool-use turn's billable
+    // cache reads sum correctly instead of collapsing to the final
+    // sub-call's number.
+    const events: SessionEvent[] = [
+      makeTurnEnd(
+        0,
+        {
+          inputTokens: 10,
+          outputTokens: 30,
+          cacheReadInputTokens: 150_000, // per-call: final sub-call only
+          cacheCreationInputTokens: 0,
+        },
+        "end_turn",
+        {
+          inputTokens: 15,
+          outputTokens: 50,
+          cacheReadInputTokens: 250_000, // cumulative: all sub-calls
+          cacheCreationInputTokens: 0,
+        },
+      ),
+    ];
+
+    const out = computeUsageSummary(events, "claude-opus-4-7");
+    expect(out.turnCount).toBe(1);
+    // Ring: per-call only — 10 + 150k = 150_010
+    expect(out.lastTurnInput).toBe(150_010);
+    // Totals: cumulative — 15 + 250k = 250_015
+    expect(out.totalInput).toBe(250_015);
+    expect(out.totalOutput).toBe(50);
+    // perModel rolls up the cumulative numbers too
+    expect(out.perModel[0]).toEqual({
+      model: "claude-opus-4-7",
+      inputTokens: 250_015,
+      outputTokens: 50,
+    });
+  });
+
+  it("falls back to usage for totals when billingUsage is absent (CLI imports / legacy live)", () => {
+    // CLI JSONL importer never writes billingUsage — its turn_ends are
+    // per-assistant per-call. Pre-fix live rows are the same shape (sans
+    // the per-call snapshot, but the row only has `usage`). For both,
+    // totals fall back to summing the per-call `usage`, preserving the
+    // pre-fix semantics.
+    const events: SessionEvent[] = [
+      makeTurnEnd(0, {
+        inputTokens: 10,
+        outputTokens: 30,
+        cacheReadInputTokens: 150_000,
+      }),
+    ];
+    const out = computeUsageSummary(events, "claude-opus-4-7");
+    expect(out.totalInput).toBe(150_010);
+    expect(out.lastTurnInput).toBe(150_010);
   });
 });

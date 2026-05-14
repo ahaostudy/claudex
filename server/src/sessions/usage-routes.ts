@@ -50,6 +50,14 @@ interface TurnRow {
  * payload is malformed / missing usage. We intentionally do NOT distinguish
  * input vs output here — the Usage page's "tokens" number is the whole
  * context body shipped to the model plus output.
+ *
+ * Prefers `billingUsage` (cumulative across SDK sub-calls; written by live
+ * runner from the per-call fix onward) over `usage` (per-call snapshot,
+ * post-fix; per-API-call as written by the CLI JSONL importer; cumulative
+ * on legacy live rows). For new live rows, billingUsage gives a true
+ * billing breakdown — every sub-call's cache-read sums correctly. For CLI
+ * imports / pre-fix live rows, falling back to `usage` preserves the
+ * pre-existing per-call-summed semantics.
  */
 function tokensFromTurnPayload(payloadJson: string): number {
   try {
@@ -60,8 +68,14 @@ function tokensFromTurnPayload(payloadJson: string): number {
         cacheReadInputTokens?: number;
         cacheCreationInputTokens?: number;
       };
+      billingUsage?: {
+        inputTokens?: number;
+        outputTokens?: number;
+        cacheReadInputTokens?: number;
+        cacheCreationInputTokens?: number;
+      };
     };
-    const u = payload?.usage;
+    const u = payload?.billingUsage ?? payload?.usage;
     if (!u) return 0;
     return (
       (Number(u.inputTokens ?? 0) | 0) +

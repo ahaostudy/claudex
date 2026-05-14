@@ -199,11 +199,137 @@ describe("AgentRunner.translate (SDK message → RunnerEvent)", () => {
     expect(kinds).toContain("turn_end");
     expect(kinds).toContain("status");
     const turnEnd = events.find((e) => e.type === "turn_end")!;
+    // No prior assistant message → `usage` falls back to result.usage
+    // (rare edge case, but preserves backward-compat for synthetic tests
+    // that drive `result` directly). `billingUsage` always carries the
+    // cumulative `result.usage` shape.
     expect(turnEnd).toMatchObject({
       type: "turn_end",
       stopReason: "success",
       usage: { inputTokens: 100, outputTokens: 50 },
+      billingUsage: { inputTokens: 100, outputTokens: 50 },
     });
+  });
+
+  it("turn_end usage = last assistant per-call; billingUsage = cumulative result.usage", () => {
+    // Multi-tool-use turn: SDK delivers two `assistant` messages (one per
+    // API sub-call) before the `result`. The ring needs the LAST sub-call's
+    // per-call usage (`message.usage` on the final assistant), not the
+    // cumulative `result.usage` — that one sums every sub-call's
+    // cache-read and pushes the ring above 100% on long turns.
+    const { events, translate } = collect();
+    translate({
+      type: "assistant",
+      uuid: "asst-1",
+      message: {
+        content: [{ type: "text", text: "first call" }],
+        usage: {
+          input_tokens: 5,
+          output_tokens: 20,
+          cache_read_input_tokens: 100_000,
+          cache_creation_input_tokens: 0,
+        },
+      },
+    });
+    translate({
+      type: "assistant",
+      uuid: "asst-2",
+      message: {
+        content: [{ type: "text", text: "final" }],
+        usage: {
+          input_tokens: 10,
+          output_tokens: 30,
+          cache_read_input_tokens: 150_000,
+          cache_creation_input_tokens: 0,
+        },
+      },
+    });
+    translate({
+      type: "result",
+      subtype: "success",
+      result: "Done.",
+      total_cost_usd: 0,
+      // Cumulative across both sub-calls. Note cache_read = 100k + 150k.
+      usage: {
+        input_tokens: 15,
+        output_tokens: 50,
+        cache_read_input_tokens: 250_000,
+        cache_creation_input_tokens: 0,
+      },
+      num_turns: 1,
+    });
+    const turnEnd = events.find((e) => e.type === "turn_end")! as Extract<
+      RunnerEvent,
+      { type: "turn_end" }
+    >;
+    // Per-call: from the LAST assistant — 150k cache read, not 250k.
+    expect(turnEnd.usage).toEqual({
+      inputTokens: 10,
+      outputTokens: 30,
+      cacheReadInputTokens: 150_000,
+      cacheCreationInputTokens: 0,
+    });
+    // Cumulative: from result.usage — 250k cache read.
+    expect(turnEnd.billingUsage).toEqual({
+      inputTokens: 15,
+      outputTokens: 50,
+      cacheReadInputTokens: 250_000,
+      cacheCreationInputTokens: 0,
+    });
+  });
+
+  it("subagent assistant messages do not drive parent turn_end usage", () => {
+    // Only top-level assistants (no parent_tool_use_id) carry the parent
+    // session's context body. A subagent's per-call usage describes the
+    // subagent's prompt, not the parent's — wiring it into lastAssistantUsage
+    // would make the ring jump to the subagent's context size.
+    const { events, translate } = collect();
+    translate({
+      type: "assistant",
+      uuid: "parent-1",
+      message: {
+        content: [{ type: "text", text: "parent" }],
+        usage: {
+          input_tokens: 5,
+          output_tokens: 10,
+          cache_read_input_tokens: 50_000,
+          cache_creation_input_tokens: 0,
+        },
+      },
+    });
+    translate({
+      type: "assistant",
+      uuid: "subagent-1",
+      parent_tool_use_id: "tu-sub",
+      message: {
+        content: [{ type: "text", text: "subagent" }],
+        usage: {
+          input_tokens: 1,
+          output_tokens: 2,
+          cache_read_input_tokens: 999_999,
+          cache_creation_input_tokens: 0,
+        },
+      },
+    });
+    translate({
+      type: "result",
+      subtype: "success",
+      result: "Done.",
+      total_cost_usd: 0,
+      usage: {
+        input_tokens: 6,
+        output_tokens: 12,
+        cache_read_input_tokens: 1_049_999,
+        cache_creation_input_tokens: 0,
+      },
+      num_turns: 1,
+    });
+    const turnEnd = events.find((e) => e.type === "turn_end")! as Extract<
+      RunnerEvent,
+      { type: "turn_end" }
+    >;
+    // Per-call snapshot stays on the parent's 50k, NOT the subagent's 999_999.
+    expect(turnEnd.usage?.cacheReadInputTokens).toBe(50_000);
   });
 
   it("maps error result subtype", () => {

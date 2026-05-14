@@ -148,53 +148,76 @@ export function scanTurnEnds(
   for (const ev of events) {
     if (ev.kind !== "turn_end") continue;
     const payload = ev.payload as Record<string, unknown>;
-    const usage = payload.usage as
-      | {
-          inputTokens?: number;
-          outputTokens?: number;
-          cacheReadInputTokens?: number;
-          cacheCreationInputTokens?: number;
-        }
-      | null
-      | undefined;
-    if (!usage) continue;
-    const inp = Number(usage.inputTokens ?? 0) | 0;
-    const out = Number(usage.outputTokens ?? 0) | 0;
-    const cacheRead = Number(usage.cacheReadInputTokens ?? 0) | 0;
-    const cacheCreate = Number(usage.cacheCreationInputTokens ?? 0) | 0;
-    const totalInputThisTurn = inp + cacheRead + cacheCreate;
-    if (totalInputThisTurn === 0 && out === 0) continue;
-
-    // Always refresh `lastTurn` — this is the context ring's source, and it
-    // should follow the most recent usage even mid-turn.
-    lastTurn = {
-      inputTokens: inp,
-      outputTokens: out,
-      cacheReadInputTokens: cacheRead,
-      cacheCreationInputTokens: cacheCreate,
+    type RawUsage = {
+      inputTokens?: number;
+      outputTokens?: number;
+      cacheReadInputTokens?: number;
+      cacheCreationInputTokens?: number;
     };
+    const usage = payload.usage as RawUsage | null | undefined;
+    // `billingUsage` is the SDK's cumulative `result.usage` for live
+    // sessions (post per-call fix). Drives totals/perModel. CLI imports
+    // and pre-fix live rows omit it — fall back to per-call `usage`,
+    // which preserves the existing "context body summed across final
+    // turns" semantics for those rows.
+    const billingUsage = (payload.billingUsage as RawUsage | null | undefined) ?? null;
+    if (!usage && !billingUsage) continue;
+    const inp = Number(usage?.inputTokens ?? 0) | 0;
+    const out = Number(usage?.outputTokens ?? 0) | 0;
+    const cacheRead = Number(usage?.cacheReadInputTokens ?? 0) | 0;
+    const cacheCreate = Number(usage?.cacheCreationInputTokens ?? 0) | 0;
+    const totalInputThisTurn = inp + cacheRead + cacheCreate;
+    if (totalInputThisTurn === 0 && out === 0 && !billingUsage) continue;
+
+    // Always refresh `lastTurn` from per-call `usage` — this is the
+    // context ring's source, and it should follow the most recent turn's
+    // final-sub-call prompt size even mid-turn. We deliberately do NOT
+    // read `billingUsage` here: cumulative cache-read across sub-calls
+    // double-counts the warm prefix and is what made the ring read
+    // 100%+ on long turns. Skip the refresh on an empty `usage` payload
+    // so a `billingUsage`-only row can't blank out a real lastTurn.
+    if (usage && (totalInputThisTurn > 0 || out > 0)) {
+      lastTurn = {
+        inputTokens: inp,
+        outputTokens: out,
+        cacheReadInputTokens: cacheRead,
+        cacheCreationInputTokens: cacheCreate,
+      };
+    }
 
     // Only accumulate totals on real end-of-turn records. Intermediate
     // tool_use chunks share the same warm cache block and would triple-count.
     const stopReason = String(payload.stopReason ?? "");
     if (NON_FINAL_STOP_REASONS.has(stopReason)) continue;
 
+    // Prefer `billingUsage` (cumulative across SDK sub-calls) for
+    // totals — that's the true billable breakdown for live sessions.
+    // CLI imports / legacy rows fall back to `usage`.
+    const billingSrc = billingUsage ?? usage;
+    if (!billingSrc) continue;
+    const billInp = Number(billingSrc.inputTokens ?? 0) | 0;
+    const billOut = Number(billingSrc.outputTokens ?? 0) | 0;
+    const billCacheRead = Number(billingSrc.cacheReadInputTokens ?? 0) | 0;
+    const billCacheCreate = Number(billingSrc.cacheCreationInputTokens ?? 0) | 0;
+    const billingInputThisTurn = billInp + billCacheRead + billCacheCreate;
+    if (billingInputThisTurn === 0 && billOut === 0) continue;
+
     const key: ModelId | string = sessionModel;
     const row = perModel.get(key);
     if (row) {
-      row.inputTokens += totalInputThisTurn;
-      row.outputTokens += out;
+      row.inputTokens += billingInputThisTurn;
+      row.outputTokens += billOut;
       row.count += 1;
     } else {
       perModel.set(key, {
-        inputTokens: totalInputThisTurn,
-        outputTokens: out,
+        inputTokens: billingInputThisTurn,
+        outputTokens: billOut,
         count: 1,
       });
     }
     turnCount += 1;
-    totalInput += totalInputThisTurn;
-    totalOutput += out;
+    totalInput += billingInputThisTurn;
+    totalOutput += billOut;
   }
 
   const lastTurnTotal = lastTurn

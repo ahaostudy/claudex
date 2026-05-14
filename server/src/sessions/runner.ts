@@ -141,12 +141,29 @@ export type RunnerEvent =
   | {
       type: "turn_end";
       stopReason: string;
-      // Token usage from the SDK's `result` message. `inputTokens` is the
-      // *new* (uncached) input for this turn — with prompt caching on, most
-      // of the real context sits under `cacheReadInputTokens` and
-      // `cacheCreationInputTokens`. The UI sums all three to reflect the
-      // true context body shipped to the model.
+      // Per-call usage from the FINAL underlying API call of this turn —
+      // sourced from the SDK's last `assistant` message (`message.usage`),
+      // not from the `result` aggregate. This is what the context-window
+      // ring needs: `inputTokens + cacheReadInputTokens +
+      // cacheCreationInputTokens` is the size of the prompt the model
+      // actually saw on its last sub-call. The SDK's `result.usage` sums
+      // every sub-call's cache_read, which double-counts the warm prefix
+      // across tool-use loops and pushes the ring above 100% on long
+      // turns. See `billingUsage` below for the cumulative number.
       usage?: {
+        inputTokens?: number;
+        outputTokens?: number;
+        cacheReadInputTokens?: number;
+        cacheCreationInputTokens?: number;
+      };
+      // Cumulative usage across every API sub-call the SDK made during
+      // this turn (i.e. the original `result.usage`). Drives the
+      // session-level "Tokens · this session" totals and the per-day /
+      // per-range billing rollups, where summing the per-call cache reads
+      // gives an accurate billing breakdown. Absent when the SDK didn't
+      // surface a `result.usage` (extremely rare) — consumers should
+      // fall back to `usage`.
+      billingUsage?: {
         inputTokens?: number;
         outputTokens?: number;
         cacheReadInputTokens?: number;

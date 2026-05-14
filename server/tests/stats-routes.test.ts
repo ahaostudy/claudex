@@ -69,6 +69,12 @@ function seedTurnEnd(
     cacheCreationInputTokens?: number;
   },
   seq = 1,
+  billingUsage?: {
+    inputTokens?: number;
+    outputTokens?: number;
+    cacheReadInputTokens?: number;
+    cacheCreationInputTokens?: number;
+  },
 ): void {
   ctx.dbh.db
     .prepare(
@@ -80,7 +86,7 @@ function seedTurnEnd(
       sessionId,
       seq,
       new Date().toISOString(),
-      JSON.stringify({ usage }),
+      JSON.stringify(billingUsage ? { usage, billingUsage } : { usage }),
     );
 }
 
@@ -370,5 +376,81 @@ describe("stats routes", () => {
     expect(body.busiestProject!.sessionCount).toBe(2);
     // avgTurnsPerSession: nonArchived=0 → handler returns 0 (documented).
     expect(body.avgTurnsPerSession).toBe(0);
+  });
+
+  it("totalTokens prefers billingUsage (cumulative) over usage when both present", async () => {
+    // Live runner from the per-call fix onward writes both fields.
+    // `usage` is per-call (drives the ring); `billingUsage` is cumulative
+    // (drives billing-style totals). The stats SQL must prefer
+    // billingUsage so totalTokens reflects the true billable breakdown
+    // across SDK sub-calls, not just the final sub-call's per-call number.
+    const ctx = await bootstrap();
+    disposers.push(ctx.cleanup);
+    const projectId = await createProject(ctx, "billing-priority");
+    const sid = await createSession(ctx, projectId, "s-bill");
+
+    // Single turn_end with disagreeing per-call vs cumulative numbers.
+    // billingUsage sum = 15 + 50 + 250 + 5 = 320 → expected totalTokens.
+    // usage (per-call) sum = 10 + 30 + 150 + 0 = 190 → would be wrong.
+    seedTurnEnd(
+      ctx,
+      sid,
+      {
+        inputTokens: 10,
+        outputTokens: 30,
+        cacheReadInputTokens: 150,
+        cacheCreationInputTokens: 0,
+      },
+      1,
+      {
+        inputTokens: 15,
+        outputTokens: 50,
+        cacheReadInputTokens: 250,
+        cacheCreationInputTokens: 5,
+      },
+    );
+
+    const res = await ctx.app.inject({
+      method: "GET",
+      url: "/api/stats",
+      headers: { cookie: ctx.cookie },
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as StatsResponse;
+    expect(body.totalTurns).toBe(1);
+    expect(body.totalTokens).toBe(320);
+  });
+
+  it("totalTokens falls back to usage when billingUsage is absent (CLI imports / legacy live)", async () => {
+    // CLI JSONL importer never writes billingUsage; pre-fix live rows
+    // are the same shape. The fallback path keeps these rows contributing
+    // to totalTokens — otherwise stats would silently drop per-call data
+    // for any session not yet touched by the per-call fix.
+    const ctx = await bootstrap();
+    disposers.push(ctx.cleanup);
+    const projectId = await createProject(ctx, "billing-fallback");
+    const sid = await createSession(ctx, projectId, "s-fallback");
+
+    seedTurnEnd(
+      ctx,
+      sid,
+      {
+        inputTokens: 10,
+        outputTokens: 30,
+        cacheReadInputTokens: 150,
+        cacheCreationInputTokens: 0,
+      },
+      1,
+    );
+
+    const res = await ctx.app.inject({
+      method: "GET",
+      url: "/api/stats",
+      headers: { cookie: ctx.cookie },
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as StatsResponse;
+    expect(body.totalTurns).toBe(1);
+    expect(body.totalTokens).toBe(190); // 10 + 30 + 150 + 0
   });
 });

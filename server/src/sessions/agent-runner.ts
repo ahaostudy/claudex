@@ -66,6 +66,19 @@ export class AgentRunner implements Runner {
   private permissionMode: PermissionMode;
   private effort: EffortLevel;
   private currentModel: ModelId;
+  // Per-call usage from the most recent SDK `assistant` message in the
+  // current turn. We snapshot it here because the SDK only delivers the
+  // (cumulative) `result.usage` at end-of-turn, but the context-window
+  // ring needs the FINAL sub-call's prompt size — that's the one
+  // `message.usage` carries on each assistant chunk. Reset to null
+  // whenever a new turn starts (start / sendUserMessage) and after we
+  // emit it on `result`.
+  private lastAssistantUsage: {
+    inputTokens?: number;
+    outputTokens?: number;
+    cacheReadInputTokens?: number;
+    cacheCreationInputTokens?: number;
+  } | null = null;
 
   constructor(private readonly opts: RunnerInitOptions) {
     this.sessionId = opts.sessionId;
@@ -424,6 +437,30 @@ export class AgentRunner implements Runner {
           typeof (msg as any).parent_tool_use_id === "string"
             ? ((msg as any).parent_tool_use_id as string)
             : undefined;
+        // Snapshot per-call usage for the context-window ring. The SDK
+        // attaches the underlying API response's `Usage` to each
+        // assistant message; the LAST one we see in a turn carries the
+        // final sub-call's prompt size (`cache_read + cache_create +
+        // input` of THAT call). We overwrite each time so when `result`
+        // lands we have the freshest per-call snapshot. Top-level
+        // assistants only — subagent assistant messages (with
+        // `parent_tool_use_id`) carry the subagent's context body, not
+        // the parent session's, and shouldn't drive the parent's ring.
+        if (!parentToolUseId) {
+          const callUsage = (msg.message as any)?.usage;
+          if (callUsage) {
+            this.lastAssistantUsage = {
+              inputTokens: Number(callUsage.input_tokens ?? 0),
+              outputTokens: Number(callUsage.output_tokens ?? 0),
+              cacheReadInputTokens: Number(
+                callUsage.cache_read_input_tokens ?? 0,
+              ),
+              cacheCreationInputTokens: Number(
+                callUsage.cache_creation_input_tokens ?? 0,
+              ),
+            };
+          }
+        }
         const content = msg.message?.content ?? [];
         for (const block of content as Array<any>) {
           if (block.type === "text" && typeof block.text === "string") {
@@ -487,37 +524,48 @@ export class AgentRunner implements Runner {
         return;
       }
       case "result": {
-        // Diagnostic: log the raw usage payload the SDK actually emits on
-        // each turn. The Usage ring's context % depends on
-        // `cache_read_input_tokens` + `cache_creation_input_tokens` being
-        // present — with prompt caching on, `input_tokens` alone is only a
-        // few dozen tokens on warm cache turns and makes the ring read "0%".
-        // We've been burned by this blind spot twice; the log is a
-        // permanent breadcrumb so future sessions can be diagnosed from the
-        // server log alone.
+        // Diagnostic: log both the cumulative `result.usage` and the
+        // per-call snapshot from the last assistant message. The Usage
+        // ring uses the per-call number (the FINAL sub-call's prompt
+        // size); the cumulative number drives billing-style totals.
+        // Logging both makes a "ring shows 100%+ on a long turn" report
+        // diagnosable from server logs alone.
         const rawUsage = (msg as { usage?: unknown }).usage ?? null;
         if (this.opts.logger) {
           this.opts.logger.info(
-            { sessionId: this.sessionId, usage: rawUsage },
+            {
+              sessionId: this.sessionId,
+              billingUsage: rawUsage,
+              perCallUsage: this.lastAssistantUsage,
+            },
             "turn_end usage",
           );
         }
+        const cumulative = msg.usage
+          ? {
+              inputTokens: Number((msg.usage as any).input_tokens ?? 0),
+              outputTokens: Number((msg.usage as any).output_tokens ?? 0),
+              cacheReadInputTokens: Number(
+                (msg.usage as any).cache_read_input_tokens ?? 0,
+              ),
+              cacheCreationInputTokens: Number(
+                (msg.usage as any).cache_creation_input_tokens ?? 0,
+              ),
+            }
+          : undefined;
+        // `usage` carries the per-call snapshot when we have one (the
+        // common case: a turn with at least one top-level assistant
+        // message). Fall back to the cumulative value only when no
+        // assistant message arrived during the turn — extremely rare and
+        // mostly preserves backward compat for historical edge cases.
+        const perCall = this.lastAssistantUsage ?? cumulative;
         this.emit({
           type: "turn_end",
           stopReason: msg.subtype ?? "end_turn",
-          usage: msg.usage
-            ? {
-                inputTokens: Number((msg.usage as any).input_tokens ?? 0),
-                outputTokens: Number((msg.usage as any).output_tokens ?? 0),
-                cacheReadInputTokens: Number(
-                  (msg.usage as any).cache_read_input_tokens ?? 0,
-                ),
-                cacheCreationInputTokens: Number(
-                  (msg.usage as any).cache_creation_input_tokens ?? 0,
-                ),
-              }
-            : undefined,
+          ...(perCall ? { usage: perCall } : {}),
+          ...(cumulative ? { billingUsage: cumulative } : {}),
         });
+        this.lastAssistantUsage = null;
         this.emit({ type: "status", status: "idle" });
         return;
       }
