@@ -1,6 +1,6 @@
 {
   "name": "claudex",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "Remote Control for Claude Code — a browser front-end for the claude CLI on your own machine.",
   "packageManager": "pnpm@9.12.0",
