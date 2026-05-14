@@ -388,6 +388,57 @@ prompts + diff rendering + most of P4/P5 (routines, queue, tags, search,
 export, forking, terminal, …). Track current scope in `docs/FEATURES.md`,
 not here — this section will drift.
 
+## Releases
+
+**Releases are never created proactively.** Only cut a GitHub release when the
+user explicitly asks for one (e.g. "发个 release", "create a release"). If it's
+ambiguous — ask, don't assume.
+
+### Release procedure
+
+1. **Pick a version.** Tag format is `vMAJOR.MINOR.PATCH` (semver, no leading
+   zero). The About screen's `GET /api/meta/latest-release` endpoint hits
+   `https://api.github.com/repos/ahaostudy/claudex/releases/latest` (5s
+   timeout, 1h TTL), strips the `v` prefix, and compares it against
+   `server/package.json#version` with a dotted-numeric comparator — so the
+   tag and the package.json version must agree.
+
+2. **Bump all `package.json` files** that carry a version field — root,
+   `server/`, `web/`, `shared/` — to the chosen version. Run the standard
+   iteration-loop steps before committing: `pnpm -r typecheck`, `pnpm
+   --filter @claudex/server test`, `pnpm --filter @claudex/web build`.
+
+3. **Commit** the version bump with `chore(release): bump version to X.Y.Z`,
+   merge into main, push main.
+
+4. **Write release notes** as a temporary file (e.g. `/tmp/claudex-vX.Y.Z-notes.md`).
+   Write them by hand — skim `git log` for `feat`/`fix`/`docs` commits since
+   the last tag and group highlights by feature area. Don't use
+   `--generate-notes`.
+
+5. **Create the release** via `gh`:
+   ```sh
+   https_proxy=http://localhost:7890 http_proxy=http://localhost:7890 \
+     gh release create vX.Y.Z \
+       --title "vX.Y.Z — <short summary>" \
+       --latest \
+       --notes-file /tmp/claudex-vX.Y.Z-notes.md \
+       --target main
+   ```
+   Use `--latest` for normal releases; only use `--prerelease` if the user
+   explicitly asks for a prerelease.
+
+6. **Verify:** `gh release view vX.Y.Z --json tagName,isDraft,isPrerelease,url`
+   should show `isDraft: false` and the expected tag.
+
+### What not to do
+
+- Don't create a release without an explicit user ask.
+- Don't push the `v*` tag from a worktree — the tag must point at a commit on
+  `main`. `gh release create --target main` handles this.
+- Don't use `--generate-notes` — the user prefers hand-written notes grouped by
+  feature area.
+
 ## Don'ts
 
 - Don't introduce Prisma / Drizzle / a full ORM — hand-written SQL +
