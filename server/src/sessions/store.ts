@@ -337,7 +337,7 @@ export class SessionStore {
         `SELECT id, model FROM sessions
            WHERE stats_context_pct = 0
              AND stats_messages > 0
-             AND archived = 0`,
+             AND archived_at IS NULL`,
       )
       .all() as Array<{ id: string; model: string }>;
   }
