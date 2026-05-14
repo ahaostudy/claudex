@@ -89,3 +89,19 @@ export async function restartServer(opts?: {
   }
   await waitForServerAndReload(opts);
 }
+
+// Update + restart flow: fire the update-and-restart endpoint (same
+// dropped-connection expectation as restartServer), then poll for health
+// and reload. The `tag` is the GitHub release tag from LatestReleaseResponse
+// (e.g. "v0.2.0") — the worker checks out exactly that version.
+export async function updateAndRestart(tag: string, opts?: {
+  onProgress?: () => void;
+  timeoutMs?: number;
+}): Promise<void> {
+  try {
+    await api.adminUpdateAndRestart(tag);
+  } catch {
+    // Expected: the server drops the TCP connection before flushing JSON.
+  }
+  await waitForServerAndReload(opts);
+}

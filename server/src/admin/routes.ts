@@ -6,7 +6,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { AuditStore } from "../audit/store.js";
 import { getRequestCtx } from "../lib/req.js";
-import { AdminRestartRequest } from "@claudex/shared";
+import { AdminRestartRequest, UpdateAndRestartRequest } from "@claudex/shared";
 import { PendingRestartStore } from "./pending-restarts.js";
 
 // -----------------------------------------------------------------------------
@@ -177,6 +177,82 @@ export async function registerAdminRoutes(
         port: deps.port,
         log: logPath,
         ...(pendingResult ? { pendingResult } : {}),
+      });
+
+      setTimeout(() => {
+        process.kill(process.pid, "SIGTERM");
+      }, 150);
+    },
+  );
+
+  // ---------------------------------------------------------------------------
+  // POST /api/admin/update-and-restart
+  //
+  // Update to a specific GitHub release tag and restart. The About page's
+  // "Update now" button calls this with `{ tag: "v0.2.0" }`. Compared to the
+  // plain restart endpoint, this spawns `update-restart-worker.mjs` instead
+  // of `restart-worker.mjs` — the update worker git-fetches, checks out the
+  // tag, runs pnpm install, then waits for the port to drain and relaunches
+  // the server. No `pending_restart_results` logic because the button isn't
+  // a tool_use — it's a direct user action.
+  // ---------------------------------------------------------------------------
+  app.post(
+    "/api/admin/update-and-restart",
+    { preHandler: app.requireAuth as any },
+    async (req, reply) => {
+      const ctx = getRequestCtx(req);
+      try {
+        deps.audit.append({
+          event: "server_update",
+          userId: ctx.userId,
+          ip: ctx.ip,
+          userAgent: ctx.userAgent,
+        });
+      } catch {
+        /* audit is fire-and-forget */
+      }
+
+      const parsed = UpdateAndRestartRequest.safeParse(req.body ?? {});
+      if (!parsed.success) {
+        return reply.code(400).send({ error: "invalid_request", details: parsed.error.issues });
+      }
+      const tag = parsed.data.tag;
+
+      if (process.env.NODE_ENV === "test") {
+        return reply.code(200).send({ ok: true, dryRun: true } as const);
+      }
+
+      const repoRoot = resolveRepoRoot();
+      const workerPath = join(repoRoot, "scripts", "update-restart-worker.mjs");
+
+      if (!existsSync(workerPath)) {
+        return reply
+          .code(500)
+          .send({ error: "update_worker_missing", path: workerPath });
+      }
+
+      mkdirSync(deps.stateDir, { recursive: true });
+      const logPath = join(deps.stateDir, "server-stdout.log");
+      const logFd = openSync(logPath, "a");
+
+      const child = spawn(
+        process.execPath,
+        [workerPath, String(deps.port), repoRoot, tag],
+        {
+          detached: true,
+          stdio: ["ignore", logFd, logFd],
+          cwd: repoRoot,
+          env: process.env,
+          windowsHide: true,
+        },
+      );
+      child.unref();
+
+      reply.code(200).send({
+        ok: true,
+        restarterPid: child.pid,
+        port: deps.port,
+        log: logPath,
       });
 
       setTimeout(() => {

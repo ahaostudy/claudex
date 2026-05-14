@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ChevronLeft, Download, ExternalLink, Info } from "lucide-react";
+import { AlertTriangle, ChevronLeft, Download, ExternalLink, Info, RefreshCw } from "lucide-react";
 import { api, ApiError } from "@/api/client";
 import type { LatestReleaseResponse, MetaResponse } from "@claudex/shared";
 import { AppShell } from "@/components/AppShell";
 import { timeAgoLong } from "@/lib/format";
+import { updateAndRestart } from "@/lib/admin-actions";
 
 // ---------------------------------------------------------------------------
 // About — static "what am I running?" surface. Reached from the Settings
@@ -207,18 +208,48 @@ function LatestReleaseValue({
   );
 }
 
-// Shown above the meta card when a newer release is available. We surface the
-// tag + the first chunk of release notes so the user can decide whether to
-// pull. Update is *always manual* — claudex doesn't ship a self-updater (the
-// user runs `git pull` + the iteration loop), so the CTA here links to the
-// release page rather than triggering anything server-side.
+// Shown above the meta card when a newer release is available. Two CTAs:
+//   - "Update now" — triggers detached git-fetch + checkout + restart on the
+//     server, then polls /api/health and reloads the page.
+//   - "View release" — opens the GitHub release page in a new tab so the user
+//     can read the full notes before deciding.
+//
+// State machine: idle → updating → waiting → reload (success) / failed.
 function UpdateBanner({
   release,
 }: {
   release: Extract<LatestReleaseResponse, { ok: true }>;
 }) {
+  const [status, setStatus] = useState<
+    "idle" | "updating" | "waiting" | "failed"
+  >("idle");
+  const [err, setErr] = useState<string | null>(null);
+
+  async function triggerUpdate() {
+    setStatus("updating");
+    setErr(null);
+    try {
+      await updateAndRestart(release.tag, {
+        onProgress: () => setStatus("waiting"),
+      });
+      // updateAndRestart only returns after calling window.location.replace,
+      // so we rarely reach here — but if the reload is blocked, flip to idle
+      // so the button isn't stuck.
+      setStatus("idle");
+    } catch (e) {
+      setStatus("failed");
+      setErr(
+        e instanceof Error
+          ? e.message
+          : "Timed out waiting for the server to come back up.",
+      );
+    }
+  }
+
+  const busy = status === "updating" || status === "waiting";
   const notes = release.body.trim();
   const notesPreview = notes.length > 280 ? `${notes.slice(0, 280)}…` : notes;
+
   return (
     <div className="rounded-[12px] border border-warn/40 bg-warn-wash/40 p-4 flex items-start gap-3">
       <div className="h-9 w-9 rounded-[8px] bg-canvas border border-warn/40 flex items-center justify-center shrink-0 text-warn">
@@ -231,21 +262,57 @@ function UpdateBanner({
             (current v{release.currentVersion})
           </span>
         </div>
+
         {notesPreview ? (
           <div className="text-ink-soft whitespace-pre-wrap break-words">
             {notesPreview}
           </div>
         ) : null}
-        <div>
-          <a
-            href={release.htmlUrl}
-            target="_blank"
-            rel="noreferrer noopener"
-            className="inline-flex items-center gap-1 underline underline-offset-2 hover:text-ink"
-          >
-            View release on GitHub
-            <ExternalLink className="w-3 h-3" />
-          </a>
+
+        {/* ---- action row ---- */}
+        <div className="flex items-center gap-2 flex-wrap">
+          {status === "failed" ? (
+            <>
+              <button
+                type="button"
+                onClick={triggerUpdate}
+                className="h-9 px-3.5 rounded-md border border-danger/40 bg-danger-wash text-[13.5px] font-medium text-danger hover:opacity-90 inline-flex items-center gap-1.5"
+              >
+                <AlertTriangle className="w-3.5 h-3.5" />
+                Retry
+              </button>
+              <span className="text-[12px] text-danger/80 truncate max-w-[240px]">
+                {err}
+              </span>
+            </>
+          ) : (
+            <>
+              <button
+                type="button"
+                onClick={triggerUpdate}
+                disabled={busy}
+                className="h-9 px-3.5 rounded-md bg-warn text-canvas text-[13.5px] font-medium hover:opacity-90 disabled:opacity-60 disabled:cursor-not-allowed inline-flex items-center gap-1.5"
+              >
+                {busy ? (
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                ) : null}
+                {status === "idle"
+                  ? `Update to ${release.tag}`
+                  : status === "updating"
+                    ? "Updating…"
+                    : "Waiting for server…"}
+              </button>
+              <a
+                href={release.htmlUrl}
+                target="_blank"
+                rel="noreferrer noopener"
+                className="inline-flex items-center gap-1 underline underline-offset-2 hover:text-ink text-ink-soft"
+              >
+                View release
+                <ExternalLink className="w-3 h-3" />
+              </a>
+            </>
+          )}
         </div>
       </div>
     </div>

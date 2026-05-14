@@ -1843,6 +1843,22 @@ export const AdminRestartResponse = z.object({
 export type AdminRestartResponse = z.infer<typeof AdminRestartResponse>;
 
 // ============================================================================
+// Update-and-restart — the About page's "Update now" button.
+//
+// POST /api/admin/update-and-restart  { tag: "v0.2.0" }
+//
+// Spawns a detached worker that git-fetches, checks out the given tag, runs
+// pnpm install, waits for the port to drain, then relaunches the server.
+// Response shape is identical to AdminRestartResponse because the client
+// treats both the same: "restart is underway, poll health and reload."
+// ============================================================================
+
+export const UpdateAndRestartRequest = z.object({
+  tag: z.string(), // GitHub release tag e.g. "v0.2.0"
+});
+export type UpdateAndRestartRequest = z.infer<typeof UpdateAndRestartRequest>;
+
+// ============================================================================
 // Files browser — read-only project file viewer served from the host disk.
 //
 // Three REST endpoints wire into one new screen (mockup s-14):

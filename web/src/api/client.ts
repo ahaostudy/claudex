@@ -516,6 +516,19 @@ export const api = {
     });
   },
 
+  /** Update to a specific GitHub release tag and restart. The About page's
+   *  "Update now" button calls this with the tag from LatestReleaseResponse.
+   *  Server spawns a detached worker that git-fetches, checks out the tag,
+   *  runs pnpm install, then restarts. */
+  adminUpdateAndRestart(tag: string) {
+    const body: Record<string, string> = { tag };
+    return request<{ ok: true; dryRun?: boolean }>("/api/admin/update-and-restart", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  },
+
   // ---------------------------------------------------------------------------
   // Alerts — persistent queue of "needs your attention" rows, keyed on
   // session status transitions. The badge in AppShell and the dedicated
