@@ -10,8 +10,10 @@
 //      is still alive, retry. This avoids relying on lsof / netstat / ss,
 //      none of which are consistent across macOS, Linux, and Windows.
 //
-//   2. Once the port is free, exec `pnpm exec tsx src/index.ts` in the
-//      server directory to start the fresh process.
+//   2. Build the web frontend (`pnpm --filter @claudex/web build`) so the
+//      restarted server serves the latest bundle.
+//
+//   3. Start the new server with `pnpm exec tsx src/index.ts`.
 //
 // Usage (internal; not meant to be called directly):
 //   node scripts/restart-worker.mjs <port> <server-cwd>
@@ -23,10 +25,13 @@
 
 import { spawn } from "node:child_process";
 import net from "node:net";
+import { resolve } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 
 const port = Number(process.argv[2] ?? 5179);
 const cwd = process.argv[3] ?? process.cwd();
+const repoRoot = resolve(cwd, "..");
+const isWin = process.platform === "win32";
 
 /**
  * Returns true when the port is still held by some other listener on
@@ -66,10 +71,40 @@ while (await portBusy(port)) {
   await sleep(200);
 }
 
+// Build the web frontend first so the restarted server serves the latest
+// bundle. This matches the CLAUDE.md iteration loop (step 3: build, step 7:
+// restart). The server's static mount reads from <repoRoot>/web/dist.
+function runStep(cmd, args, cwd_, label) {
+  return new Promise((res, rej) => {
+    const c = spawn(cmd, args, {
+      cwd: cwd_,
+      stdio: "inherit",
+      env: process.env,
+      shell: isWin,
+    });
+    c.on("exit", (code) =>
+      code === 0 ? res() : rej(new Error(`${label} exited with code ${code}`)),
+    );
+    c.on("error", rej);
+  });
+}
+
+try {
+  await runStep(
+    "pnpm",
+    ["--filter", "@claudex/web", "build"],
+    repoRoot,
+    "web build",
+  );
+} catch (err) {
+  // eslint-disable-next-line no-console
+  console.error("[claudex-restart] web build failed:", err.message);
+  process.exit(1);
+}
+
 // Start the new server. `pnpm exec tsx src/index.ts` matches the canonical
 // dev entry documented in CLAUDE.md. On Windows, pnpm resolves to a .cmd
 // shim which requires `shell: true` for spawn to find it.
-const isWin = process.platform === "win32";
 const child = spawn("pnpm", ["exec", "tsx", "src/index.ts"], {
   cwd,
   stdio: "inherit",
