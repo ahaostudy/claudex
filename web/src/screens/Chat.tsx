@@ -59,6 +59,7 @@ import { SlashCommandSheet, type PickerHandle } from "@/components/SlashCommandS
 import { FileMentionSheet } from "@/components/FileMentionSheet";
 import { TerminalDrawer } from "@/components/TerminalDrawer";
 import { ContextRingButton, UsagePanel } from "@/components/UsagePanel";
+import { ContextPanel } from "@/components/ContextPanel";
 import { Markdown } from "@/components/Markdown";
 import { LinkPreview, firstHttpUrl } from "@/components/LinkPreview";
 import { ImageLightbox } from "@/components/ImageLightbox";
@@ -281,6 +282,7 @@ export function ChatScreen() {
   const [project, setProject] = useState<Project | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [showUsage, setShowUsage] = useState(false);
+  const [showContext, setShowContext] = useState(false);
   const [showSideChat, setShowSideChat] = useState(false);
   const [showTerminal, setShowTerminal] = useState(false);
   // Mobile-only bottom-sheet for the per-session Tasks list. Desktop uses
@@ -1000,11 +1002,7 @@ export function ChatScreen() {
             pct={headerContext.pct}
             known={headerContext.known}
             disabled={!session}
-            onClick={() =>
-              session
-                ? navigate(`/usage?session=${encodeURIComponent(session.id)}`)
-                : undefined
-            }
+            onClick={() => setShowContext(true)}
           />
           {/* Desktop overflow menu — collapses session diff, /btw, settings,
               terminal behind a single "⋯" so the header stays breathable on
@@ -1328,6 +1326,13 @@ export function ChatScreen() {
 
       {showUsage && session && (
         <UsagePanel session={session} onClose={() => setShowUsage(false)} />
+      )}
+      {showContext && session && (
+        <ContextPanel
+          session={session}
+          customModels={customModels}
+          onClose={() => setShowContext(false)}
+        />
       )}
       </main>
       {showTasks && (
