@@ -313,7 +313,10 @@ export function ChatScreen() {
   // trip during scroll-past tracking. Optimistic echoes without a persisted
   // seq can't be revealed — acceptable tradeoff, they're short-lived.
   const [revealedSeq, setRevealedSeq] = useState<number | null>(null);
-  const [showThinking, setShowThinking] = useState(false);
+  const [showThinking, setShowThinking] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
+    return window.localStorage.getItem("claudex.chat.showThinking") === "1";
+  });
   // iOS Safari collapses its layout viewport when the software keyboard
   // opens, which used to park the composer *under* the keyboard. We read
   // the visual viewport's bottom offset and lift the composer wrapper by
@@ -348,6 +351,16 @@ export function ChatScreen() {
       /* private browsing etc. — ignore */
     }
   }, [showTasks]);
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(
+        "claudex.chat.showThinking",
+        showThinking ? "1" : "0",
+      );
+    } catch {
+      /* private browsing etc. — ignore */
+    }
+  }, [showThinking]);
   // Desktop settings rail visibility — the new default persistent right
   // rail (mockup s-10). Mirrors the `showTasks` persistence so either rail
   // remembers the user's preference independently.
@@ -1325,8 +1338,6 @@ export function ChatScreen() {
             setShowMore(false);
             navigate(`/session/${id}/session-diff`);
           }}
-          showThinking={showThinking}
-          onToggleThinking={() => setShowThinking((v) => !v)}
           onClose={() => setShowMore(false)}
         />
       )}
@@ -1336,6 +1347,8 @@ export function ChatScreen() {
           project={project}
           onClose={() => setShowSettings(false)}
           onUpdated={(next) => setSession(next)}
+          showThinking={showThinking}
+          onToggleThinking={() => setShowThinking((v) => !v)}
         />
       )}
       {showSideChat && session && (
@@ -1388,6 +1401,8 @@ export function ChatScreen() {
           project={project}
           onClose={() => setShowSettingsRail(false)}
           onUpdated={(next) => setSession(next)}
+          showThinking={showThinking}
+          onToggleThinking={() => setShowThinking((v) => !v)}
         />
       )}
       {/* Desktop-only push-mode rails for Plan + Subagents. They share the
@@ -1692,16 +1707,12 @@ function ChatMoreSheet({
   onOpenSideChat,
   onOpenTerminal,
   onOpenSessionDiff,
-  showThinking,
-  onToggleThinking,
   onClose,
 }: {
   onOpenTasks: () => void;
   onOpenSideChat: () => void;
   onOpenTerminal: () => void;
   onOpenSessionDiff: () => void;
-  showThinking: boolean;
-  onToggleThinking: () => void;
   onClose: () => void;
 }) {
   return (
@@ -1733,12 +1744,6 @@ function ChatMoreSheet({
             onClick={onOpenTerminal}
           />
         </div>
-        <div className="caps text-ink-muted mt-4 mb-2">Display</div>
-        <SheetAction
-          icon={<Brain className={`w-4 h-4 ${showThinking ? "text-klein" : "text-ink-soft"}`} />}
-          label={showThinking ? "Hide thinking" : "Show thinking"}
-          onClick={onToggleThinking}
-        />
         <button
           onClick={onClose}
           className="mt-4 w-full h-11 rounded-[8px] border border-line text-[13px]"
@@ -1940,21 +1945,30 @@ function Piece({
       useEffect(() => {
         setOpen(isLatest);
       }, [isLatest]);
+      // First line of thinking text for the collapsed preview.
+      const firstLine = p.text.includes("\n")
+        ? p.text.slice(0, p.text.indexOf("\n"))
+        : p.text;
       return (
         <div>
           <button
             type="button"
             onClick={() => setOpen((v) => !v)}
-            className="flex items-center gap-1.5 text-[11px] text-ink-muted hover:text-ink-soft transition-colors"
+            className="flex items-center gap-1.5 text-[11px] text-ink-muted hover:text-ink-soft transition-colors w-full text-left min-w-0"
           >
             <ChevronRight
               className={cn(
-                "w-3 h-3 transition-transform",
+                "w-3 h-3 transition-transform shrink-0",
                 open && "rotate-90",
               )}
             />
-            <Brain className="w-3 h-3" />
-            Thinking
+            <Brain className="w-3 h-3 shrink-0" />
+            {!open && (
+              <span className="truncate italic">
+                {firstLine}
+              </span>
+            )}
+            {open && <span>Thinking</span>}
           </button>
           {open && (
             <div className="text-[12.5px] text-ink-muted italic pl-4 border-l-2 border-line whitespace-pre-wrap break-words [overflow-wrap:anywhere] max-w-[72ch] mt-1.5">

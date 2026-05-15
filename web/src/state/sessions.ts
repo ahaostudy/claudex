@@ -590,6 +590,7 @@ function frameToPiece(frame: ServerFrame): UIPiece | null {
     case "thinking":
       return {
         kind: "thinking",
+        seq: frame.seq,
         text: frame.text,
         createdAt: nowIso,
         ...(frame.parentToolUseId !== undefined

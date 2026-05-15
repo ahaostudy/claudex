@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { GitBranch, Pin, X } from "lucide-react";
+import { Brain, GitBranch, Pin, X } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { api, ApiError } from "@/api/client";
 import { Markdown } from "@/components/Markdown";
@@ -40,12 +40,16 @@ export function SessionSettingsSheet({
   project,
   onClose,
   onUpdated,
+  showThinking,
+  onToggleThinking,
   variant = "overlay",
 }: {
   session: Session;
   project?: Project | null;
   onClose: () => void;
   onUpdated: (next: Session) => void;
+  showThinking?: boolean;
+  onToggleThinking?: () => void;
   /**
    * `"overlay"` (default): fixed inset-0 scrim + right-aligned dialog.
    * Used as an on-demand slide-over — e.g. opened from the mobile More
@@ -709,6 +713,38 @@ export function SessionSettingsSheet({
               </div>
             )}
           </div>
+
+          {showThinking !== undefined && onToggleThinking && (
+            <div>
+              <div className="text-[11px] uppercase tracking-[0.14em] text-ink-muted mb-2">
+                Display
+              </div>
+              <div className="rounded-[8px] border border-line bg-canvas overflow-hidden">
+                <button
+                  type="button"
+                  onClick={onToggleThinking}
+                  disabled={archived}
+                  className="w-full flex items-center gap-3 px-3 py-2.5 text-left disabled:opacity-60 hover:bg-paper/40"
+                >
+                  <Brain className={`w-4 h-4 ${showThinking ? "text-klein" : "text-ink-soft"}`} />
+                  <span className="text-[13px] font-medium flex-1">
+                    Show thinking
+                  </span>
+                  <span
+                    className={`h-5 w-9 rounded-full relative transition-colors ${
+                      showThinking ? "bg-klein" : "bg-line"
+                    }`}
+                  >
+                    <span
+                      className={`absolute top-0.5 h-4 w-4 rounded-full bg-canvas shadow transition-transform ${
+                        showThinking ? "translate-x-[18px]" : "translate-x-0.5"
+                      }`}
+                    />
+                  </span>
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* Workspace — read-only. Branch + worktree (or project root). */}
           <div>
