@@ -5409,6 +5409,7 @@ function filterPiecesForView(pieces: UIPiece[], showThinking: boolean): UIPiece[
       return false;
     }
     if (p.kind === "thinking" && !showThinking) return false;
+    if (p.kind === "thinking" && !p.text.trim()) return false;
     return true;
   });
 }
