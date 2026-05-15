@@ -22,6 +22,7 @@ import {
   Settings2,
   StopCircle,
   Terminal,
+  Brain,
   X,
 } from "lucide-react";
 import { ChatSessionsRail } from "@/components/ChatSessionsRail";
@@ -312,6 +313,7 @@ export function ChatScreen() {
   // trip during scroll-past tracking. Optimistic echoes without a persisted
   // seq can't be revealed — acceptable tradeoff, they're short-lived.
   const [revealedSeq, setRevealedSeq] = useState<number | null>(null);
+  const [showThinking, setShowThinking] = useState(false);
   // iOS Safari collapses its layout viewport when the software keyboard
   // opens, which used to park the composer *under* the keyboard. We read
   // the visual viewport's bottom offset and lift the composer wrapper by
@@ -487,8 +489,8 @@ export function ChatScreen() {
   const meta = id ? transcriptMeta[id] : undefined;
 
   const visiblePieces = useMemo(
-    () => filterPiecesForView(pieces),
-    [pieces],
+    () => filterPiecesForView(pieces, showThinking),
+    [pieces, showThinking],
   );
 
   // Latest TodoWrite snapshot — drives the sticky PlanStrip, the PlanSheet,
@@ -879,6 +881,21 @@ export function ChatScreen() {
           disabled={!session}
           onClick={() => setShowUsage(true)}
         />
+        <button
+          type="button"
+          onClick={() => setShowThinking((v) => !v)}
+          aria-label={showThinking ? "Hide thinking" : "Show thinking"}
+          aria-pressed={showThinking}
+          title={showThinking ? "Hide thinking" : "Show thinking"}
+          className={cn(
+            "h-9 w-9 rounded-[8px] border flex items-center justify-center shrink-0",
+            showThinking
+              ? "bg-klein text-canvas border-klein"
+              : "bg-paper border-line text-ink-muted",
+          )}
+        >
+          <Brain className="w-4 h-4" />
+        </button>
         {subagentRuns.length > 0 && (
           <button
             type="button"
@@ -1004,6 +1021,21 @@ export function ChatScreen() {
             disabled={!session}
             onClick={() => setShowContext(true)}
           />
+          <button
+            type="button"
+            onClick={() => setShowThinking((v) => !v)}
+            aria-label={showThinking ? "Hide thinking" : "Show thinking"}
+            aria-pressed={showThinking}
+            title={showThinking ? "Hide thinking" : "Show thinking"}
+            className={cn(
+              "h-8 w-8 rounded-[6px] border flex items-center justify-center shrink-0",
+              showThinking
+                ? "bg-klein text-canvas border-klein"
+                : "bg-paper border-line text-ink-muted",
+            )}
+          >
+            <Brain className="w-4 h-4" />
+          </button>
           {/* Desktop overflow menu — collapses session diff, /btw, settings,
               terminal behind a single "⋯" so the header stays breathable on
               tablet widths (≈ 768–1100px) where the sessions + tasks rails
@@ -5309,7 +5341,7 @@ function safeStringify(input: Record<string, unknown>): string {
 // summary view modes are gone — the transcript always renders in the
 // previous "Normal" shape.
 // ---------------------------------------------------------------------------
-function filterPiecesForView(pieces: UIPiece[]): UIPiece[] {
+function filterPiecesForView(pieces: UIPiece[], showThinking: boolean): UIPiece[] {
   return pieces.filter((p) => {
     if (
       p.kind === "subagent_start" ||
@@ -5330,7 +5362,7 @@ function filterPiecesForView(pieces: UIPiece[]): UIPiece[] {
     ) {
       return false;
     }
-    if (p.kind === "thinking") return false;
+    if (p.kind === "thinking" && !showThinking) return false;
     return true;
   });
 }
