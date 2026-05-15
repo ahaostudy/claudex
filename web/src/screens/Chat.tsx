@@ -493,6 +493,14 @@ export function ChatScreen() {
     [pieces, showThinking],
   );
 
+  const latestThinkingSeq = useMemo(() => {
+    let max = -1;
+    for (const p of visiblePieces) {
+      if (p.kind === "thinking" && typeof p.seq === "number" && p.seq > max) max = p.seq;
+    }
+    return max;
+  }, [visiblePieces]);
+
   // Latest TodoWrite snapshot — drives the sticky PlanStrip, the PlanSheet,
   // and the inline lightweight pointer. Empty snapshot (total === 0)
   // hides every plan surface so we don't eat space on sessions that
@@ -881,21 +889,6 @@ export function ChatScreen() {
           disabled={!session}
           onClick={() => setShowUsage(true)}
         />
-        <button
-          type="button"
-          onClick={() => setShowThinking((v) => !v)}
-          aria-label={showThinking ? "Hide thinking" : "Show thinking"}
-          aria-pressed={showThinking}
-          title={showThinking ? "Hide thinking" : "Show thinking"}
-          className={cn(
-            "h-9 w-9 rounded-[8px] border flex items-center justify-center shrink-0",
-            showThinking
-              ? "bg-klein text-canvas border-klein"
-              : "bg-paper border-line text-ink-muted",
-          )}
-        >
-          <Brain className="w-4 h-4" />
-        </button>
         {subagentRuns.length > 0 && (
           <button
             type="button"
@@ -1196,6 +1189,7 @@ export function ChatScreen() {
                 p.kind === "tool_result" &&
                 matchedToolUseIds.has(p.toolUseId)
               }
+              latestThinkingSeq={latestThinkingSeq}
             />
           );
           return renderEntries.map((e) => {
@@ -1331,6 +1325,8 @@ export function ChatScreen() {
             setShowMore(false);
             navigate(`/session/${id}/session-diff`);
           }}
+          showThinking={showThinking}
+          onToggleThinking={() => setShowThinking((v) => !v)}
           onClose={() => setShowMore(false)}
         />
       )}
@@ -1696,12 +1692,16 @@ function ChatMoreSheet({
   onOpenSideChat,
   onOpenTerminal,
   onOpenSessionDiff,
+  showThinking,
+  onToggleThinking,
   onClose,
 }: {
   onOpenTasks: () => void;
   onOpenSideChat: () => void;
   onOpenTerminal: () => void;
   onOpenSessionDiff: () => void;
+  showThinking: boolean;
+  onToggleThinking: () => void;
   onClose: () => void;
 }) {
   return (
@@ -1733,6 +1733,12 @@ function ChatMoreSheet({
             onClick={onOpenTerminal}
           />
         </div>
+        <div className="caps text-ink-muted mt-4 mb-2">Display</div>
+        <SheetAction
+          icon={<Brain className={`w-4 h-4 ${showThinking ? "text-klein" : "text-ink-soft"}`} />}
+          label={showThinking ? "Hide thinking" : "Show thinking"}
+          onClick={onToggleThinking}
+        />
         <button
           onClick={onClose}
           className="mt-4 w-full h-11 rounded-[8px] border border-line text-[13px]"
@@ -1783,6 +1789,7 @@ function Piece({
   onClearReveal,
   matchedResult,
   isAbsorbedResult,
+  latestThinkingSeq,
 }: {
   p: UIPiece;
   session: Session | null;
@@ -1834,6 +1841,9 @@ function Piece({
    * preceding tool_use's merged block — render nothing here to avoid a
    * duplicate bubble. */
   isAbsorbedResult?: boolean;
+  /** The seq of the latest thinking piece in the visible transcript.
+   *  Only that piece renders expanded by default; others start collapsed. */
+  latestThinkingSeq?: number;
 }) {
   // Normal mode: tool_use chips + tool_result blocks start compact and
   // expand on click. There is no verbose/summary alternative anymore.
@@ -1924,14 +1934,36 @@ function Piece({
         </div>
       );
     }
-    case "thinking":
-      // Thinking is only reached in verbose mode (normal/summary filter it
-      // out in applyViewMode). Render full.
+    case "thinking": {
+      const isLatest = typeof p.seq === "number" && p.seq === latestThinkingSeq;
+      const [open, setOpen] = useState(isLatest);
+      useEffect(() => {
+        setOpen(isLatest);
+      }, [isLatest]);
       return (
-        <div className="text-[12.5px] text-ink-muted italic pl-4 border-l-2 border-line whitespace-pre-wrap break-words [overflow-wrap:anywhere] max-w-[72ch]">
-          {p.text}
+        <div>
+          <button
+            type="button"
+            onClick={() => setOpen((v) => !v)}
+            className="flex items-center gap-1.5 text-[11px] text-ink-muted hover:text-ink-soft transition-colors"
+          >
+            <ChevronRight
+              className={cn(
+                "w-3 h-3 transition-transform",
+                open && "rotate-90",
+              )}
+            />
+            <Brain className="w-3 h-3" />
+            Thinking
+          </button>
+          {open && (
+            <div className="text-[12.5px] text-ink-muted italic pl-4 border-l-2 border-line whitespace-pre-wrap break-words [overflow-wrap:anywhere] max-w-[72ch] mt-1.5">
+              {p.text}
+            </div>
+          )}
         </div>
       );
+    }
     case "tool_use": {
       const diff = toolCallToDiff(p.name, p.input);
       if (diff) {
