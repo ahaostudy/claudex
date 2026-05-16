@@ -2225,7 +2225,7 @@ function ProjectsSheet({ onClose }: { onClose: () => void }) {
     <div className="fixed inset-0 z-40 bg-ink/30 flex items-end sm:items-center justify-center">
       <div role="dialog" aria-modal="true" aria-labelledby="projects-sheet-title" className="w-full sm:max-w-lg bg-canvas border-t sm:border border-line rounded-t-[20px] sm:rounded-[14px] shadow-lift flex flex-col max-h-[90vh]">
         <div className="flex items-center p-4 border-b border-line">
-          <div>
+          <div className="min-w-0">
             <div className="text-[11px] uppercase tracking-[0.14em] text-ink-muted">
               Projects
             </div>
@@ -2233,13 +2233,13 @@ function ProjectsSheet({ onClose }: { onClose: () => void }) {
               Manage where claude can work.
             </h2>
           </div>
-          <div className="ml-auto flex items-center gap-2">
+          <div className="ml-auto flex items-center gap-2 shrink-0">
             {projects.length > 0 && (
               <button
                 onClick={cleanupEmpty}
                 disabled={cleaning || loading}
                 title="Remove every project that has no sessions"
-                className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-[8px] border border-line bg-canvas hover:bg-paper text-[12px] font-medium text-ink-soft disabled:opacity-60 disabled:cursor-not-allowed"
+                className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-[8px] border border-line bg-canvas hover:bg-paper text-[12px] font-medium text-ink-soft disabled:opacity-60 disabled:cursor-not-allowed whitespace-nowrap"
               >
                 <Sparkles className="w-3.5 h-3.5" />
                 {cleaning ? "Cleaning…" : "Clean up empty"}
