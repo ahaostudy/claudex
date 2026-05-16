@@ -2247,12 +2247,14 @@ function ProjectsSheet({ onClose }: { onClose: () => void }) {
                 <span className="hidden sm:inline">{cleaning ? "Cleaning…" : "Clean up empty"}</span>
               </Button>
             )}
-            <button
+            <Button
+              variant="outline"
+              size="md"
               onClick={onClose}
-              className="h-8 w-8 rounded-[8px] border border-line flex items-center justify-center"
+              className="w-8 justify-center !px-0"
             >
               ✕
-            </button>
+            </Button>
           </div>
         </div>
         <div className="flex-1 overflow-y-auto">
