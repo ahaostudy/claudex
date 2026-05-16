@@ -180,7 +180,7 @@ function pieceKey(p: UIPiece, idx: number): string {
  * it neither starts nor breaks a group, and renders nothing itself (its
  * matching tool_use already shows the result). After the first pass, a
  * second reverse walk annotates each group's `finalized` flag based on
- * whether a non-tool "finalizer" piece (assistant_text / thinking / user
+ * whether a "finalizer" piece (assistant_text / thinking / user
  * / permission / ask / plan_accept) appears later in the list — groups
  * without a finalizer stay expanded by default to prevent back-to-back
  * tool runs from flickering open/closed/open while claude is still
@@ -248,14 +248,9 @@ function buildRenderEntries(
  * expanded even if the per-group `anyRunning` flag momentarily flips
  * false between runs. */
 function isFinalizerPiece(p: UIPiece): boolean {
-  // `thinking` is intentionally NOT a finalizer: the model emits thinking
-  // blocks *between* tool calls while it picks the next move, so treating
-  // one as "group closed" flips the header to ✓ done the instant the
-  // first tool_result lands — exactly when more tools are usually about
-  // to fire. We want the group to stay in the running tone until a real
-  // user-facing finalizer (prose, a prompt, a permission request) lands.
   return (
     p.kind === "assistant_text" ||
+    p.kind === "thinking" ||
     p.kind === "user" ||
     p.kind === "permission_request" ||
     p.kind === "ask_user_question" ||
