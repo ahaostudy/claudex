@@ -506,12 +506,12 @@ export function ChatScreen() {
     [pieces, showThinking],
   );
 
-  const latestThinkingSeq = useMemo(() => {
-    let max = -1;
-    for (const p of visiblePieces) {
-      if (p.kind === "thinking" && typeof p.seq === "number" && p.seq > max) max = p.seq;
+  const latestThinkingIndex = useMemo(() => {
+    let idx = -1;
+    for (let i = 0; i < visiblePieces.length; i++) {
+      if (visiblePieces[i].kind === "thinking") idx = i;
     }
-    return max;
+    return idx;
   }, [visiblePieces]);
 
   // Latest TodoWrite snapshot — drives the sticky PlanStrip, the PlanSheet,
@@ -1202,7 +1202,9 @@ export function ChatScreen() {
                 p.kind === "tool_result" &&
                 matchedToolUseIds.has(p.toolUseId)
               }
-              latestThinkingSeq={latestThinkingSeq}
+              isLatestThinking={
+                p.kind === "thinking" && i === latestThinkingIndex
+              }
             />
           );
           return renderEntries.map((e) => {
@@ -1794,7 +1796,7 @@ function Piece({
   onClearReveal,
   matchedResult,
   isAbsorbedResult,
-  latestThinkingSeq,
+  isLatestThinking,
 }: {
   p: UIPiece;
   session: Session | null;
@@ -1846,9 +1848,9 @@ function Piece({
    * preceding tool_use's merged block — render nothing here to avoid a
    * duplicate bubble. */
   isAbsorbedResult?: boolean;
-  /** The seq of the latest thinking piece in the visible transcript.
-   *  Only that piece renders expanded by default; others start collapsed. */
-  latestThinkingSeq?: number;
+  /** True when this thinking piece is the last one in the visible
+   *  transcript — expands by default so the user sees the latest thought. */
+  isLatestThinking?: boolean;
 }) {
   // Normal mode: tool_use chips + tool_result blocks start compact and
   // expand on click. There is no verbose/summary alternative anymore.
@@ -1940,11 +1942,10 @@ function Piece({
       );
     }
     case "thinking": {
-      const isLatest = typeof p.seq === "number" && p.seq === latestThinkingSeq;
-      const [open, setOpen] = useState(isLatest);
+      const [open, setOpen] = useState(isLatestThinking ?? false);
       useEffect(() => {
-        setOpen(isLatest);
-      }, [isLatest]);
+        setOpen(isLatestThinking ?? false);
+      }, [isLatestThinking]);
       // First line of thinking text for the collapsed preview.
       const firstLine = p.text.includes("\n")
         ? p.text.slice(0, p.text.indexOf("\n"))
