@@ -859,7 +859,7 @@ function ProjectGroup({
           ≈ 45px); desktop rail is py-3 (24 + 28 + 1 ≈ 53px). z-10 keeps it
           under the rail so it slides beneath as you scroll past. */}
       <div className="sticky top-[45px] md:top-[53px] z-10 flex items-center gap-3 px-4 md:px-6 py-2 bg-paper/80 backdrop-blur border-b border-line">
-        <span className="display text-[15px] md:text-[16px]">{displayName}</span>
+        <span className="text-[15px] md:text-[16px] font-medium">{displayName}</span>
         {path && (
           <span className="mono text-[11px] text-ink-muted truncate hidden md:inline">
             {path}
