@@ -2239,10 +2239,10 @@ function ProjectsSheet({ onClose }: { onClose: () => void }) {
                 onClick={cleanupEmpty}
                 disabled={cleaning || loading}
                 title="Remove every project that has no sessions"
-                className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-[8px] border border-line bg-canvas hover:bg-paper text-[12px] font-medium text-ink-soft disabled:opacity-60 disabled:cursor-not-allowed whitespace-nowrap"
+                className="inline-flex items-center gap-1.5 h-8 w-8 sm:w-auto sm:px-2.5 rounded-[8px] border border-line bg-canvas hover:bg-paper text-[12px] font-medium text-ink-soft disabled:opacity-60 disabled:cursor-not-allowed whitespace-nowrap"
               >
-                <Sparkles className="w-3.5 h-3.5" />
-                {cleaning ? "Cleaning…" : "Clean up empty"}
+                <Sparkles className="w-3.5 h-3.5 shrink-0" />
+                <span className="hidden sm:inline">{cleaning ? "Cleaning…" : "Clean up empty"}</span>
               </button>
             )}
             <button
