@@ -1067,7 +1067,7 @@ function SessionRow({
               aria-label="Pinned"
             />
           )}
-          <div className="text-[15px] font-medium leading-snug truncate flex-1 min-w-0">
+          <div className="display text-[15px] font-medium leading-snug truncate flex-1 min-w-0">
             {s.title || "Untitled"}
           </div>
         </div>
@@ -1131,7 +1131,7 @@ function SessionRow({
                   aria-label="Pinned"
                 />
               )}
-              <span className="text-[14px] font-medium truncate">
+              <span className="display text-[14px] font-medium truncate">
                 {s.title || "Untitled"}
               </span>
               {s.worktreePath && (
