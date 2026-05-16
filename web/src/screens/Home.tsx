@@ -7,6 +7,7 @@ import { api, ApiError } from "@/api/client";
 import type { Project, Session, EffortLevel, ModelId, PermissionMode } from "@claudex/shared";
 import { clampEffortForModel, defaultEffortForModel, effortSupportedOnModel } from "@claudex/shared";
 import { FolderPicker } from "@/components/FolderPicker";
+import { Button } from "@/components/Button";
 import { AppShell } from "@/components/AppShell";
 import { ImportSessionsSheet } from "@/components/ImportSessionsSheet";
 import { GlobalSearchSheet } from "@/components/GlobalSearchSheet";
@@ -2235,15 +2236,16 @@ function ProjectsSheet({ onClose }: { onClose: () => void }) {
           </div>
           <div className="ml-auto flex items-center gap-2 shrink-0">
             {projects.length > 0 && (
-              <button
+              <Button
+                size="md"
                 onClick={cleanupEmpty}
                 disabled={cleaning || loading}
                 title="Remove every project that has no sessions"
-                className="inline-flex items-center gap-1.5 h-8 w-8 sm:w-auto sm:px-2.5 rounded-[8px] border border-line bg-canvas hover:bg-paper text-[12px] font-medium text-ink-soft disabled:opacity-60 disabled:cursor-not-allowed whitespace-nowrap"
+                className="w-8 sm:w-auto justify-center !px-0 sm:!px-2.5 whitespace-nowrap"
               >
                 <Sparkles className="w-3.5 h-3.5 shrink-0" />
                 <span className="hidden sm:inline">{cleaning ? "Cleaning…" : "Clean up empty"}</span>
-              </button>
+              </Button>
             )}
             <button
               onClick={onClose}
